@@ -136,6 +136,18 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: SecretStr | None = None
     GOOGLE_CSE_ID: str | None = None
     BRAVE_API_KEY: SecretStr | None = None
+    # Per product directive ("remove for now"), Brave Search is gated behind
+    # a feature flag, OFF by default. Its 2000 req/mo limit makes it
+    # expensive compared to free alternatives (OpenAlex, Europe PMC,
+    # Semantic Scholar). Set BRAVE_SEARCH_ENABLED=true to re-enable.
+    BRAVE_SEARCH_ENABLED: bool = False
+
+    # Knowledge-graph backend selector. Per product directive: "tech should
+    # be from Apache AGE, but humanovo specific UIUX." When set to
+    # 'apache_age' we use the AGEGraphStore (PostgreSQL-native, $0 infra);
+    # 'neo4j' uses the existing Neo4j driver; 'auto' prefers AGE when the
+    # extension is installed and transparently falls back to Neo4j.
+    KG_GRAPH_BACKEND: str = "auto"   # auto | apache_age | neo4j
 
     # PubMed / Data Sources
     PUBMED_EMAIL: str = "humanovo@example.com"
@@ -155,6 +167,14 @@ class Settings(BaseSettings):
     GROUNDING_SIMILARITY_THRESHOLD: float = 0.4  # Min cosine similarity for claim grounding
     GROUNDING_RAG_TOP_K: int = 8  # Top-K chunks retrieved per stage
     GROUNDING_GATE_ENABLED: bool = True  # Enable semantic similarity gating between stages
+    # Per product directive ("every stage should be grounded 100% so that
+    # relations are not hallucinated"), we run grounding on EVERY stage
+    # (generative + analytical). STRICT mode rejects a stage output when
+    # its grounding ratio falls below the threshold and forces the
+    # pipeline to retry with a stricter "ground every claim" instruction.
+    GROUNDING_STRICT_MODE: bool = True
+    GROUNDING_STRICT_RATIO_MIN: float = 0.60  # stage fails if <60% claims grounded
+    GROUNDING_STRICT_MAX_RETRIES: int = 2
 
     # Azure OpenAI Embedding — dedicated endpoint on cognitiveservices resource
     # Deployment: text-embedding-3-large (150K TPM, 900 RPM)

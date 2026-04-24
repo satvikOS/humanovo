@@ -33,6 +33,7 @@ from app.api.v1.endpoints import (
     ingestion,
     ingestion_ws,
     jamison_api,
+    kg_permissions,
     knowledge,
     knowledge_graph,
     knowledge_graph_entities,
@@ -47,6 +48,7 @@ from app.api.v1.endpoints import (
     regulatory,
     simulation,
     statistics,
+    user_budget,
     user_state,
     websocket,
     ws_streaming,
@@ -135,6 +137,8 @@ router.include_router(compute_engine.router)
 
 # User State (localStorage sync across devices)
 router.include_router(user_state.router, prefix="/user-state", tags=["user-state"])
+router.include_router(user_budget.router)
+router.include_router(kg_permissions.router)
 
 # Admin (non-prod): kg-stats, seed-kg. Disabled in production via guard.
 router.include_router(admin.router, prefix="/admin", tags=["admin"])

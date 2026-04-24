@@ -155,6 +155,90 @@ async def _stream_fallback(user_message: str) -> AsyncGenerator[tuple[str, dict[
 # ─── Card extraction ─────────────────────────────────────────────
 
 
+def _detect_paper_intent(user_message: str) -> bool:
+    """Return True when the user turn looks like a paper-generation request.
+
+    Matches typed slash commands (/paper) and natural-language asks
+    ("generate the paper", "write the manuscript", "draft a journal
+    paper", "export paper", etc.). Keeps the heuristic conservative —
+    false positives trigger a long-running expensive pipeline.
+    """
+    if not user_message:
+        return False
+    text = user_message.strip().lower()
+    if text.startswith("/paper") or text.startswith("/write-paper") or text.startswith("/manuscript"):
+        return True
+    triggers = (
+        "generate the paper", "generate a paper", "write the paper",
+        "write a paper", "draft the paper", "draft a paper",
+        "write the manuscript", "draft the manuscript", "generate the manuscript",
+        "produce the paper", "produce a paper", "finalize the paper",
+        "export paper", "export the paper",
+        "compile the paper", "compile a paper",
+    )
+    return any(t in text for t in triggers)
+
+
+def _session_hypotheses(session: DiscoverySession) -> list[dict[str, Any]]:
+    """Pull hypotheses off a DiscoverySession if the session stored them."""
+    ctx = dict(getattr(session, "context", None) or {})
+    h = ctx.get("hypotheses") or ctx.get("discovery_hypotheses") or []
+    if not isinstance(h, list):
+        return []
+    return [x for x in h if isinstance(x, dict)]
+
+
+async def _run_strict_paper_for_session(
+    session: DiscoverySession,
+    *,
+    journal_style: str = "humanovo",
+) -> dict[str, Any]:
+    """Invoke the strict paper generator against the session's hypotheses.
+
+    Returns a dict with `ok` + either `paper` (StructuredPaper.to_dict())
+    or `error`. This is what the SSE stream emits as a `card` event so
+    the front-end doc viewer can pick it up inline.
+    """
+    hypotheses = _session_hypotheses(session)
+    if not hypotheses:
+        return {
+            "ok": False,
+            "error": (
+                "No hypotheses on this Discovery session yet. Run a discovery "
+                "round first or ask the agent to draft hypotheses before "
+                "requesting a paper."
+            ),
+        }
+    disease = (
+        (session.context or {}).get("disease")
+        or (session.agent_config or {}).get("disease")
+        or "(unspecified disease)"
+    )
+    discovery_type = (
+        (session.context or {}).get("discovery_type")
+        or (session.agent_config or {}).get("discovery_type")
+        or "treatment"
+    )
+    try:
+        from app.services.paper_generation_service import get_paper_service
+        svc = get_paper_service()
+        structured = await svc.generate_paper_strict(
+            disease=disease,
+            discovery_type=discovery_type,
+            hypotheses=hypotheses,
+            stats={
+                "total_agents": 12,
+                "session_id": str(session.id),
+            },
+            external_factors=(session.context or {}).get("external_factors") or [],
+            journal_style=journal_style,
+        )
+        return {"ok": True, "paper": structured}
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"strict paper generation failed for session {session.id}: {e}")
+        return {"ok": False, "error": f"Paper generation failed: {e}"}
+
+
 def _extract_cards(assistant_text: str) -> list[dict[str, Any]]:
     """
     Detect hypothesis-shaped content in the assistant response and
@@ -240,8 +324,91 @@ async def stream_chat(req: ChatStreamRequest, db: AsyncSession = Depends(get_db)
     #    the session when the stream terminates.
     run_id = f"chat-{uuid.uuid4().hex[:12]}"
 
+    # Detect whether this turn is a "generate the paper" request.
+    # If so, we short-circuit the LLM and run the strict paper pipeline,
+    # emitting the StructuredPaper as a rich-card event. This keeps the
+    # conversational UI consistent (paper appears in the doc viewer
+    # inline) and avoids a roundtrip through the chat LLM just to trigger
+    # a pipeline the chat can't run itself.
+    paper_intent = _detect_paper_intent(req.user_message)
+
     async def generator() -> AsyncGenerator[str, None]:
         yield _sse_event("start", run_id=run_id, model=model, session_id=str(session.id))
+
+        if paper_intent:
+            yield _sse_event(
+                "status",
+                message=("Generating strict journal-grade paper — "
+                         "this runs the 4-phase pipeline + citation re-verification."),
+            )
+            # Choose journal_style via slash-arg if present
+            jstyle = "humanovo"
+            low = req.user_message.lower()
+            for candidate in ("nature", "nejm", "lancet", "jama", "cell",
+                              "plos_one", "science", "humanovo"):
+                if f"--style={candidate}" in low or f" style {candidate}" in low:
+                    jstyle = candidate
+                    break
+
+            result = await _run_strict_paper_for_session(session, journal_style=jstyle)
+            if result.get("ok"):
+                paper = result["paper"]
+                # Emit a rich-card the frontend doc viewer renders inline.
+                yield _sse_event(
+                    "card",
+                    card={
+                        "kind": "strict_paper",
+                        "payload": {
+                            "journal_style": jstyle,
+                            "is_valid": paper.get("is_valid"),
+                            "n_figures": len(paper.get("figures", []) or []),
+                            "n_mermaid": len(paper.get("mermaid_diagrams", []) or []),
+                            "n_references": len(paper.get("references", []) or []),
+                            "validation": paper.get("validation", []),
+                            "structured_paper": paper,
+                        },
+                    },
+                )
+                summary_line = (
+                    f"Generated a {jstyle} strict paper with "
+                    f"{len(paper.get('sections', {}) or {})} sections, "
+                    f"{len(paper.get('figures', []) or [])} scientific figures, "
+                    f"{len(paper.get('mermaid_diagrams', []) or [])} Mermaid diagrams, "
+                    f"and {len(paper.get('references', []) or [])} re-verified citations. "
+                    f"is_valid={paper.get('is_valid')}."
+                )
+            else:
+                yield _sse_event("error", message=result.get("error", "Paper failed"))
+                summary_line = result.get("error") or "Paper generation failed."
+
+            # Persist assistant turn (short summary + card payload).
+            assistant_msg = {
+                "id": str(uuid.uuid4()),
+                "role": "assistant",
+                "content": summary_line,
+                "cards": [
+                    {
+                        "kind": "strict_paper_ref",
+                        "payload": {"session_id": str(session.id), "ok": result.get("ok")},
+                    }
+                ],
+                "timestamp": datetime.utcnow().isoformat(),
+                "finish_reason": "paper_generated" if result.get("ok") else "paper_failed",
+                "tokens": {"prompt": 0, "completion": 0},
+            }
+            try:
+                messages = list(session.messages or [])
+                messages.append(assistant_msg)
+                session.messages = messages
+                await db.commit()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Failed to persist paper-gen assistant turn: {e}")
+
+            yield _sse_event("done", finish_reason=assistant_msg["finish_reason"],
+                             tokens=assistant_msg["tokens"],
+                             message_id=assistant_msg["id"])
+            return
+
         yield _sse_event("status", message="Composing response…")
 
         full_text = ""

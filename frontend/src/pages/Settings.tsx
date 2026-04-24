@@ -11,7 +11,11 @@ import {
   FiGlobe,
   FiMonitor,
   FiChevronRight,
-  FiCheck
+  FiCheck,
+  FiDollarSign,
+  FiShare2,
+  FiAlertCircle,
+  FiTrendingUp
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -54,6 +58,8 @@ applyAppearancePrefs(loadAppearancePrefs())
 const BASE_SETTINGS_SECTIONS = [
   { id: 'appearance', label: 'Appearance', icon: FiMonitor },
   { id: 'account', label: 'Account', icon: FiUser },
+  { id: 'billing', label: 'Usage & Billing', icon: FiDollarSign },
+  { id: 'kg-contributions', label: 'KG & Contributions', icon: FiShare2 },
   { id: 'notifications', label: 'Notifications', icon: FiBell },
   { id: 'privacy', label: 'Privacy & Security', icon: FiShield },
   { id: 'data', label: 'Data & Storage', icon: FiDatabase },
@@ -479,6 +485,476 @@ function PrivacySettings() {
               <option value={0}>Never</option>
             </select>
           </SettingRow>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Usage & Billing ───────────────────────────────────────────
+// Shows the user's current monthly AI-spend, lets them set a hard cap,
+// and surfaces a real last-30-days usage breakdown. When the cap is
+// reached the backend blocks new discovery runs with an explanatory
+// notification (UserBudgetBlocked).
+//
+// The user-id is read from the profile stored in localStorage (same
+// convention AccountSettings uses). When no profile exists we fall
+// back to the email; both are string-keyed on the server.
+
+function _currentUserId(): string {
+  try {
+    const stored = localStorage.getItem('humanovo-user-profile')
+    if (stored) {
+      const p = JSON.parse(stored)
+      return p.email || p.name || 'self'
+    }
+  } catch {}
+  return 'self'
+}
+
+function UsageBillingSettings() {
+  const userId = _currentUserId()
+  const [loading, setLoading] = useState(true)
+  const [budget, setBudget] = useState<any>(null)
+  const [usage, setUsage] = useState<any>(null)
+  const [capUsd, setCapUsd] = useState<number>(50)
+  const [threshold, setThreshold] = useState<number>(80)
+  const [hardLimit, setHardLimit] = useState<boolean>(true)
+  const [notifEmail, setNotifEmail] = useState<string>('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [b, u] = await Promise.all([
+        api.getUserBudget(userId),
+        api.getUserBudgetUsage(userId, 30),
+      ])
+      setBudget(b)
+      setUsage(u)
+      setCapUsd(Number(b.monthly_budget_usd) || 50)
+      setThreshold(b.alert_threshold_pct ?? 80)
+      setHardLimit(Boolean(b.hard_limit))
+      setNotifEmail(b.notification_email || '')
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load usage data')
+    } finally {
+      setLoading(false)
+    }
+  }, [userId])
+
+  useEffect(() => { load() }, [load])
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const updated = await api.updateUserBudget(userId, {
+        monthly_budget_cents: Math.max(0, Math.round(capUsd * 100)),
+        alert_threshold_pct: threshold,
+        hard_limit: hardLimit,
+        notification_email: notifEmail.trim() || null,
+      })
+      setBudget(updated)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e: any) {
+      setError(e?.message || 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <h3 className="text-base font-medium">Usage &amp; Billing</h3>
+        <div className="glass-card p-4 text-sm text-[var(--color-text-muted)]">
+          Loading usage&hellip;
+        </div>
+      </div>
+    )
+  }
+
+  const pct = budget?.percent_used || 0
+  const statusColor =
+    budget?.status === 'blocked' ? 'text-red-400' :
+    budget?.status === 'warning' ? 'text-amber-400' :
+    'text-emerald-400'
+
+  return (
+    <div className="space-y-6">
+      {/* Summary */}
+      <div>
+        <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+          <FiDollarSign className="w-4 h-4" />
+          This month
+        </h3>
+        <div className="glass-card p-4 space-y-3">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <div className="text-3xl font-semibold text-[var(--color-text)]">
+                ${Number(budget?.current_spend_usd || 0).toFixed(2)}
+              </div>
+              <div className="text-xs text-[var(--color-text-muted)] mt-1">
+                of ${Number(budget?.monthly_budget_usd || 0).toFixed(2)} cap
+                <span className="mx-1">·</span>
+                resets {budget?.current_month_starts
+                  ? new Date(budget.current_month_starts).toLocaleDateString()
+                  : '—'}
+              </div>
+            </div>
+            <div className={clsx('text-xs uppercase tracking-wide', statusColor)}>
+              {budget?.status || 'ok'}
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div className="w-full h-2 rounded-full bg-white/5 overflow-hidden">
+            <div
+              className={clsx(
+                'h-full transition-all',
+                pct >= 100 ? 'bg-red-500/70' :
+                pct >= threshold ? 'bg-amber-500/70' :
+                'bg-emerald-500/70',
+              )}
+              style={{ width: `${Math.min(100, pct)}%` }}
+            />
+          </div>
+          {budget?.message && (
+            <div className="flex items-start gap-2 text-xs text-[var(--color-text-muted)] pt-1">
+              <FiAlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <span>{budget.message}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Cap configuration */}
+      <div>
+        <h3 className="text-base font-medium mb-4">Monthly cap</h3>
+        <div className="glass-card p-4 space-y-4">
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+              Hard cap (USD / month)
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-[var(--color-text-muted)] text-sm">$</span>
+              <input
+                type="number" min={0} max={10000} step={1}
+                value={capUsd}
+                onChange={e => setCapUsd(Number(e.target.value))}
+                className="input w-32 text-sm"
+              />
+              <span className="text-xs text-[var(--color-text-muted)]">
+                per calendar month · 0 disables discovery
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+              Alert threshold
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="range" min={10} max={99} step={1}
+                value={threshold}
+                onChange={e => setThreshold(Number(e.target.value))}
+                className="w-40 accent-[var(--color-text)]"
+              />
+              <span className="text-sm text-[var(--color-text)] w-10">
+                {threshold}%
+              </span>
+              <span className="text-xs text-[var(--color-text-muted)]">
+                notify when month-to-date spend reaches this %
+              </span>
+            </div>
+          </div>
+
+          <SettingRow
+            title="Hard-stop at cap"
+            description="When enabled, new discovery runs are blocked once the cap is reached. When off, runs proceed but warnings fire."
+          >
+            <Toggle enabled={hardLimit} onChange={setHardLimit} />
+          </SettingRow>
+
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+              Notification email (optional)
+            </label>
+            <input
+              type="email"
+              value={notifEmail}
+              onChange={e => setNotifEmail(e.target.value)}
+              className="input w-full text-sm"
+              placeholder="ops@example.com"
+            />
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn btn-primary text-sm"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            {saved && (
+              <span className="text-xs text-emerald-400 flex items-center gap-1">
+                <FiCheck className="w-3.5 h-3.5" /> Saved
+              </span>
+            )}
+            {error && (
+              <span className="text-xs text-red-400">{error}</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 30-day breakdown */}
+      <div>
+        <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+          <FiTrendingUp className="w-4 h-4" />
+          Last 30 days
+        </h3>
+        <div className="glass-card p-4 space-y-4">
+          <div className="grid grid-cols-4 gap-3 text-sm">
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)]">
+                Total spend
+              </div>
+              <div className="text-lg font-semibold">
+                ${Number(usage?.total_spend_usd || 0).toFixed(2)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)]">
+                Runs
+              </div>
+              <div className="text-lg font-semibold">
+                {usage?.total_runs || 0}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)]">
+                Hypotheses
+              </div>
+              <div className="text-lg font-semibold">
+                {usage?.total_hypotheses_generated || 0}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)]">
+                Papers
+              </div>
+              <div className="text-lg font-semibold">
+                {usage?.total_papers_generated || 0}
+              </div>
+            </div>
+          </div>
+
+          {(usage?.by_model || []).length > 0 && (
+            <div>
+              <div className="text-xs text-[var(--color-text-muted)] mb-2">
+                Spend by model
+              </div>
+              <div className="space-y-1.5">
+                {usage.by_model.slice(0, 8).map((m: any) => (
+                  <div key={m.model} className="flex items-center gap-2 text-xs">
+                    <div className="w-48 truncate" title={m.model}>
+                      {m.model}
+                    </div>
+                    <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--color-text)]/40"
+                        style={{
+                          width: `${Math.min(100, (m.cost_usd / Math.max(0.01, usage.total_spend_usd)) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="w-16 text-right tabular-nums">
+                      ${Number(m.cost_usd).toFixed(3)}
+                    </div>
+                    <div className="w-14 text-right text-[var(--color-text-muted)] tabular-nums">
+                      {m.n_calls}×
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── KG & Contributions ────────────────────────────────────────
+// Shows the user's private KG footprint, public (common) contributions,
+// and royalty accrual. Also lets the user flip the default upload
+// scope between 'private' (no sharing) and 'common' (shared + royalty-
+// eligible).
+
+function KGContributionsSettings() {
+  const userId = _currentUserId()
+  const [overview, setOverview] = useState<any>(null)
+  const [royalties, setRoyalties] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [defaultScope, setDefaultScope] = useState<'private' | 'common'>(() => {
+    try {
+      return (localStorage.getItem('humanovo-default-upload-scope') as any) || 'private'
+    } catch { return 'private' }
+  })
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [o, r] = await Promise.all([
+        api.getUserKGOverview(userId).catch(() => null),
+        api.getUserRoyalties(userId, 30).catch(() => null),
+      ])
+      setOverview(o)
+      setRoyalties(r)
+    } finally {
+      setLoading(false)
+    }
+  }, [userId])
+
+  useEffect(() => { load() }, [load])
+
+  const changeDefault = (scope: 'private' | 'common') => {
+    setDefaultScope(scope)
+    try { localStorage.setItem('humanovo-default-upload-scope', scope) } catch {}
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <h3 className="text-base font-medium">KG &amp; Contributions</h3>
+        <div className="glass-card p-4 text-sm text-[var(--color-text-muted)]">
+          Loading…
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+          <FiShare2 className="w-4 h-4" />
+          Your Knowledge Graph
+        </h3>
+        <div className="glass-card p-4 grid grid-cols-3 gap-4 text-sm">
+          <div>
+            <div className="text-xs text-[var(--color-text-muted)]">
+              Private nodes
+            </div>
+            <div className="text-2xl font-semibold">
+              {overview?.private_nodes?.toLocaleString() || 0}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-[var(--color-text-muted)]">
+              Private edges
+            </div>
+            <div className="text-2xl font-semibold">
+              {overview?.private_edges?.toLocaleString() || 0}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-[var(--color-text-muted)]">
+              Common contributions
+            </div>
+            <div className="text-2xl font-semibold">
+              {overview?.common_contributions?.toLocaleString() || 0}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-base font-medium mb-4">
+          Default upload scope
+        </h3>
+        <div className="glass-card p-4 space-y-3">
+          <p className="text-xs text-[var(--color-text-muted)]">
+            When you upload a document, humanovo asks whether it should
+            stay private (only your agents can query it) or join the
+            common Knowledge Graph (other users' agents can query facts
+            derived from it, and you receive royalty credit every time
+            they do).
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => changeDefault('private')}
+              className={clsx(
+                'px-3 py-1.5 rounded text-xs border transition-colors',
+                defaultScope === 'private'
+                  ? 'border-[var(--color-text)] bg-white/10 text-[var(--color-text)]'
+                  : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
+              )}
+            >
+              Private (recommended)
+            </button>
+            <button
+              onClick={() => changeDefault('common')}
+              className={clsx(
+                'px-3 py-1.5 rounded text-xs border transition-colors',
+                defaultScope === 'common'
+                  ? 'border-[var(--color-text)] bg-white/10 text-[var(--color-text)]'
+                  : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
+              )}
+            >
+              Common (royalty-eligible)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+          <FiTrendingUp className="w-4 h-4" />
+          Royalty accrual (last 30 days)
+        </h3>
+        <div className="glass-card p-4 space-y-3 text-sm">
+          <div>
+            <div className="text-xs text-[var(--color-text-muted)]">
+              Total weight
+            </div>
+            <div className="text-2xl font-semibold">
+              {Number(royalties?.total_weight || 0).toFixed(2)}
+            </div>
+            <div className="text-xs text-[var(--color-text-muted)] mt-1">
+              All-time weight: {Number(overview?.royalty_weight_all_time || 0).toFixed(2)}
+            </div>
+          </div>
+          {(royalties?.by_kind || []).length > 0 ? (
+            <div className="space-y-1.5">
+              {(royalties.by_kind || []).map((k: any) => (
+                <div key={k.event_kind}
+                     className="flex items-center justify-between text-xs">
+                  <span className="capitalize">{k.event_kind}</span>
+                  <span className="text-[var(--color-text-muted)] tabular-nums">
+                    {k.n}× · weight {Number(k.weight).toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              No royalty events yet. Enable common sharing on a document
+              or validated hypothesis to become eligible.
+            </p>
+          )}
+          {royalties?.note && (
+            <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed pt-2">
+              {royalties.note}
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -988,6 +1464,10 @@ export default function Settings() {
         return <AppearanceSettings />
       case 'account':
         return <AccountSettings />
+      case 'billing':
+        return <UsageBillingSettings />
+      case 'kg-contributions':
+        return <KGContributionsSettings />
       case 'notifications':
         return <NotificationSettings />
       case 'privacy':
