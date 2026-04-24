@@ -142,6 +142,13 @@ class Settings(BaseSettings):
     # Semantic Scholar). Set BRAVE_SEARCH_ENABLED=true to re-enable.
     BRAVE_SEARCH_ENABLED: bool = False
 
+    # Knowledge-graph backend selector. Per product directive: "tech should
+    # be from Apache AGE, but humanovo specific UIUX." When set to
+    # 'apache_age' we use the AGEGraphStore (PostgreSQL-native, $0 infra);
+    # 'neo4j' uses the existing Neo4j driver; 'auto' prefers AGE when the
+    # extension is installed and transparently falls back to Neo4j.
+    KG_GRAPH_BACKEND: str = "auto"   # auto | apache_age | neo4j
+
     # PubMed / Data Sources
     PUBMED_EMAIL: str = "humanovo@example.com"
     PUBMED_API_KEY: SecretStr | None = None
