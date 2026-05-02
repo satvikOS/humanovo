@@ -51,6 +51,7 @@ import {
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
 import { useWorkspace, WorkspaceTab } from '../contexts/WorkspaceContext'
+import HumanovoGlyph from './HumanovoGlyph'
 
 const mainNavItems = [
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
@@ -1432,9 +1433,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
         {/* Logo */}
         <div className="h-14 flex items-center px-4 border-b border-[var(--color-border)]">
           <a href="/dashboard" onClick={(e) => { e.preventDefault(); window.location.href = '/dashboard' }} className="flex items-center gap-2.5 no-underline hover:opacity-80 transition-opacity cursor-pointer">
-            <div className="w-8 h-8 rounded-lg bg-[var(--color-text)] flex items-center justify-center">
-              <span className="text-[var(--color-bg)] text-2xl" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 600, lineHeight: 1 }}>h</span>
-            </div>
+            <HumanovoGlyph size={36} className="text-[var(--color-text)]" />
             <div className="flex flex-col">
               <span className="text-2xl text-[var(--color-text)] tracking-wide" style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 700, lineHeight: 1.2, letterSpacing: '0.04em' }}>humanovo</span>
             </div>

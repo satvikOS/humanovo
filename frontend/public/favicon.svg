@@ -1,4 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="6" fill="#ffffff"/>
-  <text x="16" y="24" text-anchor="middle" font-family="'Cormorant Garamond', Georgia, serif" font-style="italic" font-weight="600" font-size="26" fill="#000000">h</text>
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  humanovo glyph — peanut / dumbbell silhouette.
+
+  Two overlapping discs share a smooth waist. Path inherits its fill from
+  `currentColor`; the in-SVG media query flips root colour so the favicon
+  reads black on light browser chrome and white on dark browser chrome.
+  Honoured by Safari, Firefox, Edge, Chromium.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40" role="img" aria-label="humanovo">
+  <style>
+    :root { color: #0b0f14; }
+    @media (prefers-color-scheme: dark) {
+      :root { color: #f5f5f5; }
+    }
+  </style>
+  <circle cx="24" cy="20" r="18" fill="currentColor"/>
+  <circle cx="56" cy="20" r="18" fill="currentColor"/>
 </svg>
