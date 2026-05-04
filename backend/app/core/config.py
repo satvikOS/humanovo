@@ -132,15 +132,10 @@ class Settings(BaseSettings):
     MCP_SYNTHESIS_MODEL: str = "us.anthropic.claude-opus-4-6-v1:0"  # Claude Opus via Bedrock for final synthesis (200K context)
     MCP_CHUNK_STRATEGY: str = "semantic"  # semantic | fixed | sliding_window
 
-    # Search APIs
-    GOOGLE_API_KEY: SecretStr | None = None
-    GOOGLE_CSE_ID: str | None = None
-    BRAVE_API_KEY: SecretStr | None = None
-    # Per product directive ("remove for now"), Brave Search is gated behind
-    # a feature flag, OFF by default. Its 2000 req/mo limit makes it
-    # expensive compared to free alternatives (OpenAlex, Europe PMC,
-    # Semantic Scholar). Set BRAVE_SEARCH_ENABLED=true to re-enable.
-    BRAVE_SEARCH_ENABLED: bool = False
+    # Web-search backends (Google, Brave) were removed for v1. The
+    # discovery pipeline grounds exclusively in open biomedical sources.
+    # See docs/planning/SOURCES_ROADMAP.md for the v1 source set + the
+    # roadmap toward 60+ open sources.
 
     # Knowledge-graph backend selector. Per product directive: "tech should
     # be from Apache AGE, but humanovo specific UIUX." When set to
@@ -221,11 +216,6 @@ class Settings(BaseSettings):
     def azure_openai_api_key_value(self) -> str | None:
         """Get Azure OpenAI API key value."""
         return self.AZURE_OPENAI_API_KEY.get_secret_value() if self.AZURE_OPENAI_API_KEY else None
-
-    @property
-    def brave_api_key_value(self) -> str | None:
-        """Get Brave API key value."""
-        return self.BRAVE_API_KEY.get_secret_value() if self.BRAVE_API_KEY else None
 
     @property
     def aws_access_key_value(self) -> str | None:

@@ -654,8 +654,8 @@ class DiseaseDiscoveryService(LoggerMixin):
 
     Connects billions of data points from:
     - Knowledge graph (genes, proteins, diseases, drugs, pathways)
-    - Research literature (PubMed, clinical trials, patents)
-    - Real-time healthcare data (via Brave Search)
+    - Open biomedical literature (PubMed, EuropePMC, OpenAlex, preprints)
+    - Clinical trials registry, patents, drug-target databases
 
     Uses advanced LLM reasoning to synthesize discoveries with confidence scores.
     """
@@ -797,30 +797,9 @@ class DiseaseDiscoveryService(LoggerMixin):
             except Exception as e:
                 self.logger.warning("RAG query failed", error=str(e))
 
-        # Query Brave Search for recent healthcare data.
-        # Gated by settings.BRAVE_SEARCH_ENABLED (off by default per directive).
-        try:
-            if not getattr(settings, "BRAVE_SEARCH_ENABLED", False):
-                raise RuntimeError("Brave Search disabled via feature flag")
-            from app.services.brave_search_service import search_healthcare_data
-
-            brave_results = await search_healthcare_data(
-                f"{disease} treatment breakthrough research",
-                max_results=10,
-            )
-
-            for i, result in enumerate(brave_results):
-                evidence.append(DiscoveryEvidence(
-                    id=f"brave-{i}",
-                    content=result.get("description", ""),
-                    source=result.get("url", "Unknown"),
-                    source_type="web_search",
-                    relevance_score=0.7,  # Default relevance for web results
-                    publication_date=result.get("published_date"),
-                    metadata=result,
-                ))
-        except Exception as e:
-            self.logger.debug("Brave search failed", error=str(e))
+        # Web search backends were removed for v1 — discovery now grounds
+        # exclusively in the open biomedical sources (PubMed, EuropePMC,
+        # OpenAlex, ClinicalTrials.gov, etc.). See SOURCES_ROADMAP.md.
 
         return evidence
 

@@ -1,7 +1,10 @@
 """
 Search Agent Module
 
-Searches multiple sources (web, PubMed, databases) for relevant evidence.
+Searches biomedical databases (PubMed, ClinicalTrials.gov) for relevant
+evidence. Web-search backends (Google, Brave) were removed for v1 — the
+discovery pipeline grounds exclusively in open biomedical sources.
+See docs/planning/SOURCES_ROADMAP.md.
 """
 
 import asyncio
@@ -30,7 +33,7 @@ class SearchResult:
         title: str,
         url: str,
         snippet: str = "",
-        source: str = "web",
+        source: str = "pubmed",
         relevance_score: float = 0.5,
         metadata: dict[str, Any] = None,
     ):
@@ -53,17 +56,15 @@ class SearchResult:
 
 
 class SearchAgent(BaseAgent):
-    """Search agent that queries multiple sources for evidence.
+    """Search agent that queries open biomedical sources for evidence.
 
     Supports:
-    - Google Custom Search
-    - Brave Search
-    - PubMed
+    - PubMed (NCBI E-utilities)
     - ClinicalTrials.gov
     """
 
     agent_type = AgentType.SEARCH
-    description = "Searches multiple sources for relevant biomedical evidence"
+    description = "Searches open biomedical sources for relevant evidence"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -71,20 +72,6 @@ class SearchAgent(BaseAgent):
 
     def _setup_tools(self) -> None:
         """Set up search-specific tools."""
-        self.register_tool(
-            Tool(
-                name="google_search",
-                description="Search using Google Custom Search API",
-                handler=self._google_search,
-            )
-        )
-        self.register_tool(
-            Tool(
-                name="brave_search",
-                description="Search using Brave Search API",
-                handler=self._brave_search,
-            )
-        )
         self.register_tool(
             Tool(
                 name="pubmed_search",
@@ -106,54 +93,35 @@ class SearchAgent(BaseAgent):
         query: str = None,
         **kwargs,
     ) -> AgentResult:
-        """Execute search across configured sources.
-
-        Args:
-            context: Shared context
-            query: Search query (uses context.query if not provided)
-            **kwargs: Additional parameters (sources, max_results, etc.)
-
-        Returns:
-            AgentResult with search results
-        """
+        """Execute search across configured sources."""
         import time
 
         start_time = time.time()
 
-        # Get query
         search_query = query or (context.query if context else "")
         if not search_query:
             return AgentResult(success=False, error="No query provided")
 
-        sources = kwargs.get("sources", ["pubmed", "web"])
+        sources = kwargs.get("sources", ["pubmed", "clinical_trials"])
         max_results = kwargs.get("max_results", 10)
-        include_snippets = kwargs.get("include_snippets", True)
 
         self.logger.info(
             "Search agent starting",
-            query=search_query[:100],
             sources=sources,
         )
 
-        # Run searches in parallel
         search_tasks = []
         for source in sources:
-            if source == "google":
-                search_tasks.append(self._google_search(search_query, max_results))
-            elif source == "brave":
-                search_tasks.append(self._brave_search(search_query, max_results))
-            elif source == "pubmed":
+            if source == "pubmed":
                 search_tasks.append(self._pubmed_search(search_query, max_results))
             elif source == "clinical_trials":
                 search_tasks.append(self._clinical_trials_search(search_query, max_results))
-            elif source == "web":
-                # Default web search - try Google, fallback to Brave
-                search_tasks.append(self._web_search(search_query, max_results))
+            # Web sources (google/brave) and the generic "web" alias were
+            # removed in v1. Unknown sources are silently skipped so that
+            # legacy callers passing source="web" don't error.
 
-        # Execute all searches
         results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-        # Aggregate results
         all_results: list[SearchResult] = []
         errors = []
 
@@ -163,7 +131,6 @@ class SearchAgent(BaseAgent):
             elif isinstance(result, list):
                 all_results.extend(result)
 
-        # Deduplicate by URL
         seen_urls = set()
         unique_results = []
         for r in all_results:
@@ -171,7 +138,6 @@ class SearchAgent(BaseAgent):
                 seen_urls.add(r.url)
                 unique_results.append(r)
 
-        # Sort by relevance
         unique_results.sort(key=lambda x: x.relevance_score, reverse=True)
         unique_results = unique_results[:max_results]
 
@@ -179,7 +145,7 @@ class SearchAgent(BaseAgent):
 
         self.record_step(
             action="search",
-            input_data={"query": search_query, "sources": sources},
+            input_data={"sources": sources},
             output_data={"result_count": len(unique_results), "errors": errors},
             tool_calls=sources,
             duration_ms=duration_ms,
@@ -207,115 +173,11 @@ class SearchAgent(BaseAgent):
         """Convenience method for direct search."""
         result = await self.execute(
             query=query,
-            sources=sources or ["pubmed", "web"],
+            sources=sources or ["pubmed", "clinical_trials"],
             max_results=max_results,
             include_snippets=include_snippets,
         )
         return result.data.get("results", [])
-
-    async def _web_search(
-        self,
-        query: str,
-        max_results: int = 10,
-    ) -> list[SearchResult]:
-        """Generic web search - tries Google, then Brave."""
-        try:
-            return await self._google_search(query, max_results)
-        except Exception:
-            try:
-                return await self._brave_search(query, max_results)
-            except Exception:
-                # Return empty if both fail
-                return []
-
-    async def _google_search(
-        self,
-        query: str,
-        max_results: int = 10,
-    ) -> list[SearchResult]:
-        """Search using Google Custom Search API."""
-        api_key = settings.GOOGLE_API_KEY
-        cse_id = settings.GOOGLE_CSE_ID
-
-        if not api_key or not cse_id:
-            self.logger.debug("Google Search API not configured")
-            return []
-
-        url = "https://www.googleapis.com/customsearch/v1"
-        params = {
-            "key": api_key.get_secret_value(),
-            "cx": cse_id,
-            "q": query,
-            "num": min(max_results, 10),
-        }
-
-        try:
-            response = await self.http_client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
-
-            results = []
-            for item in data.get("items", []):
-                results.append(
-                    SearchResult(
-                        title=item.get("title", ""),
-                        url=item.get("link", ""),
-                        snippet=item.get("snippet", ""),
-                        source="google",
-                        relevance_score=0.7,
-                    )
-                )
-
-            return results
-
-        except Exception as e:
-            self.logger.warning("Google search failed", error=str(e))
-            raise
-
-    async def _brave_search(
-        self,
-        query: str,
-        max_results: int = 10,
-    ) -> list[SearchResult]:
-        """Search using Brave Search API."""
-        api_key = settings.BRAVE_API_KEY
-
-        if not api_key:
-            self.logger.debug("Brave Search API not configured")
-            return []
-
-        url = "https://api.search.brave.com/res/v1/web/search"
-        headers = {
-            "X-Subscription-Token": api_key.get_secret_value(),
-            "Accept": "application/json",
-        }
-        params = {
-            "q": query,
-            "count": max_results,
-        }
-
-        try:
-            response = await self.http_client.get(url, headers=headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-
-            results = []
-            for item in data.get("web", {}).get("results", []):
-                results.append(
-                    SearchResult(
-                        title=item.get("title", ""),
-                        url=item.get("url", ""),
-                        snippet=item.get("description", ""),
-                        source="brave",
-                        relevance_score=0.65,
-                    )
-                )
-
-            return results
-
-        except Exception as e:
-            self.logger.warning("Brave search failed", error=str(e))
-            raise
 
     async def _pubmed_search(
         self,
@@ -325,7 +187,6 @@ class SearchAgent(BaseAgent):
         """Search PubMed using E-utilities API."""
         base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
-        # Build search params
         search_params = {
             "db": "pubmed",
             "term": query,
@@ -338,7 +199,6 @@ class SearchAgent(BaseAgent):
             search_params["api_key"] = settings.PUBMED_API_KEY.get_secret_value()
 
         try:
-            # Step 1: Search for IDs
             search_url = f"{base_url}/esearch.fcgi"
             response = await self.http_client.get(search_url, params=search_params)
             response.raise_for_status()
@@ -348,7 +208,6 @@ class SearchAgent(BaseAgent):
             if not id_list:
                 return []
 
-            # Step 2: Fetch summaries
             summary_params = {
                 "db": "pubmed",
                 "id": ",".join(id_list),
@@ -376,9 +235,9 @@ class SearchAgent(BaseAgent):
                     author_str += " et al."
 
                 pub_date = article.get("pubdate", "")
-                source = article.get("source", "")
+                source_journal = article.get("source", "")
 
-                snippet = f"{author_str}. {source}. {pub_date}"
+                snippet = f"{author_str}. {source_journal}. {pub_date}"
 
                 results.append(
                     SearchResult(
@@ -390,7 +249,7 @@ class SearchAgent(BaseAgent):
                         metadata={
                             "pmid": pmid,
                             "authors": [a.get("name", "") for a in authors],
-                            "journal": source,
+                            "journal": source_journal,
                             "pub_date": pub_date,
                         },
                     )
@@ -428,22 +287,21 @@ class SearchAgent(BaseAgent):
                 desc_module = protocol.get("descriptionModule", {})
 
                 nct_id = id_module.get("nctId", "")
-                title = id_module.get("officialTitle", id_module.get("briefTitle", ""))
+                title = id_module.get("briefTitle", "")
                 status = status_module.get("overallStatus", "")
-                brief_summary = desc_module.get("briefSummary", "")
-
-                snippet = f"Status: {status}. {brief_summary[:200]}..."
+                summary = desc_module.get("briefSummary", "")
 
                 results.append(
                     SearchResult(
                         title=title,
                         url=f"https://clinicaltrials.gov/study/{nct_id}",
-                        snippet=snippet,
+                        snippet=f"[{status}] {summary[:200]}",
                         source="clinical_trials",
                         relevance_score=0.75,
                         metadata={
                             "nct_id": nct_id,
                             "status": status,
+                            "phase": protocol.get("designModule", {}).get("phases", []),
                         },
                     )
                 )
@@ -451,9 +309,5 @@ class SearchAgent(BaseAgent):
             return results
 
         except Exception as e:
-            self.logger.warning("ClinicalTrials.gov search failed", error=str(e))
+            self.logger.warning("ClinicalTrials search failed", error=str(e))
             raise
-
-    async def close(self) -> None:
-        """Close HTTP client."""
-        await self.http_client.aclose()
