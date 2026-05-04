@@ -6,6 +6,7 @@ import { EmptyState } from '../components/EmptyState'
 import { logActivity } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
+import { keyboardClickProps } from '../utils/clickable'
 
 interface MLModel {
   id: string; name: string; model_type: string; status: string; description: string; version: string
@@ -122,8 +123,12 @@ export default function MLModelManager() {
               fullPanel={false}
             />
           ) : models.map(m => (
-            <div key={m.id} onClick={() => selectModel(m)}
-              className={`p-3 rounded-lg cursor-pointer group transition-colors ${selected?.id === m.id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}>
+            <div
+              key={m.id}
+              {...keyboardClickProps(() => selectModel(m))}
+              aria-pressed={selected?.id === m.id}
+              aria-label={`Select model ${m.name}`}
+              className={`p-3 rounded-lg cursor-pointer group transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-border-strong)] ${selected?.id === m.id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'hover:bg-[var(--glass-bg)]'}`}>
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium truncate">{m.name}</span>
                 <button onClick={e => { e.stopPropagation(); deleteModel(m.id) }} className="opacity-0 group-hover:opacity-100 p-1"><FiTrash2 className="w-3 h-3" /></button>

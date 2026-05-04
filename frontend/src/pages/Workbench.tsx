@@ -2537,7 +2537,13 @@ export default function Workbench() {
       try {
         const res = await api.searchSimilarEntities(searchTerm, { limit: 10 })
         if (!cancelled) setVectorSearchResults(res)
-      } catch { /* silently skip; local path already populated */ }
+      } catch (err) {
+        // Vector search is a *secondary* augmentation; the local path
+        // already populated useful results, so don't bother the user
+        // with a toast. But log so a dev can see why suggestions are
+        // narrower than expected (api down, network, etc.).
+        if (!cancelled) console.warn('vector search failed (local results still shown)', err)
+      }
     }, 250)
     return () => { cancelled = true; window.clearTimeout(t) }
   }, [searchTerm])

@@ -1251,10 +1251,16 @@ export default function DataVisualization() {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
         setCopiedChart(id)
         setTimeout(() => setCopiedChart(null), 2000)
+      } else {
+        toast('error', 'Could not encode the chart as a PNG. Try the export-PNG button instead.')
       }
-    } catch {
-      setCopiedChart(id)
-      setTimeout(() => setCopiedChart(null), 2000)
+    } catch (err) {
+      // Don't fake the success state — clipboard.write failed and the
+      // user has nothing to paste. Common cause: the page isn't HTTPS
+      // (clipboard API requires secure context) or the browser denied
+      // the permission prompt.
+      console.error('chart copy failed', err)
+      toast('error', 'Copy to clipboard failed. The chart was not copied; try the PNG export button.')
     }
   }, [chartBgTheme, setChartBg])
 

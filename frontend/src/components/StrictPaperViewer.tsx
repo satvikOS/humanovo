@@ -4,6 +4,7 @@ import {
   FiChevronRight, FiChevronDown,
 } from 'react-icons/fi'
 import clsx from 'clsx'
+import DOMPurify from 'dompurify'
 
 /**
  * StrictPaperViewer renders the output of
@@ -334,8 +335,23 @@ export default function StrictPaperViewer({ paper, qaFindings, onExportPdf }: Pr
                        alt={f.title || 'Figure'}
                        className="max-w-full mx-auto" />
                 ) : f.svg ? (
-                  <div dangerouslySetInnerHTML={{ __html: f.svg }}
-                       className="mx-auto max-w-full" />
+                  // SVG comes from the strict-paper backend pipeline.
+                  // Even though we trust the source, we still sanitize
+                  // before render so a compromised intermediate node
+                  // (or a future change that lets user input flow into
+                  // the SVG generator) can't ship script-bearing markup.
+                  // SVG profile keeps <svg> + drawing primitives but
+                  // strips <script>, on* handlers, javascript: URIs.
+                  <div
+                    dangerouslySetInnerHTML={{
+                      __html: DOMPurify.sanitize(f.svg, {
+                        USE_PROFILES: { svg: true, svgFilters: true },
+                      }),
+                    }}
+                    aria-label={f.title || 'Paper figure'}
+                    role="img"
+                    className="mx-auto max-w-full"
+                  />
                 ) : (
                   <div className="p-4 bg-slate-50 border border-slate-200 text-xs text-slate-500 italic text-center">
                     Figure placeholder: {f.figure_type}

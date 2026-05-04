@@ -28,6 +28,7 @@ import { logActivity } from '../utils/persistence'
 import { useAlertDialog } from '../components/AlertDialog'
 import api from '../services/api'
 import { EmptyState } from '../components/EmptyState'
+import { keyboardClickProps } from '../utils/clickable'
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -1031,7 +1032,11 @@ export default function Notebook() {
                       <FiTrash2 className="w-3 h-3 pointer-events-none" />
                     </button>
                   </div>
-                  <div className="cursor-pointer" onClick={() => selectPage(page.id)}>
+                  <div
+                    {...keyboardClickProps(() => selectPage(page.id))}
+                    aria-label={`Open page ${page.title || 'Untitled'}`}
+                    className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-border-strong)] rounded"
+                  >
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xxs px-1 py-0.5 rounded" style={{
                         background: (CATEGORY_COLORS[page.category] || '#94a3b8') + '20',
