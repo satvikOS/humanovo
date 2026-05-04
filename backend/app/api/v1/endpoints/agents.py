@@ -498,8 +498,8 @@ async def list_agent_capabilities() -> list[AgentCapabilities]:
         AgentCapabilities(
             agent_type=AgentType.SEARCH,
             name="Search Agent",
-            description="Searches web, PubMed, and other sources for relevant information",
-            available_tools=["google_search", "brave_search", "pubmed_search", "web_fetch"],
+            description="Searches PubMed, ClinicalTrials.gov, and other open biomedical sources",
+            available_tools=["pubmed_search", "clinical_trials_search"],
             max_parallel=5,
         ),
         AgentCapabilities(

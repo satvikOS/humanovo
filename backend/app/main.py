@@ -72,13 +72,21 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     setup_logging()
 
+    # Interactive API docs (Swagger / ReDoc / OpenAPI JSON) are gated
+    # behind DEBUG so production doesn't publish the full API surface.
+    # The discovery pipeline routes describe the proprietary architecture
+    # in their schemas; exposing them on production is an IP leak.
+    docs_url = "/api/docs" if settings.DEBUG else None
+    redoc_url = "/api/redoc" if settings.DEBUG else None
+    openapi_url = "/api/openapi.json" if settings.DEBUG else None
+
     app = FastAPI(
         title="humanovo API",
         description="Biomedical Discovery Platform API",
         version=settings.VERSION,
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json",
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
         lifespan=lifespan,
         # Disable the 307 trailing-slash redirect: we'd rather accept
         # both `/clinical-trials` and `/clinical-trials/` inline than
@@ -99,53 +107,40 @@ def create_app() -> FastAPI:
     # Include API routers
     app.include_router(api_router, prefix="/api")
 
-    # Health check endpoint with service-level diagnostics
+    # Liveness endpoint — aggregate-only, no service topology details.
+    #
+    # Per-service diagnostics (database / pgvector / Neo4j status, error
+    # strings) are deliberately NOT returned here because (a) anyone can
+    # hit /health unauthenticated, and (b) leaking which services are
+    # configured + their failure modes is reconnaissance for an attacker
+    # and an IP signal for competitors. Detailed checks run server-side
+    # and any non-healthy state is logged + alerted via CloudWatch.
+    # An admin-only `/admin/health` (Sprint 1 / D4) returns the full
+    # diagnostic for ops/monitoring.
     @app.get("/health")
     async def health_check():
-        """Health check endpoint with connectivity diagnostics for AWS monitoring."""
         from sqlalchemy import text
 
         from app.core.database import engine
 
-        checks: dict[str, str] = {}
-
-        # Check PostgreSQL / RDS connectivity
+        # The only signal we expose to anonymous callers is a 200 with
+        # status="healthy" or 503 with status="degraded". No per-service
+        # detail; no error strings.
         try:
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
-            checks["database"] = "connected"
-        except Exception as e:
-            checks["database"] = f"error: {str(e)[:120]}"
+            healthy = True
+        except Exception as exc:
+            logger.error("health check failed", exception_type=type(exc).__name__)
+            healthy = False
 
-        # Check pgvector extension
-        try:
-            async with engine.connect() as conn:
-                await conn.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'"))
-            checks["pgvector"] = "available"
-        except Exception as e:
-            checks["pgvector"] = f"error: {str(e)[:120]}"
-
-        # Check Neo4j / graph store
-        try:
-            from app.knowledge.graph_store import graph_store
-
-            if graph_store and hasattr(graph_store, "_driver") and graph_store._driver:
-                checks["neo4j"] = "connected"
-            else:
-                checks["neo4j"] = "not_configured"
-        except Exception as e:
-            checks["neo4j"] = f"error: {str(e)[:120]}"
-
-        overall = "healthy" if checks.get("database") == "connected" else "degraded"
-
+        if healthy:
+            return JSONResponse(
+                content={"status": "healthy", "service": "humanovo-backend"}
+            )
         return JSONResponse(
-            content={
-                "status": overall,
-                "version": settings.VERSION,
-                "service": "humanovo-backend",
-                "environment": settings.ENVIRONMENT,
-                "checks": checks,
-            }
+            status_code=503,
+            content={"status": "degraded", "service": "humanovo-backend"},
         )
 
     return app

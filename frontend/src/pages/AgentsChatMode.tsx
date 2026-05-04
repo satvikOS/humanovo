@@ -32,6 +32,7 @@ import AgentConfigPanel from '../components/discovery/AgentConfigPanel'
 import { useSSEChat } from '../components/discovery/useSSEChat'
 import { toast } from '../contexts/ToastContext'
 import { EmptyState } from '../components/EmptyState'
+import { modalBackdropProps } from '../utils/clickable'
 
 const LS_SIDEBAR_KEY = 'agents-sidebar-collapsed'
 
@@ -511,7 +512,12 @@ export default function Agents() {
 
       {/* Project picker modal */}
       {projectPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setProjectPickerOpen(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          aria-modal="true"
+          aria-label="Pick project"
+          {...modalBackdropProps(() => setProjectPickerOpen(false))}
+        >
           <div className="absolute inset-0 bg-black/40" />
           <div onClick={e => e.stopPropagation()} className="relative w-full max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-solid)] p-5">
             <div className="flex items-start justify-between mb-3">

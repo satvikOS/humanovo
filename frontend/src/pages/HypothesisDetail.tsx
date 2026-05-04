@@ -7,9 +7,10 @@ import {
 import clsx from 'clsx'
 import { api, apiClient } from '../services/api'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
+import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
 
 const PAPER_PHASES = [
-  { label: 'Initializing 8-model pipeline...', duration: 2000 },
+  { label: 'Initializing reasoning pipeline...', duration: 2000 },
   { label: 'Phase 1: Generating abstract & introduction...', duration: 3000 },
   { label: 'Phase 2: Bench science — mechanism, evidence, targets...', duration: 4000 },
   { label: 'Phase 3: Translational roadmap — T0 Basic Research...', duration: 3000 },
@@ -620,28 +621,26 @@ export default function HypothesisDetail() {
 
   // ---- Default: Document viewer ----
   const roadmapData = (hypothesis as any).translational_roadmap || undefined
-  // Derive a 12-stage pass/fail from confidence_score — temporary until
+  // Derive per-phase pass/fail from confidence_score — temporary until
   // the backend returns per-stage scores on the hypothesis payload.
-  // Higher confidence → more stages cleanly passed; confidence<0.5 shows
-  // the later stages as unresolved (amber).
+  // Higher confidence → more phases cleanly passed; confidence<0.5 shows
+  // the later phases as unresolved (amber).
   const stageConfidence = hypothesis.confidence_score || 0
-  const stagesPassed = Math.round(stageConfidence * 12)
-  const pipelineStages = [
-    'SEED', 'EXPAND', 'EVIDENCE', 'COUNTER', 'REVISE', 'MECHANISM',
-    'VALIDATE', 'GROUND', 'SCORE', 'REFINE', 'TRANSLATE', 'FINALIZE',
-  ]
+  const totalStages = STAGE_CODES.length
+  const stagesPassed = Math.round(stageConfidence * totalStages)
+  const pipelineStages = STAGE_CODES
 
   return (
     <div className="h-full flex flex-col">
       <div
         className="px-6 pt-4 border-b border-[var(--color-border)]"
         role="region"
-        aria-label="12-stage pipeline breakdown"
+        aria-label="reasoning phase breakdown"
       >
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
-              12-stage adversarial pipeline
+              Reasoning pipeline
             </span>
             <span
               className="text-xxs px-1.5 py-0.5 rounded"
@@ -651,16 +650,17 @@ export default function HypothesisDetail() {
                 border: '1px solid currentColor',
               }}
             >
-              {stagesPassed} / 12 passed · confidence {(stageConfidence * 100).toFixed(0)}%
+              {stagesPassed} / {totalStages} passed · confidence {(stageConfidence * 100).toFixed(0)}%
             </span>
           </div>
         </div>
         <div className="flex gap-1 mb-2">
-          {pipelineStages.map((label, i) => {
+          {pipelineStages.map((code, i) => {
             const passed = i < stagesPassed
+            const label = stageLabel(code)
             return (
               <div
-                key={label}
+                key={code}
                 className="flex-1 text-center group relative"
                 title={`${label} — ${passed ? 'passed' : 'not yet reached / failed'}`}
               >
@@ -680,7 +680,7 @@ export default function HypothesisDetail() {
                     fontSize: '9px',
                   }}
                 >
-                  {label}
+                  {i + 1}
                 </div>
               </div>
             )

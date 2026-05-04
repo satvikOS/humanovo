@@ -9,6 +9,7 @@ import {
 } from 'react-icons/fi'
 import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport'
 import PublicationFigure from '../../components/PublicationFigure'
+import { toast } from '../../contexts/ToastContext'
 
 // ═══════════════════════════════════════════════════════════════════
 //  Expression Evaluator — self-contained, no external math library
@@ -611,7 +612,12 @@ export default function EquationPlotter() {
     if (mainData.length === 0) return
     const header = 'x\ty\n'
     const rows = mainData.map(p => `${p.x}\t${p.y}`).join('\n')
-    navigator.clipboard.writeText(header + rows).catch(() => {})
+    navigator.clipboard.writeText(header + rows)
+      .then(() => toast('success', 'Chart data copied'))
+      .catch(err => {
+        console.error('clipboard write failed', err)
+        toast('error', 'Copy failed — clipboard requires HTTPS or permission. Try downloading instead.')
+      })
   }, [mainData])
 
   const clearHistory = useCallback(() => {
@@ -627,7 +633,12 @@ export default function EquationPlotter() {
   const copyStats = useCallback(() => {
     if (!stats) return
     const lines = [`Expression: ${expr}`, `Range: [${xMin}, ${xMax}]`, `Min: ${stats.min}`, `Max: ${stats.max}`, `Mean: ${stats.mean}`, `Points: ${stats.points}`]
-    navigator.clipboard.writeText(lines.join('\n')).catch(() => {})
+    navigator.clipboard.writeText(lines.join('\n'))
+      .then(() => toast('success', 'Stats copied'))
+      .catch(err => {
+        console.error('clipboard write failed', err)
+        toast('error', 'Copy failed — clipboard requires HTTPS or permission.')
+      })
     setCopied(true)
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => setCopied(false), 2000)

@@ -13,14 +13,6 @@ from app.services.audit_service import (
     get_audit_service,
 )
 
-from app.services.brave_search_service import (
-    BraveSearchService,
-    HealthcareDataIngestionService,
-    get_brave_service,
-    search_healthcare_data,
-    start_24_7_ingestion,
-)
-
 from app.services.disease_discovery_service import (
     DiseaseDiscoveryService,
     DiscoveryResult,
@@ -40,12 +32,6 @@ __all__ = [
     "AuditService",
     "AuditSeverity",
     "get_audit_service",
-    # Brave Search
-    "BraveSearchService",
-    "HealthcareDataIngestionService",
-    "get_brave_service",
-    "search_healthcare_data",
-    "start_24_7_ingestion",
     # Disease Discovery
     "DiseaseDiscoveryService",
     "DiscoveryResult",

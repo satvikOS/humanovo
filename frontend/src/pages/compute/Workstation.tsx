@@ -6076,7 +6076,9 @@ export default function Workstation() {
                   <span
                     style={styles.tabCloseBtn}
                     onClick={e => { e.stopPropagation(); closeScript(s.id) }}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); closeScript(s.id) } }}
                     role="button"
+                    tabIndex={0}
                     aria-label={`Close ${s.name}`}
                   >×</span>
                 </button>
@@ -7791,10 +7793,12 @@ export default function Workstation() {
         <span
           style={styles.statusBarAction}
           onClick={openGoto}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openGoto() } }}
           onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
           title="Go to line… (Ctrl/Cmd + G)"
           role="button"
+          tabIndex={0}
         >Ln {cursor.line}, Col {cursor.col}</span>
         <span>·</span>
         <span>{lineCount} line{lineCount === 1 ? '' : 's'}</span>
@@ -7839,10 +7843,12 @@ export default function Workstation() {
         <span
           style={styles.statusBarAction}
           onClick={() => { setResultsTab('workspace'); setResultsOverlay(true) }}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setResultsTab('workspace'); setResultsOverlay(true) } }}
           onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
           title={`Open Workspace tab — ${workspaceBytes.toLocaleString()} bytes across ${vars.length} variable${vars.length === 1 ? '' : 's'}`}
           role="button"
+          tabIndex={0}
         >
           {vars.length} var{vars.length === 1 ? '' : 's'}
           {vars.length > 0 && ` · ${workspaceSizeLabel}`}
@@ -7853,20 +7859,24 @@ export default function Workstation() {
             <span
               style={styles.statusBarAction}
               onClick={() => { setResultsTab('figure'); setResultsOverlay(true) }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setResultsTab('figure'); setResultsOverlay(true) } }}
               onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
               title="Open Figures tab"
               role="button"
+              tabIndex={0}
             >{plots.length} figure{plots.length === 1 ? '' : 's'}</span>
           </>
         )}
         <span
           style={{ ...styles.statusBarAction, marginLeft: 'auto' }}
           onClick={() => setHelpOpen(true)}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHelpOpen(true) } }}
           onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
           title="Keyboard shortcuts (F1)"
           role="button"
+          tabIndex={0}
         >
           F1 shortcuts
         </span>
@@ -7878,10 +7888,19 @@ export default function Workstation() {
             setEditorPrefs(next)
             saveEditorPrefs(next)
           }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              const next = { ...editorPrefs, wrap: !editorPrefs.wrap }
+              setEditorPrefs(next)
+              saveEditorPrefs(next)
+            }
+          }}
           onMouseEnter={e => { (e.currentTarget as HTMLSpanElement).style.background = 'var(--glass-bg-hover)'; (e.currentTarget as HTMLSpanElement).style.color = 'var(--color-text)' }}
           onMouseLeave={e => { (e.currentTarget as HTMLSpanElement).style.background = 'transparent'; (e.currentTarget as HTMLSpanElement).style.color = '' }}
           title={`Word wrap: ${editorPrefs.wrap ? 'ON' : 'OFF'} — click to toggle`}
           role="button"
+          tabIndex={0}
         >
           {editorPrefs.fontSize}px {editorPrefs.wrap ? 'wrap' : 'nowrap'}
         </span>

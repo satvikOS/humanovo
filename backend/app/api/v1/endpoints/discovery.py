@@ -6,9 +6,10 @@ API endpoints for the disease discovery service.
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from app.core.errors import ErrorCode, safe_error
 from app.core.logging import get_logger
 from app.services.disease_discovery_service import (
     DiscoveryResult,
@@ -29,17 +30,25 @@ class DiscoveryRequest(BaseModel):
     discovery_type: DiscoveryType = DiscoveryType.TREATMENT
     focus_entities: list[str] = []
     max_results: int = 5
-    llm_provider: Optional[str] = None  # openai, anthropic, bedrock, together, groq
+    # NOTE: provider/model selection is intentionally server-side only.
+    # The client does not pick a model; the orchestrator routes to the
+    # right model per stage. Keeping the field as a no-op for backwards
+    # compatibility with older clients but it is ignored.
+    llm_provider: Optional[str] = None
 
 
 class DiscoveryResponse(BaseModel):
-    """Response model for discovery results."""
+    """Response model for discovery results.
+
+    The internal `llm_provider` and `model_used` fields were removed in
+    Sprint 1 to prevent leakage of the underlying pipeline architecture.
+    Callers should not depend on knowing which provider produced a
+    discovery — that's an implementation detail.
+    """
     disease: str
     discovery_type: str
     discoveries: list[DiscoveryResult]
     total_count: int
-    llm_provider: str
-    model_used: str
 
 
 class ExplanationRequest(BaseModel):
@@ -75,12 +84,10 @@ async def discover_disease_treatments(request: DiscoveryRequest):
     """
     Discover potential treatments, strategies, or prevention approaches for a disease.
 
-    This endpoint uses advanced LLM reasoning combined with:
-    - Knowledge graph analysis (genes, proteins, drugs, pathways)
-    - Research literature retrieval (PubMed, clinical trials, patents)
-    - Real-time healthcare data (web search)
-
-    Returns ranked discoveries with confidence scores.
+    Combines knowledge-graph analysis (genes, proteins, drugs, pathways) with
+    open biomedical literature retrieval (PubMed, EuropePMC, OpenAlex,
+    clinical trials, preprints, patents) and returns ranked discoveries with
+    confidence scores.
     """
     try:
         service = await get_service(request.llm_provider)
@@ -97,13 +104,14 @@ async def discover_disease_treatments(request: DiscoveryRequest):
             discovery_type=request.discovery_type.value,
             discoveries=discoveries,
             total_count=len(discoveries),
-            llm_provider=discoveries[0].llm_provider if discoveries else "",
-            model_used=discoveries[0].model_used if discoveries else "",
         )
 
-    except Exception as e:
-        logger.error("Discovery failed", disease=request.disease, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)}")
+    except Exception as exc:
+        raise safe_error(
+            exc,
+            code=ErrorCode.PIPELINE_FAILED,
+            log_context={"disease": request.disease, "discovery_type": str(request.discovery_type)},
+        )
 
 
 @router.get("/quick/{disease}")
@@ -142,9 +150,12 @@ async def quick_discovery(
             ],
         }
 
-    except Exception as e:
-        logger.error("Quick discovery failed", disease=disease, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise safe_error(
+            exc,
+            code=ErrorCode.PIPELINE_FAILED,
+            log_context={"disease": disease, "discovery_type": str(discovery_type)},
+        )
 
 
 @router.post("/explain")
@@ -174,9 +185,8 @@ async def explain_discovery(request: ExplanationRequest):
             "detail_level": request.detail_level,
         }
 
-    except Exception as e:
-        logger.error("Explanation failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise safe_error(exc, code=ErrorCode.PIPELINE_FAILED)
 
 
 @router.post("/compare")
@@ -202,35 +212,15 @@ async def compare_discoveries(request: ComparisonRequest):
             "analysis": comparison,
         }
 
-    except Exception as e:
-        logger.error("Comparison failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise safe_error(exc, code=ErrorCode.PIPELINE_FAILED)
 
 
-@router.get("/providers")
-async def list_providers():
-    """List available LLM providers for discovery."""
-    return {
-        "providers": [
-            {
-                "id": "azure_ai",
-                "name": "Azure AI Foundry",
-                "description": "Mistral-Large-3 (critic)",
-                "default": True,
-            },
-            {
-                "id": "bedrock",
-                "name": "Constant AI",
-                "description": "Explorer + synthesizer",
-            },
-            {
-                "id": "azure",
-                "name": "Azure OpenAI",
-                "description": "o3-deep-research, o1 (legacy, requires org access)",
-            },
-        ],
-        "recommended": "azure_ai",
-    }
+# `/providers` was removed in Sprint 1: the v1 surface does NOT let
+# clients pick a provider, and listing the vendor/model lineup was a
+# direct IP leak (it advertised the multi-vendor architecture verbatim).
+# Provider selection is server-side only; the orchestrator routes per
+# stage based on internal config.
 
 
 @router.get("/discovery-types")
@@ -268,35 +258,8 @@ async def list_discovery_types():
     }
 
 
-@router.get("/health")
-async def discovery_health():
-    """Check health of the discovery service."""
-    try:
-        from app.core.config import settings
-        service = await get_service()
-
-        # Build model list — show mixed provider models
-        models_active = []
-        providers = []
-        if settings.aws_access_key_value and settings.aws_secret_key_value:
-            models_active.append(f"{settings.BEDROCK_MODEL_CLAUDE_OPUS} (explorer+synthesizer)")
-            providers.append("bedrock")
-        if settings.azure_mistral_key_value and settings.AZURE_MISTRAL_ENDPOINT:
-            models_active.append(f"{settings.AZURE_MISTRAL_MODEL} (critic)")
-            providers.append("azure-mistral")
-        llm_info = {
-            "providers": providers,
-            "models": models_active,
-        } if models_active else {"provider": service._llm.model_name}
-
-        return {
-            "status": "healthy",
-            "llm": llm_info,
-            "graph_store": "connected" if service._graph_store else "not connected",
-            "rag_service": "connected" if service._rag_service else "not connected",
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-        }
+# `/discovery/health` removed in Sprint 1: it leaked exact model IDs
+# (BEDROCK_MODEL_CLAUDE_OPUS, AZURE_MISTRAL_MODEL) plus agent role names
+# ("explorer+synthesizer", "critic") and `str(exc)` on failure. Use the
+# top-level `/health` endpoint for liveness; for orchestrator diagnostics
+# use the admin-only health check (Sprint 1 / D4).

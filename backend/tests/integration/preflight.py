@@ -200,9 +200,6 @@ def check_data_sources():
     sources = {
         "PubMed": bool(settings.PUBMED_EMAIL and settings.PUBMED_EMAIL != "humanovo@example.com"),
         "PubMed API Key": bool(settings.PUBMED_API_KEY),
-        "Elsevier/Scopus": bool(settings.ELSEVIER_API_KEY),
-        "Brave Search": bool(settings.brave_api_key_value),
-        "Google Search": bool(settings.GOOGLE_API_KEY),
     }
 
     available = 0

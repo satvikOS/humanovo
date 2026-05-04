@@ -8,6 +8,7 @@ import {
 } from 'react-icons/fi'
 import { api, apiClient, Entity } from '../services/api'
 import { toast } from '../contexts/ToastContext'
+import { modalBackdropProps } from '../utils/clickable'
 
 // Entity type colors and configurations
 const ENTITY_COLORS = {
@@ -1049,8 +1050,13 @@ export default function KnowledgeGraph() {
 
       {/* Connect Nodes Dialog */}
       {showConnectDialog && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => { setShowConnectDialog(null); setConnectSource(null) }}>
-          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl w-full max-w-sm mx-4 p-0 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+          aria-modal="true"
+          aria-label="Connect entities"
+          {...modalBackdropProps(() => { setShowConnectDialog(null); setConnectSource(null) })}
+        >
+          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl w-full max-w-sm mx-4 p-0 shadow-2xl" role="dialog" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)]">
               <h2 className="text-sm font-semibold text-[var(--color-text)]">Connect Nodes</h2>
               <button onClick={() => { setShowConnectDialog(null); setConnectSource(null) }} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">

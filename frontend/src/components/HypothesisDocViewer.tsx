@@ -62,7 +62,7 @@ export interface HypothesisDocData {
   feasibility_score?: number
   target_entities?: string[]
   target_pathways?: string[]
-  causal_chain?: Array<string | { event?: string; level?: string; kind?: string; intervention?: any }>
+  causal_chain?: Array<string | { event?: string; description?: string; level?: string; kind?: string; intervention?: unknown }>
   counter_arguments?: Array<{ argument?: string; severity?: string; rebuttal?: string }>
   evidence_summary?: Array<string | { finding?: string; pmid?: string; doi?: string; journal?: string }>
   key_citations?: Array<string | { pmid?: string; doi?: string; title?: string; authors?: string; year?: string | number }>
@@ -168,10 +168,9 @@ function buildDocumentHtml(h: HypothesisDocData): string {
 
   // Dimension-score extraction (accepts {score} or number)
   const dimVal = (k: string): number | undefined => {
-    const v = h.dimension_scores?.[k as any]
+    const v = h.dimension_scores?.[k]
     if (typeof v === 'number') return v
-    if (v && typeof v === 'object' && typeof (v as any).score === 'number')
-      return (v as any).score
+    if (v && typeof v === 'object' && typeof v.score === 'number') return v.score
     return undefined
   }
   const dims: Array<[string, number]> = [
@@ -188,16 +187,33 @@ function buildDocumentHtml(h: HypothesisDocData): string {
   // Citations (numbered, ordered by first-appearance)
   const citations: Array<{ n: number; html: string }> = []
   const refMap = new Map<string, number>()
-  const citeKey = (c: any) => {
-    return (c?.doi || c?.pmid || c?.title || JSON.stringify(c || {})).toString()
-      .slice(0, 160)
+  type CitationObject = {
+    doi?: string
+    pmid?: string
+    title?: string
+    finding?: string
+    authors?: string
+    author?: string
+    year?: string | number
+    pub_year?: string | number
+    journal?: string
+    source?: string
   }
-  const refBracket = (c: any): string => {
+  type CitationLike = string | CitationObject
+  const citeKey = (c: CitationLike): string => {
+    if (typeof c === 'string') return c.slice(0, 160)
+    return (c?.doi || c?.pmid || c?.title || JSON.stringify(c || {})).toString().slice(0, 160)
+  }
+  const refBracket = (c: CitationLike): string => {
     const k = citeKey(c)
     if (refMap.has(k)) return `[${refMap.get(k)}]`
     const n = refMap.size + 1
     refMap.set(k, n)
-    const fallback = typeof c === 'string' ? c : (c?.title || c?.finding || 'Reference')
+    if (typeof c === 'string') {
+      citations.push({ n, html: esc(c) })
+      return `[${n}]`
+    }
+    const fallback = c?.title || c?.finding || 'Reference'
     const author = c?.authors || c?.author || ''
     const year = c?.year || c?.pub_year || ''
     const journal = c?.journal || c?.source || ''
@@ -271,7 +287,7 @@ function buildDocumentHtml(h: HypothesisDocData): string {
     if (Array.isArray(h.causal_chain) && h.causal_chain.length) {
       for (const c of h.causal_chain.slice(0, 6)) {
         if (typeof c === 'string') chain.push(c)
-        else chain.push((c as any)?.event || (c as any)?.description || '')
+        else chain.push(c?.event || c?.description || '')
       }
     } else if (h.mechanism) {
       // Split the mechanism prose on strong separators
@@ -629,6 +645,11 @@ export default function HypothesisDocViewer({
 
   const documentHtml = useMemo(() => buildDocumentHtml(hypothesis), [hypothesis])
 
+  // Zoom callbacks declared before the keyboard-shortcut effect so the
+  // effect's dep array can include them without a TDZ.
+  const zoomIn = useCallback(() => setZoom(z => Math.min(z + ZOOM_STEP, ZOOM_MAX)), [])
+  const zoomOut = useCallback(() => setZoom(z => Math.max(z - ZOOM_STEP, ZOOM_MIN)), [])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -641,10 +662,7 @@ export default function HypothesisDocViewer({
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [isFullscreen, onClose])
-
-  const zoomIn = useCallback(() => setZoom(z => Math.min(z + ZOOM_STEP, ZOOM_MAX)), [])
-  const zoomOut = useCallback(() => setZoom(z => Math.max(z - ZOOM_STEP, ZOOM_MIN)), [])
+  }, [isFullscreen, onClose, zoomIn, zoomOut])
 
   const handlePrint = useCallback(() => {
     const printWindow = window.open('', '_blank')

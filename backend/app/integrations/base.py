@@ -266,7 +266,14 @@ class IntegrationClient:
                     or f"humanovo/0.1 (mailto:{settings.PUBMED_EMAIL})",
                 "Accept": "application/json",
             }
-            self._client = httpx.AsyncClient(
+            # SSRF defense: every outbound URL must clear the allowlist
+            # in app.core.http_allowlist before httpx sends it. Block
+            # raises SSRFBlockedError, surfacing as a 500 to the caller
+            # of the integration (intentional — a misconfiguration here
+            # is a server bug, not a user-recoverable error).
+            from app.core.http_allowlist import make_httpx_client
+
+            self._client = make_httpx_client(
                 base_url=self.BASE_URL,
                 headers=headers,
                 timeout=self.DEFAULT_TIMEOUT,

@@ -511,7 +511,7 @@ export interface PaginationParams {
 
 export interface SearchResult {
   id: string
-  type: 'evidence' | 'hypothesis' | 'project' | 'entity' | 'notebook'
+  type: 'evidence' | 'hypothesis' | 'project' | 'entity' | 'notebook' | 'simulation' | 'experiment' | 'equation'
   title: string
   snippet: string
   source: string

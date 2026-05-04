@@ -90,10 +90,17 @@ function RecentSimulationsWidget() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Gather all simulation types from localStorage
+    // Gather all simulation types from localStorage. Each storage shape
+    // is loose (different writers across the codebase) so we type each
+    // entry as the minimal subset of fields we read here.
+    type LocalMCSim = { id: string; name?: string; simulationType?: string; simulation_type?: string; stats?: SimulationSummary['stats']; createdAt?: string; created_at?: string }
+    type LocalEqEntry = { id: string; expr?: string; createdAt?: string }
+    type LocalCompRun = { id: string; template?: string; env?: string; createdAt?: string }
+    type RemoteSim = { id: string; name?: string; simulation_type?: string; simulationType?: string; results?: { stats?: SimulationSummary['stats'] }; stats?: SimulationSummary['stats']; created_at?: string; createdAt?: string }
+
     const allSims: SimulationSummary[] = []
 
-    const mcSims = persistGet<any[]>('mc-simulations', [])
+    const mcSims = persistGet<LocalMCSim[]>('mc-simulations', [])
     for (const s of mcSims) {
       allSims.push({
         id: s.id,
@@ -105,7 +112,7 @@ function RecentSimulationsWidget() {
       })
     }
 
-    const eqHistory = persistGet<any[]>('eq-history', [])
+    const eqHistory = persistGet<LocalEqEntry[]>('eq-history', [])
     for (const eq of eqHistory) {
       allSims.push({
         id: eq.id,
@@ -116,7 +123,7 @@ function RecentSimulationsWidget() {
       })
     }
 
-    const compHistory = persistGet<any[]>('comp-history', [])
+    const compHistory = persistGet<LocalCompRun[]>('comp-history', [])
     for (const cr of compHistory) {
       allSims.push({
         id: cr.id,
@@ -133,7 +140,7 @@ function RecentSimulationsWidget() {
     const fetchSimulations = async () => {
       try {
         const res = await api.getSimulations({ page_size: 3 })
-        const items = (res?.items || []).map((s: any) => ({
+        const items = ((res?.items || []) as RemoteSim[]).map((s) => ({
           id: s.id,
           name: s.name || 'Untitled Simulation',
           simulationType: s.simulation_type || s.simulationType || 'unknown',
@@ -143,14 +150,17 @@ function RecentSimulationsWidget() {
         }))
         if (items.length > 0) {
           setSimulations(prev => {
-            const ids = new Set(items.map((i: any) => i.id))
+            const ids = new Set(items.map((i) => i.id))
             const merged = [...items, ...prev.filter(p => !ids.has(p.id))]
             merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
             return merged.slice(0, 4)
           })
         }
-      } catch {
-        /* API unavailable — localStorage data is already displayed */
+      } catch (err) {
+        // API unavailable — localStorage data is already displayed.
+        // Log so a dev debugging "why is the simulation list empty"
+        // sees the upstream failure instead of silently shrugging.
+        console.warn('Dashboard: simulations API unavailable; using local cache', err)
       } finally {
         setLoading(false)
       }
@@ -236,10 +246,12 @@ function RecentNotebooksWidget() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    type RemoteNotebook = { id: string; title?: string; updated_at?: string; created_at?: string; tags?: string[] }
+    type LocalNotebook = { id: string; title?: string; updatedAt?: string; updated_at?: string; createdAt?: string; tags?: string[] }
     const fetchNotebooks = async () => {
       try {
         const res = await api.getNotebookPages({ page_size: 4 })
-        const items = (res?.items || []).map((p: any) => ({
+        const items = ((res?.items || []) as RemoteNotebook[]).map((p) => ({
           id: p.id,
           title: p.title || 'Untitled',
           updated_at: p.updated_at || p.created_at || '',
@@ -249,14 +261,14 @@ function RecentNotebooksWidget() {
           setNotebooks(items)
           return
         }
-      } catch { /* API unavailable, fall back to local */ }
-      const pageIndex = persistGet<any[]>('notebook-index', [])
+      } catch (err) { console.warn('Dashboard: notebooks API unavailable; using local index', err) }
+      const pageIndex = persistGet<LocalNotebook[]>('notebook-index', [])
       const sorted = [...pageIndex].sort((a, b) =>
         new Date(b.updatedAt || b.updated_at || 0).getTime() - new Date(a.updatedAt || a.updated_at || 0).getTime()
       )
-      setNotebooks(sorted.slice(0, 4).map((p: any) => ({
+      setNotebooks(sorted.slice(0, 4).map((p) => ({
         id: p.id,
-        title: p.title,
+        title: p.title || 'Untitled',
         updated_at: p.updatedAt || p.updated_at || p.createdAt || '',
         tags: p.tags || [],
       })))
@@ -340,7 +352,7 @@ const ACTIVITY_ROUTES: Record<string, string> = {
  *  hypothesis events always should), we navigate straight to that
  *  project folder so the user doesn't have to hunt for it. */
 function activityDest(activity: ActivityEntry): string | undefined {
-  const pid = (activity.metadata as any)?.project_id
+  const pid = (activity.metadata as { project_id?: string } | undefined)?.project_id
   if (pid && (activity.type === 'hypothesis' || activity.type === 'discovery')) {
     return `/projects/${pid}`
   }
@@ -365,10 +377,21 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
   useEffect(() => {
     let cancelled = false
     const fetchActivities = async () => {
+      type RemoteActivity = {
+        id: string
+        type?: ActivityEntry['type']
+        action?: ActivityEntry['action']
+        title?: string
+        description?: string
+        project_name?: string
+        project_id?: string
+        created_at?: string
+        metadata?: Record<string, unknown>
+      }
       try {
         const res = await api.getActivities({ page_size: 10 })
         if (cancelled) return
-        const items = (res?.items || []).map((a: any) => ({
+        const items = ((res?.items || []) as RemoteActivity[]).map((a) => ({
           id: a.id,
           type: a.type || 'project',
           action: a.action || 'created',
@@ -382,8 +405,12 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
           setStale(false)
           return
         }
-      } catch {
+      } catch (err) {
         if (cancelled) return
+        // Surface "stale" state to the user (handled below) AND log so
+        // we can tell whether the activity feed went stale because of
+        // an auth blip, a 5xx, or a rate-limit.
+        console.warn('Dashboard: activity feed API failed; falling back to local log', err)
         setStale(true)
       }
       if (!cancelled) setActivities(getActivityLog().slice(0, 10))
@@ -465,9 +492,9 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
 
 // ── Discovery Pipeline Status ───────────────────────────────────
 // Small live widget that polls /orchestrator/status every 5 s so the
-// user sees whether any 12-stage Discovery run is in flight. Clicks
-// straight into the Agents page for detail. Silently tolerates the
-// orchestrator being idle (most common state).
+// user sees whether any discovery run is in flight. Clicks straight
+// into the Agents page for detail. Silently tolerates the orchestrator
+// being idle (most common state).
 
 function DiscoveryStatusWidget() {
   const [state, setState] = useState<string>('idle')
@@ -549,13 +576,12 @@ function DiscoveryStatusWidget() {
             })}
           </div>
           <div className="text-xxs text-[var(--color-text-muted)]">
-            {pct}% · SEED → EXPAND → EVIDENCE → COUNTER → REVISE → MECHANISM →
-            VALIDATE → GROUND → SCORE → REFINE → TRANSLATE → FINALIZE
+            {pct}% · multi-phase reasoning in progress
           </div>
         </div>
       ) : (
         <div className="mt-2 text-xxs text-[var(--color-text-muted)]">
-          No run in flight. Tap to start the 12-stage adversarial pipeline.
+          No run in flight. Tap to start a discovery run.
         </div>
       )}
     </Link>
@@ -706,7 +732,7 @@ export default function Dashboard() {
           <EmptyState
             icon={<FiFolder />}
             title="No projects yet"
-            description="Projects group hypotheses, evidence, and simulations into a single research context. Start one to kick off a 12-stage discovery run."
+            description="Projects group hypotheses, evidence, and simulations into a single research context. Start one to kick off a discovery run."
             action={{
               label: 'Create your first project',
               onClick: () => navigate('/projects?new=1'),

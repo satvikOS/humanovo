@@ -12,6 +12,7 @@ import { persistGet, logActivity } from '../utils/persistence'
 import { formatTimeAgo } from '../utils/time'
 import { Skeleton } from '../components/Skeleton'
 import { toast } from '../contexts/ToastContext'
+import { modalBackdropProps } from '../utils/clickable'
 
 interface SavedResearchPaper {
   id: string
@@ -106,14 +107,19 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
-      <div className="glass-card w-full max-w-lg mx-4 p-0 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+      aria-modal="true"
+      aria-labelledby="new-project-title"
+      {...modalBackdropProps(onClose)}
+    >
+      <div className="glass-card w-full max-w-lg mx-4 p-0 animate-in fade-in zoom-in-95 duration-200" role="dialog" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-[var(--color-border)]">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-white/5 rounded-lg">
               <FiPlus className="w-4 h-4 text-[var(--color-text)]" />
             </div>
-            <h2 className="text-lg font-semibold">New Research Project</h2>
+            <h2 id="new-project-title" className="text-lg font-semibold">New Research Project</h2>
           </div>
           <button aria-label="Close" onClick={onClose} className="text-[var(--color-text-muted)] hover:text-white p-1 rounded hover:bg-white/5 transition-colors">
             <FiX className="w-5 h-5" />
@@ -231,10 +237,17 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
 
 /* ─── Project Card (Grid) ──────────────────────────────────────────── */
 
-const NOISE_TAGS = new Set([
-  'AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline',
+// Auto-generated / system tags that we filter out of the user-facing tag
+// chips. The /\d+-stage-pipeline/ pattern catches stale tags from earlier
+// pipeline versions without hardcoding the specific stage counts.
+const NOISE_TAG_LITERALS = new Set([
+  'AI generated', 'ai-generated',
   'well-grounded', 'partially-grounded', 'needs-grounding',
 ])
+const NOISE_TAG_PATTERN = /^\d+-stage-pipeline$/
+function isNoiseTag(tag: string): boolean {
+  return NOISE_TAG_LITERALS.has(tag) || NOISE_TAG_PATTERN.test(tag)
+}
 
 interface CardProps {
   project: Project
@@ -264,7 +277,7 @@ function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, o
   const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
   const docCount = allDocs.filter(d => d.project_id === project.id).length
   const isArchived = (project.status || 'active') === 'archived'
-  const visibleTags = (project.tags || []).filter(t => !NOISE_TAGS.has(t))
+  const visibleTags = (project.tags || []).filter(t => !isNoiseTag(t))
 
   return (
     <div
@@ -642,8 +655,7 @@ export default function Projects() {
 
   const uniqueTags = useMemo(() => {
     const set = new Set<string>()
-    const excluded = new Set(['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'])
-    projects.forEach(p => (p.tags || []).forEach(t => { if (!excluded.has(t)) set.add(t) }))
+    projects.forEach(p => (p.tags || []).forEach(t => { if (!isNoiseTag(t)) set.add(t) }))
     return [...set].sort()
   }, [projects])
 
@@ -1074,12 +1086,17 @@ function ConfirmDeleteModal({
   description: string
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onCancel}>
-      <div className="glass-card p-6 max-w-sm mx-4 text-center" onClick={e => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      aria-modal="true"
+      aria-labelledby="confirm-delete-project-title"
+      {...modalBackdropProps(onCancel)}
+    >
+      <div className="glass-card p-6 max-w-sm mx-4 text-center" role="dialog" onClick={e => e.stopPropagation()}>
         <div className="inline-flex p-3 rounded-xl bg-red-500/10 mb-4">
           <FiTrash2 className="w-6 h-6 text-red-400" />
         </div>
-        <h3 className="text-lg font-semibold mb-2">{title}</h3>
+        <h3 id="confirm-delete-project-title" className="text-lg font-semibold mb-2">{title}</h3>
         <p className="text-sm text-[var(--color-text-muted)] mb-6 leading-relaxed">{description}</p>
         <div className="flex gap-3 justify-center">
           <button onClick={onCancel} className="px-4 py-2 text-sm rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">

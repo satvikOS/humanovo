@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { modalBackdropProps, useEscapeKey } from '../utils/clickable'
 import {
   FiDatabase,
   FiSearch,
@@ -233,6 +234,14 @@ export default function Evidence() {
   const [editingDocId, setEditingDocId] = useState<string | null>(null)
   const [editDocForm, setEditDocForm] = useState({ title: '', doc_type: '', authors: '', description: '', tags: '' })
   const [deleteDocConfirmId, setDeleteDocConfirmId] = useState<string | null>(null)
+  // Wire global Escape closers for the two modals whose backdrops are
+  // siblings of the dialog (focus lives in form fields, so the
+  // backdrop's own keydown never fires).
+  useEscapeKey(() => {
+    if (viewingDocBlobUrl) URL.revokeObjectURL(viewingDocBlobUrl)
+    setViewingDocOverlay(null)
+  }, !!viewingDocOverlay)
+  useEscapeKey(() => setEditingDocId(null), !!editingDocId)
   const pageSize = 30
 
   const fetchEvidence = useCallback(async () => {
@@ -898,9 +907,14 @@ export default function Evidence() {
 
       {/* Delete Confirmation Dialog */}
       {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}>
-          <div className="glass-card p-6 max-w-sm mx-4 text-center" style={{ background: 'var(--color-surface-solid)' }} onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-2">Delete Evidence?</h3>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          aria-modal="true"
+          aria-labelledby="delete-evidence-title"
+          {...modalBackdropProps(() => setDeleteConfirmId(null))}
+        >
+          <div className="glass-card p-6 max-w-sm mx-4 text-center" role="dialog" style={{ background: 'var(--color-surface-solid)' }} onClick={e => e.stopPropagation()}>
+            <h3 id="delete-evidence-title" className="text-lg font-semibold mb-2">Delete Evidence?</h3>
             <p className="text-sm text-[var(--color-text-muted)] mb-6">
               This will permanently delete this evidence item. This action cannot be undone.
             </p>

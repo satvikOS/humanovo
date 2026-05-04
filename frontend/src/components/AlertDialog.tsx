@@ -165,7 +165,7 @@ export function useAlertDialog() {
                   ref={inputRef}
                   defaultValue={state.inputDefault}
                   autoFocus
-                  className="w-full mt-3 px-3 py-2 text-xs rounded-lg outline-none"
+                  className="w-full mt-3 px-3 py-2 text-xs rounded-lg outline-none focus:ring-2 focus:ring-[var(--color-border-strong)] focus:border-[var(--color-border-strong)]"
                   style={{
                     background: 'var(--color-bg)',
                     border: '1px solid var(--glass-border)',

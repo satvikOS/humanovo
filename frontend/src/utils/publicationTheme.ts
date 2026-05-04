@@ -143,43 +143,43 @@ export function getPalette(name: string): string[] {
   return PALETTES[name] || PALETTES.default
 }
 
-export function makeTickFormatter(fmt: TickFormat, decimals: number): (v: any) => string {
+export function makeTickFormatter(fmt: TickFormat, decimals: number): (v: unknown) => string {
   const dp = Math.max(0, Math.min(6, decimals))
   switch (fmt) {
     case 'scientific':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         if (n === 0) return '0'
         return n.toExponential(dp)
       }
     case 'percent':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         return `${(n * 100).toFixed(dp)}%`
       }
     case 'currency':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: dp }).format(n)
       }
     case 'compact':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: dp }).format(n)
       }
     case 'plain':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         return n.toFixed(dp)
       }
     case 'auto':
     default:
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         const abs = Math.abs(n)

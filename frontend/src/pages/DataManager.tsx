@@ -22,6 +22,7 @@ import clsx from 'clsx'
 import * as XLSX from 'xlsx'
 import { useAlertDialog } from '../components/AlertDialog'
 import api from '../services/api'
+import { modalBackdropProps } from '../utils/clickable'
 
 type ColumnType = 'number' | 'string' | 'date' | 'boolean'
 
@@ -582,6 +583,7 @@ export default function DataManager() {
           <div className="relative">
             <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 text-xs opacity-60" />
             <input
+              aria-label="Search datasets"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search…"
@@ -730,7 +732,13 @@ export default function DataManager() {
 
       {/* ── Add Modal ── */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setShowAddModal(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          aria-modal="true"
+          aria-label="Add dataset"
+          {...modalBackdropProps(() => setShowAddModal(false))}
+        >
           <div
             className="w-96 p-4 rounded-lg"
             style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}
@@ -1016,6 +1024,7 @@ function TableView({ ds, previewRows, setPreviewRows }: { ds: Dataset; previewRo
               {ds.columns.map(c => (
                 <td key={c.name} className="px-1 py-1">
                   <input
+                    aria-label={`Filter column ${c.name}`}
                     className="w-full px-1 py-0.5 text-xxs rounded outline-none"
                     style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
                     placeholder="Filter..."
@@ -1175,11 +1184,11 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
 
         {opType === 'filter' && (
           <div className="space-y-1.5">
-            <select value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Filter column" value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="">Column…</option>
               {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
-            <select value={config.operator || '='} onChange={e => setConfig({ ...config, operator: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Filter operator" value={config.operator || '='} onChange={e => setConfig({ ...config, operator: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="=">=</option>
               <option value="!=">!=</option>
               <option value=">">{`>`}</option>
@@ -1188,16 +1197,16 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
               <option value="<=">{`<=`}</option>
               <option value="contains">contains</option>
             </select>
-            <input value={config.value || ''} onChange={e => setConfig({ ...config, value: e.target.value })} placeholder="Value" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
+            <input aria-label="Filter value" value={config.value || ''} onChange={e => setConfig({ ...config, value: e.target.value })} placeholder="Value" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
           </div>
         )}
         {opType === 'sort' && (
           <div className="space-y-1.5">
-            <select value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Sort column" value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="">Column…</option>
               {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
-            <select value={config.direction || 'asc'} onChange={e => setConfig({ ...config, direction: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Sort direction" value={config.direction || 'asc'} onChange={e => setConfig({ ...config, direction: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="asc">Ascending</option>
               <option value="desc">Descending</option>
             </select>
@@ -1221,15 +1230,15 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
           </div>
         )}
         {opType === 'drop_nulls' && (
-          <select value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+          <select aria-label="Column to drop nulls from" value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
             <option value="">Column…</option>
             {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
         )}
         {opType === 'derive' && (
           <div className="space-y-1.5">
-            <input value={config.name || ''} onChange={e => setConfig({ ...config, name: e.target.value })} placeholder="New column name" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
-            <input value={config.expression || ''} onChange={e => setConfig({ ...config, expression: e.target.value })} placeholder="JS expression e.g. age*2 + bmi" className="w-full px-2 py-1.5 text-xs rounded outline-none font-mono" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
+            <input aria-label="New column name" value={config.name || ''} onChange={e => setConfig({ ...config, name: e.target.value })} placeholder="New column name" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
+            <input aria-label="JavaScript expression" value={config.expression || ''} onChange={e => setConfig({ ...config, expression: e.target.value })} placeholder="JS expression e.g. age*2 + bmi" className="w-full px-2 py-1.5 text-xs rounded outline-none font-mono" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
             <div className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
               Available: {ds.columns.map(c => c.name).join(', ')}
             </div>
@@ -1237,11 +1246,11 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
         )}
         {opType === 'rename' && (
           <div className="space-y-1.5">
-            <select value={config.from || ''} onChange={e => setConfig({ ...config, from: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Rename from column" value={config.from || ''} onChange={e => setConfig({ ...config, from: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="">From…</option>
               {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
-            <input value={config.to || ''} onChange={e => setConfig({ ...config, to: e.target.value })} placeholder="To" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
+            <input aria-label="Rename to (new column name)" value={config.to || ''} onChange={e => setConfig({ ...config, to: e.target.value })} placeholder="To" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
           </div>
         )}
 

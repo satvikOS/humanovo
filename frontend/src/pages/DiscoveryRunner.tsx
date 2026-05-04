@@ -1,17 +1,18 @@
 /**
- * DiscoveryRunner — Live pipeline viewer per Jamison spec Section 14.3
- * Phase 1: Config panel → Phase 2: Live 11-stage progress viewer via WebSocket
+ * DiscoveryRunner — Live pipeline viewer.
+ * Config panel → Live progress viewer via WebSocket.
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import api, { apiClient } from '../services/api'
+import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
 
 const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
 const WS_BASE = _BACKEND
   ? _BACKEND.replace(/^http/, 'ws')
   : (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host
 
-const STAGES = ['SEED', 'EXPAND', 'EVIDENCE', 'COUNTER', 'REVISE', 'MECHANISM', 'VALIDATE', 'GROUND', 'SCORE', 'REFINE', 'TRANSLATE', 'FINALIZE']
+const STAGES = STAGE_CODES
 
 interface StageStatus {
   status: 'pending' | 'running' | 'completed' | 'error'
@@ -50,7 +51,8 @@ export default function DiscoveryRunner() {
   const [citationStyle, setCitationStyle] = useState('numbered')
 
   // Pipeline state
-  const [phase, setPhase] = useState<'config' | 'running' | 'completed'>('config')
+  const [phase, setPhase] = useState<'config' | 'running' | 'completed' | 'error'>('config')
+  const [runError, setRunError] = useState<string | null>(null)
   const [, setRunId] = useState<string | null>(null)
   const [stages, setStages] = useState<Record<string, StageStatus>>({})
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -147,8 +149,10 @@ export default function DiscoveryRunner() {
     const event = msg.event as string
     switch (event) {
       case 'stage_started':
+        // Internal `model` field is intentionally NOT logged to UI — model
+        // / provider names are pipeline IP and must not surface to users.
         setStages(prev => ({ ...prev, [msg.stage as string]: { status: 'running', model: msg.model as string } }))
-        addLog('stage_started', `${msg.stage} started (${msg.model})`)
+        addLog('stage_started', `${stageLabel(msg.stage as string)} started`)
         break
       case 'stage_completed':
         setStages(prev => ({
@@ -163,7 +167,7 @@ export default function DiscoveryRunner() {
             grounding_ratio: msg.grounding_ratio as number,
           },
         }))
-        addLog('stage_completed', `${msg.stage} completed in ${(msg.duration_seconds as number)?.toFixed(1)}s`)
+        addLog('stage_completed', `${stageLabel(msg.stage as string)} completed in ${(msg.duration_seconds as number)?.toFixed(1)}s`)
         break
       case 'hypothesis_completed':
         setHypotheses(prev => [...prev, {
@@ -186,7 +190,13 @@ export default function DiscoveryRunner() {
       case 'run_error':
         addLog('error', msg.error as string)
         if (!(msg.recoverable as boolean)) {
-          setPhase('completed')
+          // A non-recoverable run error is a real failure, not a
+          // "completed" run. The previous code transitioned to
+          // 'completed' which made the header lie ("Discovery
+          // Complete") and hid the retry affordance. Now we land on
+          // a dedicated 'error' phase the UI can surface honestly.
+          setPhase('error')
+          setRunError(typeof msg.error === 'string' ? msg.error : 'Pipeline failed')
           if (timerRef.current) clearInterval(timerRef.current)
         }
         break
@@ -376,7 +386,9 @@ export default function DiscoveryRunner() {
       {/* Header with cost and timer */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
-          {phase === 'completed' ? 'Discovery Complete' : 'Discovery Running...'}
+          {phase === 'completed' ? 'Discovery Complete'
+            : phase === 'error' ? 'Discovery Failed'
+            : 'Discovery Running...'}
         </h1>
         <div className="flex items-center gap-4 text-sm">
           <span className="font-mono" style={{ color: 'var(--color-text-muted)' }}>
@@ -390,25 +402,29 @@ export default function DiscoveryRunner() {
         </div>
       </div>
 
-      {/* 12-stage progress bar */}
+      {/* Phase progress bar — numbered blocks with descriptive labels on hover.
+          Internal stage codenames and model identities stay server-side. */}
       <div className="flex gap-0.5">
-        {STAGES.map(stage => {
+        {STAGES.map((stage, idx) => {
           const s = stages[stage]
           const bg = !s ? 'var(--color-bg-secondary)' : s.status === 'running' ? '#3b82f6' : s.status === 'completed' ? '#22c55e' : '#ef4444'
           return (
             <div key={stage} className="flex-1 group relative">
               <div className="h-8 rounded-sm flex items-center justify-center text-xs font-mono transition-colors"
                 style={{ background: bg, color: s?.status === 'running' || s?.status === 'completed' ? '#fff' : 'var(--color-text-muted)' }}>
-                {stage.slice(0, 4)}
+                {idx + 1}
               </div>
-              {s && (
-                <div className="absolute top-full mt-1 left-0 right-0 text-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                  <div className="inline-block px-2 py-1 rounded text-xs" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
-                    {s.model}{s.duration_seconds ? ` (${s.duration_seconds.toFixed(1)}s)` : ''}
-                    {s.grounding_ratio != null && Number.isFinite(s.grounding_ratio) ? ` GR:${(s.grounding_ratio * 100).toFixed(0)}%` : ''}
-                  </div>
+              <div className="absolute top-full mt-1 left-0 right-0 text-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                <div className="inline-block px-2 py-1 rounded text-xs whitespace-nowrap" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+                  <div className="font-medium" style={{ color: 'var(--color-text-secondary)' }}>{stageLabel(stage)}</div>
+                  {s && (s.duration_seconds || s.grounding_ratio != null) && (
+                    <div>
+                      {s.duration_seconds ? `${s.duration_seconds.toFixed(1)}s` : ''}
+                      {s.grounding_ratio != null && Number.isFinite(s.grounding_ratio) ? ` · grounded ${(s.grounding_ratio * 100).toFixed(0)}%` : ''}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           )
         })}
@@ -459,6 +475,39 @@ export default function DiscoveryRunner() {
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
             {hypotheses.find(h => `${h.round}-${h.index}` === bestHypothesis)?.title || bestHypothesis}
           </p>
+        </div>
+      )}
+
+      {/* Error banner — surfaced when the pipeline fails non-recoverably.
+          Was previously silent: header said "Discovery Complete", best
+          hypothesis section never rendered, user had no clear retry. */}
+      {phase === 'error' && (
+        <div
+          className="rounded-lg p-4 flex items-start gap-3"
+          style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+          role="alert"
+        >
+          <span aria-hidden style={{ color: '#ef4444', fontSize: 20, lineHeight: '1.2em' }}>⚠</span>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-medium mb-1" style={{ color: '#fca5a5' }}>
+              The discovery run did not complete
+            </h3>
+            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+              {runError || 'The pipeline encountered a non-recoverable error. Your session is preserved; please retry, or contact support if the problem persists.'}
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                onClick={() => { setPhase('config'); setRunError(null); setStages({}); setHypotheses([]); setLogs([]) }}
+                className="px-3 py-1.5 rounded text-xs font-medium"
+                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
+              >
+                Configure new run
+              </button>
+              <span className="text-xxs" style={{ color: 'var(--color-text-muted)' }}>
+                Trace logs are in the panel below.
+              </span>
+            </div>
+          </div>
         </div>
       )}
     </div>

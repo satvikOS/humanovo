@@ -270,6 +270,16 @@ export default function Agents() {
   const fetchStatus = useCallback(async () => {
     try {
       const res = await api.getOrchestratorStatus()
+      // Loose orchestrator-status shape — captures the extra fields
+      // the backend returns beyond the strict typed contract. Cast
+      // once at the boundary, then access fields normally.
+      const r = res as typeof res & {
+        disease?: string
+        discovery_type?: string
+        project_name?: string
+        project_id?: string
+        top_hypotheses?: Hypothesis[]
+      }
       failRef.current = 0
       setConnected(true)
       const newState = res.state || 'idle'
@@ -280,36 +290,38 @@ export default function Agents() {
       if ((newState === 'completed' || newState === 'stopping') && prevStateRef.current === 'running') {
         logActivity({
           type: 'discovery', action: 'completed',
-          title: `Discovery ${newState}: ${(res as any).disease || config.disease} — ${(res as any).top_hypotheses?.length || 0} hypotheses`,
-          project: (res as any).project_name || config.disease,
+          title: `Discovery ${newState}: ${r.disease || config.disease} — ${r.top_hypotheses?.length || 0} hypotheses`,
+          project: r.project_name || config.disease,
           // project_id lets the ActivityFeed / notification rows route
           // directly to the dedicated project folder instead of /agents.
           metadata: {
-            hypotheses_count: (res as any).top_hypotheses?.length || 0,
-            project_id: (res as any).project_id || '',
+            hypotheses_count: r.top_hypotheses?.length || 0,
+            project_id: r.project_id || '',
           },
         })
       }
       prevStateRef.current = newState
 
       // Restore config from backend only if discovery is actively running
-      if (!config.disease && (res as any).disease && newState === 'running') {
-        setConfig(prev => ({ ...prev, disease: (res as any).disease, discovery_type: (res as any).discovery_type || prev.discovery_type }))
+      if (!config.disease && r.disease && newState === 'running') {
+        setConfig(prev => ({
+          ...prev,
+          disease: r.disease ?? prev.disease,
+          discovery_type: (r.discovery_type as DiscoveryConfig['discovery_type']) || prev.discovery_type,
+        }))
       }
 
       // Track auto-created project (backend handles persistence)
-      if ((res as any).project_id && (res as any).project_id !== 'discovery') {
-        const pid = (res as any).project_id
-        const pname = (res as any).project_name || ''
-        setProjectId(pid)
-        setProjectName(pname)
+      if (r.project_id && r.project_id !== 'discovery') {
+        setProjectId(r.project_id)
+        setProjectName(r.project_name || '')
       }
 
       // Merge hypotheses only during active discovery, not from stale completed state
-      if ((res as any).top_hypotheses?.length > 0 && (newState === 'running' || newState === 'stopping')) {
+      if ((r.top_hypotheses?.length ?? 0) > 0 && (newState === 'running' || newState === 'stopping')) {
         setHypotheses(prev => {
           const ids = new Set(prev.map(h => h.id))
-          const incoming = (res as any).top_hypotheses.filter((h: Hypothesis) => !ids.has(h.id)).filter(isValidHypothesis)
+          const incoming = (r.top_hypotheses ?? []).filter((h: Hypothesis) => !ids.has(h.id)).filter(isValidHypothesis)
           if (!incoming.length) return prev
           const merged = [...incoming, ...prev].sort((a: Hypothesis, b: Hypothesis) => b.confidence - a.confidence).slice(0, 100)
 
@@ -320,12 +332,12 @@ export default function Agents() {
               logActivity({
                 type: 'hypothesis', action: 'created',
                 title: `Hypothesis discovered: ${h.title?.slice(0, 80) || 'Untitled'}`,
-                project: (res as any).project_name || config.disease,
+                project: r.project_name || config.disease,
                 // project_id lets the ActivityFeed / notification rows route
                 // directly to the dedicated project folder instead of /agents.
                 metadata: {
                   confidence: h.confidence,
-                  project_id: (res as any).project_id || '',
+                  project_id: r.project_id || '',
                   hypothesis_id: h.id,
                 },
               })
@@ -367,17 +379,32 @@ export default function Agents() {
       try {
         const res = await api.listProjectHypotheses(projectId, { limit: 100 })
         if (res.items?.length > 0) {
-          const mapped: Hypothesis[] = res.items.map((h: any) => ({
+          // Loose hypothesis-row shape — backend variants between
+          // statement/title and confidence/confidence_score.
+          type RawHypothesis = {
+            id: string
+            title?: string; statement?: string
+            description?: string; mechanism?: string
+            confidence?: number; confidence_score?: number
+            validated?: boolean; status?: string
+            novelty_score?: number
+            evidence_summary?: unknown[]
+            risks?: unknown[]
+            validation_steps?: unknown[]
+            translational_roadmap?: Hypothesis['translational_roadmap']
+            created_at?: string
+          }
+          const mapped: Hypothesis[] = (res.items as RawHypothesis[]).map((h) => ({
             id: h.id,
             title: h.title || h.statement || '',
             description: h.description || h.mechanism || '',
             mechanism: h.mechanism || '',
-            confidence: Number.isFinite(h.confidence) ? h.confidence : Number.isFinite(h.confidence_score) ? h.confidence_score : 0.5,
+            confidence: Number.isFinite(h.confidence) ? (h.confidence as number) : Number.isFinite(h.confidence_score) ? (h.confidence_score as number) : 0.5,
             validated: h.validated || h.status === 'validated',
             novelty_score: h.novelty_score,
-            evidence_summary: h.evidence_summary || [],
-            risks: h.risks || [],
-            validation_steps: h.validation_steps || [],
+            evidence_summary: (h.evidence_summary as Hypothesis['evidence_summary']) || [],
+            risks: (h.risks as Hypothesis['risks']) || [],
+            validation_steps: (h.validation_steps as Hypothesis['validation_steps']) || [],
             translational_roadmap: h.translational_roadmap,
             created_at: h.created_at,
           }))
@@ -402,8 +429,16 @@ export default function Agents() {
           ? await api.listAllDiscoveryRuns({ limit: 50 })
           : await api.listDiscoveryRuns(projectId, { limit: 50 })
         if (res.items?.length > 0) {
-          setDiscoveryHistory(res.items.map((r: any) => ({
-            id: r.id || r.run_id,
+          type RawRun = {
+            id?: string; run_id?: string
+            disease?: string; config?: { disease?: string; discovery_type?: string }
+            discovery_type?: string
+            hypotheses_count?: number
+            created_at?: string; started_at?: string
+            status?: string
+          }
+          setDiscoveryHistory((res.items as RawRun[]).map((r) => ({
+            id: r.id || r.run_id || '',
             disease: r.disease || r.config?.disease || '',
             discoveryType: r.discovery_type || r.config?.discovery_type || 'treatment',
             hypothesesCount: r.hypotheses_count || 0,
@@ -426,8 +461,8 @@ export default function Agents() {
     setStartError(null)
     try {
       // Include uploaded documents for AI context
-      const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
-      const docIds = allDocs.map((d: any) => d.id)
+      const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]') as Array<{ id: string }>
+      const docIds = allDocs.map((d) => d.id)
       const discoveryConfig = {
         ...config,
         external_factors: factors.length > 0 ? factors.map(f => `${f.name} (${f.category}): ${f.interaction}`) : undefined,
@@ -714,7 +749,7 @@ export default function Agents() {
                   <label className="text-xs text-[var(--color-text-muted)] mb-1.5 block font-medium">Discovery Type</label>
                   <select
                     value={config.discovery_type}
-                    onChange={e => setConfig(prev => ({ ...prev, discovery_type: e.target.value as any }))}
+                    onChange={e => setConfig(prev => ({ ...prev, discovery_type: e.target.value as DiscoveryConfig['discovery_type'] }))}
                     disabled={!isIdle}
                     className="input w-full disabled:opacity-50"
                   >
@@ -793,7 +828,7 @@ export default function Agents() {
                     <div className="mt-2 space-y-2 animate-slide-down">
                       <input type="text" value={factorName} onChange={e => setFactorName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addFactor() } }} placeholder="Factor name" disabled={!isIdle} className="input w-full text-xs disabled:opacity-50" />
                       <div className="flex gap-1">
-                        <select value={factorCategory} onChange={e => setFactorCategory(e.target.value as any)} disabled={!isIdle} className="input flex-1 text-xs disabled:opacity-50">
+                        <select value={factorCategory} onChange={e => setFactorCategory(e.target.value as ExternalFactor['category'])} disabled={!isIdle} className="input flex-1 text-xs disabled:opacity-50">
                           {factorCategories.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                         <button aria-label="Add factor" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFactor() }} disabled={!isIdle || !factorName.trim()} className="px-2 py-1 text-xs rounded-lg border border-[var(--color-border)] hover:bg-[var(--glass-bg)] text-[var(--color-text)] disabled:opacity-30 transition-colors"><FiPlus className="w-3 h-3" /></button>
@@ -990,7 +1025,7 @@ export default function Agents() {
                 ].map(s => (
                   <button
                     key={s.value}
-                    onClick={() => setSortBy(s.value as any)}
+                    onClick={() => setSortBy(s.value as 'confidence' | 'novelty' | 'date')}
                     className={`px-3 py-1.5 text-xs rounded-md transition-all ${sortBy === s.value ? 'bg-[var(--glass-bg-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`}
                   >
                     {s.label}

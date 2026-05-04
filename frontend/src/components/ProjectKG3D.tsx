@@ -24,7 +24,7 @@ interface KGNode {
   shape: string
   size: number
   canonical_id?: string
-  payload?: Record<string, any>
+  payload?: Record<string, unknown>
   // react-force-graph adds these at runtime
   x?: number; y?: number; z?: number
   vx?: number; vy?: number; vz?: number
@@ -82,15 +82,16 @@ export default function ProjectKG3D({
     setLoading(true)
     setError(null)
     try {
-      const params: Record<string, any> = { max_nodes: 500 }
+      const params: Record<string, string | number> = { max_nodes: 500 }
       if (userId) params.user_id = userId
       const { data: resp } = await apiClient.get(
         `/projects/${encodeURIComponent(projectId)}/kg`,
         { params },
       )
       setData(resp)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'Failed to load KG')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      setError(err?.response?.data?.detail || err?.message || 'Failed to load KG')
     } finally {
       setLoading(false)
     }
@@ -115,7 +116,7 @@ export default function ProjectKG3D({
     return { nodes, links }
   }, [data, filters])
 
-  const handleNodeClick = useCallback((raw: any) => {
+  const handleNodeClick = useCallback((raw: unknown) => {
     const node = raw as KGNode
     setSelectedNode(node)
     const fg = fgRef.current
@@ -176,19 +177,22 @@ export default function ProjectKG3D({
         ref={fgRef}
         graphData={filtered}
         backgroundColor="#0b0f14"
-        nodeLabel={(n: any) => `
+        nodeLabel={(n) => {
+          const node = n as KGNode
+          return `
           <div style="background:#14181f;color:#e8eef5;padding:6px 10px;
             border:1px solid #2a3240;border-radius:6px;font-size:11px">
-            <b>${escapeHtml(n.name)}</b><br/>
-            <span style="color:#8a99b3">${n.kind} · ${n.scope}</span>
+            <b>${escapeHtml(node.name)}</b><br/>
+            <span style="color:#8a99b3">${node.kind} · ${node.scope}</span>
           </div>
-        `}
-        nodeColor={(n: any) => n.color}
-        nodeVal={(n: any) => n.size || 4}
+        `
+        }}
+        nodeColor={(n) => (n as KGNode).color}
+        nodeVal={(n) => (n as KGNode).size || 4}
         nodeRelSize={4}
         nodeOpacity={0.92}
-        linkColor={(l: any) => l.color}
-        linkWidth={(l: any) => Math.max(1, (l.confidence || 0.5) * 2)}
+        linkColor={(l) => (l as KGLink).color}
+        linkWidth={(l) => Math.max(1, ((l as KGLink).confidence || 0.5) * 2)}
         linkOpacity={0.55}
         linkDirectionalParticles={1}
         linkDirectionalParticleWidth={1.2}
@@ -257,7 +261,7 @@ export default function ProjectKG3D({
               <label key={k} className="flex items-center gap-1.5 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={(filters as any)[k]}
+                  checked={filters[k]}
                   onChange={e =>
                     setFilters(f => ({ ...f, [k]: e.target.checked }))
                   }

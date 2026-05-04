@@ -11,6 +11,7 @@ import api, { Project, apiClient } from '../services/api'
 import { logActivity, formatDate, usePersistentState, blobPut, blobGet, blobDelete } from '../utils/persistence'
 import HypothesisDocViewer from '../components/HypothesisDocViewer'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import { useEscapeKey } from '../utils/clickable'
 
 
 interface SavedResearchPaper {
@@ -212,6 +213,9 @@ export default function ProjectDetail() {
     })
   }, [projectId, setAllDocs])
   const [showDocUpload, setShowDocUpload] = useState(false)
+  // Wire global Escape closer for the doc-upload modal (sibling backdrop;
+  // focus is in the file input so backdrop's own keydown never fires).
+  useEscapeKey(() => setShowDocUpload(false), showDocUpload)
   const [docForm, setDocForm] = useState({ title: '', doc_type: 'Protocol' as string, authors: '', date: '', description: '', tags: '', knowledge_base: 'private' as 'private' | 'common' })
   const [docFile, setDocFile] = useState<File | null>(null)
   const [deleteDocId, setDeleteDocId] = useState<string | null>(null)
@@ -646,7 +650,12 @@ export default function ProjectDetail() {
   const confirmDeleteDoc = async () => {
     if (!deleteDocId) return
     const doc = projectDocs.find(d => d.id === deleteDocId)
-    await blobDelete(deleteDocId).catch(() => {})
+    await blobDelete(deleteDocId).catch(err => {
+      // Local IndexedDB blob deletion failing is non-fatal (the doc
+      // record itself was already removed); log so a dev can see if
+      // the blob store is actually broken vs the doc never had a blob.
+      console.warn('ProjectDetail: failed to delete document blob (record removed anyway)', err)
+    })
     setProjectDocs(prev => prev.filter(d => d.id !== deleteDocId))
     logActivity({ type: 'evidence', action: 'deleted', title: `Deleted document: ${doc?.title || deleteDocId}`, project: project?.name })
     setDeleteDocId(null)

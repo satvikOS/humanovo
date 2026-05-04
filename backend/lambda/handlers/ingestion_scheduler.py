@@ -25,7 +25,6 @@ sns = boto3.client("sns")
 # Configuration
 PUBMED_FETCHER_ARN = os.environ.get("PUBMED_FETCHER_ARN", "")
 CLINICAL_TRIALS_FETCHER_ARN = os.environ.get("CLINICAL_TRIALS_FETCHER_ARN", "")
-BRAVE_SEARCH_ARN = os.environ.get("BRAVE_SEARCH_ARN", "")
 INGESTION_STATE_TABLE = os.environ.get("INGESTION_STATE_TABLE", "genup-dev-ingestion-state")
 NOTIFICATION_TOPIC_ARN = os.environ.get("NOTIFICATION_TOPIC_ARN", "")
 
@@ -75,17 +74,6 @@ INGESTION_SCHEDULE = {
             {"condition": "CAR-T", "priority": 9},
             {"condition": "diabetes", "priority": 7},
             {"condition": "cardiovascular", "priority": 7},
-        ],
-    },
-    "brave_search": {
-        "enabled": True,
-        "priority": 3,  # Lower priority, respect rate limits
-        "max_results": 20,  # Conservative due to 2000/month limit
-        "queries": [
-            # Only high-value searches to conserve quota
-            {"query": "FDA drug approval 2024", "priority": 10},
-            {"query": "clinical trial breakthrough results", "priority": 9},
-            {"query": "gene therapy approval news", "priority": 8},
         ],
     },
 }
@@ -238,37 +226,6 @@ def run_clinical_trials_ingestion() -> dict:
     return result
 
 
-def run_brave_search_ingestion() -> dict:
-    """Run Brave Search ingestion (rate-limited)."""
-    config = INGESTION_SCHEDULE["brave_search"]
-
-    if not should_run_source("brave_search", config):
-        logger.info("Skipping Brave Search ingestion (cooldown)")
-        return {"skipped": True, "reason": "cooldown"}
-
-    # Very conservative - only 1 query per scheduled run
-    queries = sorted(config["queries"], key=lambda x: x["priority"], reverse=True)
-    top_query = queries[0]["query"] if queries else ""
-
-    if not top_query:
-        return {"skipped": True, "reason": "no queries"}
-
-    result = invoke_fetcher(
-        BRAVE_SEARCH_ARN,
-        {
-            "query": top_query,
-            "max_results": config["max_results"],
-        },
-    )
-
-    status = "completed" if result.get("success", False) else "failed"
-    records = result.get("body", {}).get("total_indexed", 0) if isinstance(result.get("body"), dict) else 0
-
-    update_ingestion_state("brave_search", status, records, result.get("error", ""))
-
-    return result
-
-
 def send_notification(subject: str, message: str) -> None:
     """Send notification about ingestion results."""
     if not NOTIFICATION_TOPIC_ARN:
@@ -325,15 +282,8 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
             if results["clinical_trials"].get("error"):
                 errors.append(f"ClinicalTrials: {results['clinical_trials']['error']}")
 
-    if schedule_type == "full" or "brave_search" in sources:
-        logger.info("Running Brave Search ingestion")
-        results["brave_search"] = run_brave_search_ingestion()
-        if not results["brave_search"].get("skipped"):
-            body = results["brave_search"].get("body", {})
-            if isinstance(body, dict):
-                total_records += body.get("total_indexed", 0)
-            if results["brave_search"].get("error"):
-                errors.append(f"BraveSearch: {results['brave_search']['error']}")
+    # Web search ingestion (Brave) was removed for v1; only open biomedical
+    # sources are ingested now. See docs/planning/SOURCES_ROADMAP.md.
 
     # Send notification if there were results or errors
     if total_records > 0 or errors:
@@ -413,16 +363,7 @@ def handler_manual(event: dict[str, Any], context: LambdaContext) -> dict[str, A
                 },
                 async_invoke=False,
             )
-        elif source == "brave_search":
-            update_ingestion_state("brave_search", "running")
-            results["brave_search"] = invoke_fetcher(
-                BRAVE_SEARCH_ARN,
-                {
-                    "query": INGESTION_SCHEDULE["brave_search"]["queries"][0]["query"],
-                    "max_results": 10,
-                },
-                async_invoke=False,
-            )
+        # Web search ("brave_search") removed for v1.
 
     return {
         "statusCode": 200,

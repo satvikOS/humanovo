@@ -1,0 +1,129 @@
+name: Bootstrap Org (PLAN ONLY)
+
+# Runs `terraform plan` against the org/ module. NO APPLY. The plan
+# output goes to the workflow step summary so a human reviews it before
+# the separate (and gated) bootstrap-org-apply.yml workflow ever runs.
+#
+# Trigger: workflow_dispatch only.
+#
+# Phases (matches infrastructure/terraform/org/variables.tf):
+#   0-plan-only                  — sanity check, no resources
+#   1-org-only                   — Organization + accounts only
+#   2-org-and-sso                — adds Identity Center + permission sets
+#   3-org-sso-and-guardrails     — adds GuardDuty + Security Hub aggregation
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "Bootstrap phase to plan (output ONLY; no apply)"
+        type: choice
+        options:
+          - "0-plan-only"
+          - "1-org-only"
+          - "2-org-and-sso"
+          - "3-org-sso-and-guardrails"
+        default: "0-plan-only"
+      org_email_prefix:
+        description: "Email prefix for new account roots (e.g. aws)."
+        type: string
+        required: true
+      org_email_domain:
+        description: "Email domain for account roots (e.g. humanovo.net)."
+        type: string
+        required: true
+      sso_admin_email:
+        description: "Email of the human admin assuming the Admin permission set."
+        type: string
+        required: true
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    name: Terraform plan (no apply)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infrastructure/terraform/org
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.7.0"
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        run: |
+          # State backend points at the legacy genup-* state bucket
+          # for Phase 1. Once the new humanovo-security account exists
+          # we re-init with -backend-config pointing at the new bucket.
+          terraform init \
+            -backend-config="bucket=genup-terraform-state" \
+            -backend-config="key=org/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="dynamodb_table=genup-terraform-locks"
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -diff
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        run: |
+          set -o pipefail
+          terraform plan \
+            -var "phase=${{ inputs.phase }}" \
+            -var "org_email_prefix=${{ inputs.org_email_prefix }}" \
+            -var "org_email_domain=${{ inputs.org_email_domain }}" \
+            -var "sso_admin_email=${{ inputs.sso_admin_email }}" \
+            -no-color \
+            -out=tfplan.binary 2>&1 | tee plan.txt
+          terraform show -no-color tfplan.binary > plan-readable.txt
+
+      - name: Plan summary to step summary
+        if: always()
+        run: |
+          echo "## Bootstrap Org plan — phase \`${{ inputs.phase }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**This workflow made ZERO changes.** It only ran \`terraform plan\`." >> $GITHUB_STEP_SUMMARY
+          echo "Review the plan below; if it's what you want, trigger the separate \`bootstrap-org-apply.yml\` workflow with the same inputs." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Plan output" >> $GITHUB_STEP_SUMMARY
+          echo '```hcl' >> $GITHUB_STEP_SUMMARY
+          # Cap at ~50KB so the summary doesn't truncate awkwardly.
+          head -c 50000 plan-readable.txt >> $GITHUB_STEP_SUMMARY || true
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Approval checklist before running apply" >> $GITHUB_STEP_SUMMARY
+          echo "- [ ] Account names match the brand (humanovo-prod / staging / dev / security)" >> $GITHUB_STEP_SUMMARY
+          echo "- [ ] Email prefix + domain are correct (you control the inbox; plus-addressing works)" >> $GITHUB_STEP_SUMMARY
+          echo "- [ ] No unexpected resource destructions in the plan" >> $GITHUB_STEP_SUMMARY
+          echo "- [ ] Phase matches what you intend (1=org+accounts only; 2=adds SSO; 3=adds guardrails)" >> $GITHUB_STEP_SUMMARY
+          echo "- [ ] If phase >= 2, the Identity Center instance has been enabled in the AWS console (one-time)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: terraform-plan-${{ inputs.phase }}-${{ github.run_id }}
+          path: |
+            infrastructure/terraform/org/plan.txt
+            infrastructure/terraform/org/plan-readable.txt
+          retention-days: 30

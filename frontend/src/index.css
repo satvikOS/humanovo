@@ -1,8 +1,14 @@
+/* @import must precede all other statements (besides @charset / empty @layer)
+   per the CSS spec — Vite warns when this rule is broken. The Google
+   Fonts import was placed AFTER the @tailwind directives, which made
+   it functionally a no-op in some browsers (Chromium silently ignores
+   late @import). Hoisting it to the top so Inter + JetBrains Mono
+   actually load at first paint. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* Dark theme (OLED Black) - Default */
 :root,

@@ -7,8 +7,10 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 
 const PREFIX = 'humanovo-'
 
-// Backend API base URL — same as the main API
-const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || ''
+// Backend API base URL — same as the main API. import.meta.env is
+// typed by vite-env.d.ts; cast to ImportMeta for environments where
+// the global ambient typing isn't picked up by isolated tsconfigs.
+const API_BASE = (import.meta as ImportMeta).env?.VITE_API_BASE_URL || ''
 
 // Keys that should be synced to the backend for cross-device access
 const SYNCED_KEYS = new Set([
@@ -54,16 +56,28 @@ const MAX_ITEMS: Record<string, number> = {
 const _syncTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 const _syncInFlight: Set<string> = new Set()
 
+/** Loose shape every mergeable item is expected to satisfy. We don't
+ * enforce stricter types here because callers pass arrays of many
+ * different domain shapes (notebooks, simulations, citations, etc.). */
+type MergeableItem = {
+  id?: string
+  updatedAt?: string
+  updated_at?: string
+  createdAt?: string
+  created_at?: string
+  timestamp?: string
+}
+
 /**
  * Merge two arrays by `id` field. Items from `incoming` that don't exist in
  * `existing` are added. Items that exist in both keep the newer version
  * (by `updatedAt`, `updated_at`, `createdAt`, or `timestamp` field).
  * Returns the merged array sorted newest-first.
  */
-function mergeArraysById(existing: any[], incoming: any[]): any[] {
-  const map = new Map<string, any>()
+function mergeArraysById<T extends MergeableItem>(existing: T[], incoming: T[]): T[] {
+  const map = new Map<string, T>()
 
-  const getTime = (item: any): number => {
+  const getTime = (item: T): number => {
     const ts = item.updatedAt || item.updated_at || item.createdAt || item.timestamp || item.created_at || ''
     return ts ? new Date(ts).getTime() : 0
   }
@@ -139,15 +153,16 @@ async function syncKeyFromBackend(key: string): Promise<boolean> {
   if (remoteValue === null) return false
 
   const localRaw = localStorage.getItem(PREFIX + key)
-  let localValue: any = null
-  try { localValue = localRaw ? JSON.parse(localRaw) : null } catch { /* */ }
+  let localValue: unknown = null
+  try { localValue = localRaw ? JSON.parse(localRaw) : null } catch { /* corrupt local */ }
 
-  let merged: any
+  let merged: unknown
   if (ARRAY_MERGE_KEYS.has(key) && Array.isArray(remoteValue)) {
-    const localArr = Array.isArray(localValue) ? localValue : []
-    merged = mergeArraysById(localArr, remoteValue)
+    const localArr: MergeableItem[] = Array.isArray(localValue) ? (localValue as MergeableItem[]) : []
+    let mergedArr = mergeArraysById(localArr, remoteValue as MergeableItem[])
     const max = MAX_ITEMS[key]
-    if (max && merged.length > max) merged = merged.slice(0, max)
+    if (max && mergedArr.length > max) mergedArr = mergedArr.slice(0, max)
+    merged = mergedArr
   } else {
     // Scalar/object: remote wins
     merged = remoteValue
@@ -181,7 +196,7 @@ const _initialSyncPromise: Promise<void> = (async () => {
     }
 
     // After pulling remote data, push any local-only keys that don't exist on backend
-    const remoteKeySet = new Set(remoteKeys.map((r: any) => r.key))
+    const remoteKeySet = new Set(remoteKeys.map((r) => r.key))
     for (const key of SYNCED_KEYS) {
       if (remoteKeySet.has(key)) continue
       const localRaw = localStorage.getItem(PREFIX + key)

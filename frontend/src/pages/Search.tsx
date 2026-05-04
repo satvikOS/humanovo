@@ -120,13 +120,19 @@ export default function Search() {
       }
     }
 
-    // Search MC simulations
-    const mcSims = persistGet<any[]>('mc-simulations', [])
+    // Search MC simulations. Loose shapes — different writers across
+    // the codebase produce these.
+    type LocalMC = { id: string; name?: string; simulationType?: string; iterations?: number; stats?: { mean?: number }; createdAt?: string }
+    type LocalNotebook = { id: string; title?: string; tags?: string[]; updatedAt?: string; updated_at?: string; createdAt?: string }
+    type LocalExperiment = { id: string; title?: string; hypothesis?: string; status?: string; tags?: string[]; createdAt?: string }
+    type LocalEq = { id: string; expr?: string; xMin?: number; xMax?: number; createdAt?: string }
+
+    const mcSims = persistGet<LocalMC[]>('mc-simulations', [])
     for (const s of mcSims) {
       if (s.name?.toLowerCase().includes(lq) || s.simulationType?.toLowerCase().includes(lq)) {
         localResults.push({
           id: s.id,
-          type: 'project' as any,
+          type: 'simulation',
           title: s.name || 'Untitled Simulation',
           snippet: `Monte Carlo · ${s.iterations?.toLocaleString() || 0} iterations · μ=${s.stats?.mean?.toFixed(2) || 0}`,
           source: 'simulation',
@@ -140,7 +146,7 @@ export default function Search() {
     }
 
     // Search notebook pages
-    const notebooks = persistGet<any[]>('notebook-index', [])
+    const notebooks = persistGet<LocalNotebook[]>('notebook-index', [])
     for (const n of notebooks) {
       if (n.title?.toLowerCase().includes(lq) || n.tags?.some((t: string) => t.toLowerCase().includes(lq))) {
         localResults.push({
@@ -159,14 +165,14 @@ export default function Search() {
     }
 
     // Search experiments
-    const experiments = persistGet<any[]>('experiments', [])
+    const experiments = persistGet<LocalExperiment[]>('experiments', [])
     for (const e of experiments) {
       if (e.title?.toLowerCase().includes(lq) || e.hypothesis?.toLowerCase().includes(lq) || e.tags?.some((t: string) => t.toLowerCase().includes(lq))) {
         localResults.push({
           id: e.id,
-          type: 'project' as any,
-          title: e.title,
-          snippet: e.hypothesis || `Experiment · ${e.status}`,
+          type: 'experiment',
+          title: e.title || 'Untitled experiment',
+          snippet: e.hypothesis || `Experiment · ${e.status ?? 'unknown'}`,
           source: 'experiment',
           source_type: 'experiment',
           relevance_score: 0.65,
@@ -178,12 +184,12 @@ export default function Search() {
     }
 
     // Search equation history
-    const eqHistory = persistGet<any[]>('eq-history', [])
+    const eqHistory = persistGet<LocalEq[]>('eq-history', [])
     for (const eq of eqHistory) {
       if (eq.expr?.toLowerCase().includes(lq)) {
         localResults.push({
           id: eq.id,
-          type: 'project' as any,
+          type: 'equation',
           title: `f(x) = ${eq.expr}`,
           snippet: `Equation plot · x ∈ [${eq.xMin}, ${eq.xMax}]`,
           source: 'equation',

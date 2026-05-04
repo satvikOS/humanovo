@@ -50,17 +50,18 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
+import { filterV1 } from '../utils/featureFlags'
 import { useWorkspace, WorkspaceTab } from '../contexts/WorkspaceContext'
 import HumanovoGlyph from './HumanovoGlyph'
 
-const mainNavItems = [
+const mainNavItems = filterV1([
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
   { to: '/evidence', icon: FiLayers, label: 'Evidence', shortcut: '3' },
   { to: '/agents', icon: FiZap, label: 'Discovery', shortcut: '4' },
   { to: '/workbench', icon: FiTerminal, label: 'Workbench', shortcut: '5' },
   { to: '/anatomy', icon: FiAperture, label: '3D Anatomy', shortcut: '6' },
-]
+])
 
 // Default routes by activity type. When a notification has
 // metadata.project_id (set for hypothesis and discovery events in
@@ -90,7 +91,7 @@ const NOTIFICATION_ROUTES: Record<string, string> = {
 /** Resolve the best navigation destination for a notification entry.
  *  discovery and hypothesis notifications that carry a project_id in
  *  their metadata route directly to the project folder. */
-function notifDest(n: { type?: string; metadata?: any }): string | undefined {
+function notifDest(n: { type?: string; metadata?: { project_id?: string } & Record<string, unknown> }): string | undefined {
   const pid = n.metadata?.project_id
   if (pid && (n.type === 'hypothesis' || n.type === 'discovery')) {
     return `/projects/${pid}`
@@ -104,19 +105,19 @@ const secondaryNavItems = [
   { to: '/search', icon: FiSearch, label: 'Search' },
 ]
 
-const researchNavItems = [
+const researchNavItems = filterV1([
   { to: '/literature-review', icon: FiBookOpen, label: 'Literature' },
   { to: '/citation-manager', icon: FiList, label: 'Citations' },
   { to: '/experiment-tracker', icon: FiTrendingUp, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
-]
+])
 
-const analysisNavItems = [
+const analysisNavItems = filterV1([
   { to: '/compute-lab', icon: FiCpu, label: 'Compute Lab' },
   { to: '/genomics', icon: FiGrid, label: 'Genomics' },
-]
+])
 
-const managementNavItems = [
+const managementNavItems = filterV1([
   { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
   { to: '/imaging', icon: FiImage, label: 'Imaging' },
   { to: '/clinical-trials', icon: FiActivity, label: 'Clinical Trials' },
@@ -124,16 +125,16 @@ const managementNavItems = [
   { to: '/biobank', icon: FiArchive, label: 'Biobank' },
   { to: '/collaboration', icon: FiUsers, label: 'Collaboration' },
   { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
-]
+])
 
 // Knowledge section. The standalone Hypotheses entry was removed —
 // hypotheses now live inside their parent project and surface from
 // the Discovery chat or the project detail view. Old /hypotheses
 // links redirect to /projects so external bookmarks don't 404.
-const knowledgeNavItems = [
+const knowledgeNavItems = filterV1([
   { to: '/knowledge-graph', icon: FiLayers, label: 'Knowledge Graph' },
   { to: '/ml-models', icon: FiCpu, label: 'ML Models' },
-]
+])
 
 /**
  * Sidebar section with a clickable header that toggles visibility of
@@ -349,7 +350,8 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     }
 
     // Search MC simulations
-    const mcSims = persistGet<any[]>('mc-simulations', [])
+    type MCSim = { name?: string; simulationType?: string }
+    const mcSims = persistGet<MCSim[]>('mc-simulations', [])
     for (const s of mcSims) {
       if (results.length >= 8) break
       if (s.name?.toLowerCase().includes(lq) || s.simulationType?.toLowerCase().includes(lq)) {
@@ -364,7 +366,8 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     }
 
     // Search notebook pages
-    const notebooks = persistGet<any[]>('notebook-index', [])
+    type NotebookEntry = { id?: string; title?: string; tags?: string[] }
+    const notebooks = persistGet<NotebookEntry[]>('notebook-index', [])
     for (const n of notebooks) {
       if (results.length >= 10) break
       if (n.title?.toLowerCase().includes(lq) || n.tags?.some((t: string) => t.toLowerCase().includes(lq))) {
@@ -379,14 +382,15 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     }
 
     // Search experiments
-    const experiments = persistGet<any[]>('experiments', [])
+    type ExperimentEntry = { title?: string; hypothesis?: string; status?: string }
+    const experiments = persistGet<ExperimentEntry[]>('experiments', [])
     for (const e of experiments) {
       if (results.length >= 12) break
       if (e.title?.toLowerCase().includes(lq) || e.hypothesis?.toLowerCase().includes(lq)) {
         results.push({
-          label: e.title,
+          label: e.title || 'Untitled experiment',
           icon: FiClipboard,
-          description: `Experiment · ${e.status}`,
+          description: `Experiment · ${e.status ?? 'unknown'}`,
           category: 'Results',
           action: () => { navigate('/experiments'); onClose() },
         })
@@ -400,9 +404,11 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     ? actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase()) || a.description?.toLowerCase().includes(query.toLowerCase()))
     : actions
 
-  // Combine navigation + data results
-  const allItems = [...filtered, ...dataResults]
-  const categories = [...new Set(allItems.map(a => a.category))]
+  // Combine navigation + data results. Wrapped in useMemo so the
+  // downstream flatItems useMemo's dep array stays stable across
+  // renders that don't actually change inputs.
+  const allItems = useMemo(() => [...filtered, ...dataResults], [filtered, dataResults])
+  const categories = useMemo(() => [...new Set(allItems.map(a => a.category))], [allItems])
 
   // If query is long enough and no data results, offer to do a full search
   const showFullSearchOption = query.length >= 2
@@ -474,7 +480,8 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a command or search..."
-            className="flex-1 bg-transparent text-base outline-none placeholder:text-[var(--color-text-muted)]"
+            aria-label="Command palette search"
+            className="flex-1 bg-transparent text-base outline-none placeholder:text-[var(--color-text-muted)] focus:ring-1 focus:ring-[var(--color-border-strong)] rounded"
             autoFocus
           />
           <kbd className="px-1.5 py-0.5 text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
@@ -741,32 +748,44 @@ function ConstantChat() {
       const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
       const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
       const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
+      // Local-context shapes — these come out of localStorage so we
+      // tolerate every field being optional. Concrete shapes here let
+      // the downstream chat/assistant code consume them without `any`.
+      type LocalProject = { name?: string; title?: string; disease_focus?: string; disease?: string; hypothesis_count?: number; status?: string }
+      type LocalHypothesis = { statement?: string; title?: string; mechanism?: string; confidence?: number; confidence_score?: number; disease?: string; tags?: string[] }
+      type LocalPaper = { hypothesis_title?: string; disease?: string }
+      type LocalDocument = { title?: string; doc_type?: string; authors?: string; description?: string; tags?: string[]; knowledge_base?: string; project_id?: string }
+
+      const projectsTyped: LocalProject[] = Array.isArray(projects) ? projects : []
+      const hypothesesTyped: LocalHypothesis[] = Array.isArray(hypotheses) ? hypotheses : []
+      const papersTyped: LocalPaper[] = Array.isArray(papers) ? papers : []
       const simulations = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]')
       const docs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
+      const docsTyped: LocalDocument[] = Array.isArray(docs) ? docs : []
       return {
-        totalProjects: projects.length,
-        totalHypotheses: hypotheses.length,
-        totalPapers: papers.length,
+        totalProjects: projectsTyped.length,
+        totalHypotheses: hypothesesTyped.length,
+        totalPapers: papersTyped.length,
         totalSimulations: simulations.length,
-        totalDocuments: docs.length,
-        projects: projects.map((p: any) => ({
+        totalDocuments: docsTyped.length,
+        projects: projectsTyped.map((p) => ({
           name: p.name || p.title,
           disease: p.disease_focus || p.disease,
           hypotheses: p.hypothesis_count,
           status: p.status,
-        })).filter((p: any) => p.name),
-        hypotheses: hypotheses.map((h: any) => ({
+        })).filter((p) => p.name),
+        hypotheses: hypothesesTyped.map((h) => ({
           title: h.statement || h.title,
           mechanism: h.mechanism,
           confidence: h.confidence || h.confidence_score,
           disease: h.disease,
           tags: h.tags?.slice(0, 5),
-        })).filter((h: any) => h.title),
-        papers: papers.map((p: any) => ({
+        })).filter((h) => h.title),
+        papers: papersTyped.map((p) => ({
           title: p.hypothesis_title,
           disease: p.disease,
-        })).filter((p: any) => p.title),
-        documents: docs.map((d: any) => ({
+        })).filter((p) => p.title),
+        documents: docsTyped.map((d) => ({
           title: d.title,
           doc_type: d.doc_type,
           authors: d.authors,
@@ -774,7 +793,7 @@ function ConstantChat() {
           tags: d.tags,
           knowledge_base: d.knowledge_base || 'private',
           project_id: d.project_id,
-        })).filter((d: any) => d.title),
+        })).filter((d) => d.title),
       }
     } catch { /* parse error */ return {} }
   }
@@ -818,7 +837,10 @@ function ConstantChat() {
 
   const generateSmartFallbackResponse = (query: string): string => {
     const q = query.toLowerCase().trim()
-    const ctx = getLocalContext() as any
+    // The chat fallback only reads counts + recent items off the local
+    // context — no need for stricter typing here. ReturnType captures
+    // exactly what getLocalContext yields.
+    const ctx = getLocalContext() as ReturnType<typeof getLocalContext>
 
     // Scope check: reject out-of-scope topics
     if (isOutOfScope(q)) {
@@ -829,9 +851,11 @@ function ConstantChat() {
     const totalHypotheses = ctx.totalHypotheses || 0
     const totalPapers = ctx.totalPapers || 0
     const totalSimulations = ctx.totalSimulations || 0
-    const projects = (ctx.projects as any[]) || []
-    const hypotheses = (ctx.hypotheses as any[]) || []
-    const papers = (ctx.papers as any[]) || []
+    // Now that ctx is typed via ReturnType<typeof getLocalContext>,
+    // .projects/.hypotheses/.papers are already proper arrays — no casts.
+    const projects = ctx.projects || []
+    const hypotheses = ctx.hypotheses || []
+    const papers = ctx.papers || []
 
     // --- Conversational responses: greetings, introductions, casual chat ---
     if (/^(hi|hey|hello|howdy|yo|sup|what'?s up|good (morning|afternoon|evening))[\s!.?]*$/i.test(q) || q === 'hi' || q === 'hey') {
@@ -897,12 +921,12 @@ function ConstantChat() {
     }
 
     // --- Search user data for relevant context ---
-    const matchingHyps = hypotheses.filter((h: any) => {
+    const matchingHyps = hypotheses.filter((h) => {
       const searchable = [h.title, h.mechanism, h.disease, ...(h.tags || [])].filter(Boolean).join(' ').toLowerCase()
       return q.split(/\s+/).some((word: string) => word.length > 3 && searchable.includes(word))
     })
 
-    const matchingProjects = projects.filter((p: any) => {
+    const matchingProjects = projects.filter((p) => {
       const searchable = [p.name, p.disease].filter(Boolean).join(' ').toLowerCase()
       return q.split(/\s+/).some((word: string) => word.length > 3 && searchable.includes(word))
     })
@@ -911,7 +935,7 @@ function ConstantChat() {
       const intro = matchingHyps.length === 1
         ? 'I found a relevant hypothesis in your data:'
         : `I found **${matchingHyps.length}** relevant hypotheses in your data:`
-      const items = matchingHyps.slice(0, 3).map((h: any, i: number) => {
+      const items = matchingHyps.slice(0, 3).map((h, i) => {
         let item = `${i + 1}. **${h.title}**`
         if (h.confidence) item += ` (${Math.round(h.confidence * 100)}% confidence)`
         if (h.disease) item += `\n   Disease: ${h.disease}`
@@ -923,7 +947,7 @@ function ConstantChat() {
     }
 
     if (matchingProjects.length > 0) {
-      const items = matchingProjects.slice(0, 5).map((p: any, i: number) =>
+      const items = matchingProjects.slice(0, 5).map((p, i) =>
         `${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`
       ).join('\n')
       return `I found ${matchingProjects.length} related project${matchingProjects.length > 1 ? 's' : ''}:\n\n${items}\n\nOpen **Projects** in the sidebar to view details.`
@@ -932,7 +956,7 @@ function ConstantChat() {
     // --- Context-aware queries about platform sections ---
     if (/hypothes[ie]s/i.test(q)) {
       if (totalHypotheses > 0) {
-        const recent = hypotheses.slice(0, 3).map((h: any, i: number) =>
+        const recent = hypotheses.slice(0, 3).map((h, i) =>
           `${i + 1}. **${h.title}**${h.confidence ? ` — ${Math.round(h.confidence * 100)}% confidence` : ''}`
         ).join('\n')
         return `You've generated **${totalHypotheses}** hypotheses so far. Here are a few:\n\n${recent}${totalHypotheses > 3 ? `\n\n...and ${totalHypotheses - 3} more.` : ''}\n\nHead to **Discovery** to explore them or generate new ones.`
@@ -942,7 +966,7 @@ function ConstantChat() {
 
     if (/\bproject/i.test(q)) {
       if (totalProjects > 0) {
-        const recent = projects.slice(0, 3).map((p: any, i: number) =>
+        const recent = projects.slice(0, 3).map((p, i) =>
           `${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}`
         ).join('\n')
         return `You have **${totalProjects}** project${totalProjects > 1 ? 's' : ''}:\n\n${recent}${totalProjects > 3 ? `\n\n...and ${totalProjects - 3} more.` : ''}\n\nVisit **Projects** in the sidebar to manage them.`
@@ -952,7 +976,7 @@ function ConstantChat() {
 
     if (/paper|publication|manuscript/i.test(q)) {
       if (totalPapers > 0) {
-        const recent = papers.slice(0, 3).map((p: any, i: number) =>
+        const recent = papers.slice(0, 3).map((p, i) =>
           `${i + 1}. **${p.title}**${p.disease ? ` — ${p.disease}` : ''}`
         ).join('\n')
         return `You've generated **${totalPapers}** research paper${totalPapers > 1 ? 's' : ''}:\n\n${recent}\n\nYou can find them inside their respective projects.`
@@ -1194,8 +1218,9 @@ function ConstantChat() {
                 }
               }}
               placeholder="Ask Constant anything — research, biology, stats..."
+              aria-label="Chat input"
               rows={1}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed py-2"
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed py-2 focus:ring-1 focus:ring-[var(--color-border-strong)] rounded"
               style={{ maxHeight: '120px' }}
             />
             <button aria-label="Send"
@@ -1235,7 +1260,7 @@ export default function Layout() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string; type?: string; metadata?: any }>>([])
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string; type?: string; metadata?: Record<string, unknown> }>>([])
   const [hasUnread, setHasUnread] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -1247,7 +1272,7 @@ export default function Layout() {
         const activities = getActivityLog()
         const lastRead = localStorage.getItem('humanovo-notifs-read') || '0'
         const recent = activities.slice(0, 20)
-        setNotifications(recent.map((a: any) => ({
+        setNotifications(recent.map((a) => ({
           id: a.id,
           title: a.title || `${(a.type || 'activity').replace(/_/g, ' ')} ${(a.action || '').replace(/_/g, ' ')}`,
           description: a.project || '',
