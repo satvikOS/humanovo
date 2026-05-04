@@ -568,43 +568,43 @@ const CB_SIM_FILTER: Record<CBlindSim, string> = {
 // or plain notation based on the value and the user's preference. The
 // `auto` mode flips to scientific notation when |v| >= 1e4 or
 // 0 < |v| < 1e-3 so paper figures don't carry messy long numbers.
-function makeTickFormatter(fmt: TickFormat, decimals: number): (v: any) => string {
+function makeTickFormatter(fmt: TickFormat, decimals: number): (v: unknown) => string {
   const dp = Math.max(0, Math.min(6, decimals))
   switch (fmt) {
     case 'scientific':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         if (n === 0) return '0'
         return n.toExponential(dp)
       }
     case 'percent':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         return `${(n * 100).toFixed(dp)}%`
       }
     case 'currency':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: dp }).format(n)
       }
     case 'compact':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: dp }).format(n)
       }
     case 'plain':
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         return n.toFixed(dp)
       }
     case 'auto':
     default:
-      return (v: any) => {
+      return (v: unknown) => {
         const n = Number(v)
         if (!Number.isFinite(n)) return String(v ?? '')
         const abs = Math.abs(n)
@@ -1151,8 +1151,8 @@ export default function DataVisualization() {
       pdf.text(`n=${chart.data.length}`, pageW - margin, pageH - 18, { align: 'right' })
       pdf.save(`${chart.title.replace(/\s+/g, '-').toLowerCase()}.pdf`)
       toast('success', 'PDF exported')
-    } catch (err: any) {
-      toast('error', err?.message || 'PDF export failed', { title: 'Export failed' })
+    } catch (err) {
+      toast('error', (err as { message?: string })?.message || 'PDF export failed', { title: 'Export failed' })
     }
   }, [])
 
@@ -1180,8 +1180,8 @@ export default function DataVisualization() {
       a.download = `${title.replace(/\s+/g, '-').toLowerCase()}-hidpi.png`
       a.href = canvas.toDataURL('image/png'); a.click()
       toast('success', 'High-DPI PNG exported')
-    } catch (err: any) {
-      toast('error', err?.message || 'PNG export failed')
+    } catch (err) {
+      toast('error', (err as { message?: string })?.message || 'PNG export failed')
     }
   }, [])
 
@@ -1400,7 +1400,7 @@ export default function DataVisualization() {
         }
         const labels = [...new Set(data.map(d => d.label))]
         const pivoted = labels.map(label => {
-          const row: Record<string, any> = { label }
+          const row: Record<string, unknown> = { label }
           cats.forEach(cat => { row[cat!] = data.find(d => d.label === label && d.category === cat)?.value || 0 })
           return row
         })
@@ -1430,15 +1430,15 @@ export default function DataVisualization() {
         }
         const labels = [...new Set(data.map(d => d.label))]
         let pivoted = labels.map(label => {
-          const row: Record<string, any> = { label }
+          const row: Record<string, unknown> = { label }
           cats.forEach(cat => { row[cat!] = data.find(d => d.label === label && d.category === cat)?.value || 0 })
           return row
         })
         if (type === 'stacked_bar_100') {
           pivoted = pivoted.map(row => {
-            const total = cats.reduce((s, cat) => s + (row[cat!] || 0), 0)
-            const normalized: Record<string, any> = { label: row.label }
-            cats.forEach(cat => { normalized[cat!] = total > 0 ? Math.round((row[cat!] / total) * 100 * 10) / 10 : 0 })
+            const total = cats.reduce((s, cat) => s + (Number(row[cat!]) || 0), 0)
+            const normalized: Record<string, unknown> = { label: row.label }
+            cats.forEach(cat => { normalized[cat!] = total > 0 ? Math.round((Number(row[cat!]) / total) * 100 * 10) / 10 : 0 })
             return normalized
           })
         }
