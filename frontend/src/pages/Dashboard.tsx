@@ -149,8 +149,11 @@ function RecentSimulationsWidget() {
             return merged.slice(0, 4)
           })
         }
-      } catch {
-        /* API unavailable — localStorage data is already displayed */
+      } catch (err) {
+        // API unavailable — localStorage data is already displayed.
+        // Log so a dev debugging "why is the simulation list empty"
+        // sees the upstream failure instead of silently shrugging.
+        console.warn('Dashboard: simulations API unavailable; using local cache', err)
       } finally {
         setLoading(false)
       }
@@ -249,7 +252,7 @@ function RecentNotebooksWidget() {
           setNotebooks(items)
           return
         }
-      } catch { /* API unavailable, fall back to local */ }
+      } catch (err) { console.warn('Dashboard: notebooks API unavailable; using local index', err) }
       const pageIndex = persistGet<any[]>('notebook-index', [])
       const sorted = [...pageIndex].sort((a, b) =>
         new Date(b.updatedAt || b.updated_at || 0).getTime() - new Date(a.updatedAt || a.updated_at || 0).getTime()
@@ -382,8 +385,12 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
           setStale(false)
           return
         }
-      } catch {
+      } catch (err) {
         if (cancelled) return
+        // Surface "stale" state to the user (handled below) AND log so
+        // we can tell whether the activity feed went stale because of
+        // an auth blip, a 5xx, or a rate-limit.
+        console.warn('Dashboard: activity feed API failed; falling back to local log', err)
         setStale(true)
       }
       if (!cancelled) setActivities(getActivityLog().slice(0, 10))

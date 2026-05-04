@@ -632,7 +632,15 @@ export default function Notebook() {
           const html = page.content || ''
           pageContentCache.current[activePageId] = html
           setActiveHtml(html)
-        }).catch(() => setActiveHtml(''))
+        }).catch(err => {
+          // Page fetch failed (auth/network/server). Don't blank the
+          // editor — show the local cache if we have one. If we don't,
+          // empty is the safest default; the apiClient interceptor
+          // already toasted the error.
+          console.warn('Notebook: failed to load page from API; using local cache', err)
+          const cached = pageContentCache.current[activePageId]
+          setActiveHtml(cached ?? '')
+        })
       }
       const meta = pageIndex.find(p => p.id === activePageId)
       if (meta) {
@@ -759,8 +767,15 @@ export default function Notebook() {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     if (activePageId && editor && !editor.isDestroyed) {
       pageContentCache.current[activePageId] = editor.getHTML()
-      // Fire-and-forget save to API
-      api.updateNotebookPage(activePageId, { content: editor.getHTML() }).catch(() => {})
+      // Fire-and-forget save to API. On failure, flip hasUnsaved back
+      // to true so the user can see the dot/badge indicating their
+      // recent edits aren't on the server yet (the local content cache
+      // still preserves the data, so nothing is lost — they just need
+      // to know to retry / wait for connectivity).
+      api.updateNotebookPage(activePageId, { content: editor.getHTML() }).catch(err => {
+        console.warn('Notebook autosave failed; flagging as unsaved', err)
+        setHasUnsaved(true)
+      })
     }
     setActivePageId(id)
   }, [activePageId, editor])
@@ -810,7 +825,10 @@ export default function Notebook() {
       if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
       if (activePageId && editor && !editor.isDestroyed) {
         pageContentCache.current[activePageId] = editor.getHTML()
-        api.updateNotebookPage(activePageId, { content: editor.getHTML() }).catch(() => {})
+        api.updateNotebookPage(activePageId, { content: editor.getHTML() }).catch(err => {
+          console.warn('Notebook beforeunload save failed', err)
+          setHasUnsaved(true)
+        })
       }
       setActivePageId(created.id)
     } catch (err) {
