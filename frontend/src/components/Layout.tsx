@@ -480,7 +480,8 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a command or search..."
-            className="flex-1 bg-transparent text-base outline-none placeholder:text-[var(--color-text-muted)]"
+            aria-label="Command palette search"
+            className="flex-1 bg-transparent text-base outline-none placeholder:text-[var(--color-text-muted)] focus:ring-1 focus:ring-[var(--color-border-strong)] rounded"
             autoFocus
           />
           <kbd className="px-1.5 py-0.5 text-xxs text-[var(--color-text-muted)] bg-[var(--glass-bg)] rounded border border-[var(--color-border)]">ESC</kbd>
@@ -1212,8 +1213,9 @@ function ConstantChat() {
                 }
               }}
               placeholder="Ask Constant anything — research, biology, stats..."
+              aria-label="Chat input"
               rows={1}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed py-2"
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed py-2 focus:ring-1 focus:ring-[var(--color-border-strong)] rounded"
               style={{ maxHeight: '120px' }}
             />
             <button aria-label="Send"

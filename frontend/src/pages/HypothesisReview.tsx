@@ -100,6 +100,7 @@ export default function HypothesisReview() {
   const { projectId, hypothesisId } = useParams<{ projectId: string; hypothesisId: string }>()
   const [hyp, setHyp] = useState<HypothesisDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedStage, setExpandedStage] = useState<string | null>(null)
 
   // Feedback state
@@ -113,11 +114,33 @@ export default function HypothesisReview() {
 
   useEffect(() => {
     if (!projectId || !hypothesisId) return
+    let cancelled = false
     setLoading(true)
+    setLoadError(null)
     apiClient
       .get(`/projects/${projectId}/hypotheses/${hypothesisId}`)
-      .then(r => { setHyp(r.data); setLoading(false) })
-      .catch(() => setLoading(false))
+      .then(r => {
+        if (cancelled) return
+        setHyp(r.data)
+        setLoading(false)
+      })
+      .catch(err => {
+        if (cancelled) return
+        // Distinguish 404 (genuinely not found) from network/auth/server
+        // errors. Previously the catch silently set loading=false and
+        // the page rendered "Hypothesis not found" regardless of cause —
+        // a researcher whose token had expired had no path forward.
+        const status = err?.response?.status
+        if (status === 404) {
+          setLoadError('not_found')
+        } else if (status === 401 || status === 403) {
+          setLoadError('unauthorized')
+        } else {
+          setLoadError('server_error')
+        }
+        setLoading(false)
+      })
+    return () => { cancelled = true }
   }, [projectId, hypothesisId])
 
   const submitFeedback = async () => {
@@ -149,11 +172,59 @@ export default function HypothesisReview() {
       a.download = `hypothesis-${hypothesisId}.docx`
       a.click()
       URL.revokeObjectURL(url)
-    } catch { /* silent */ }
+    } catch (err) {
+      // The .docx export shares the apiClient interceptor's error toast,
+      // so the failure is already user-visible — no second toast needed.
+      // Log the full error so a dev can see what went wrong.
+      console.error('hypothesis paper export failed', err)
+    }
   }
 
   if (loading) return <div className="p-8 animate-pulse" style={{ color: 'var(--color-text-muted)' }}>Loading hypothesis...</div>
-  if (!hyp) return <div className="p-8" style={{ color: 'var(--color-text-muted)' }}>Hypothesis not found</div>
+  if (loadError === 'unauthorized') {
+    return (
+      <div className="p-8 max-w-lg mx-auto" role="alert">
+        <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Sign-in required</h2>
+        <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
+          Your session has expired or you don&apos;t have access to this hypothesis. Sign in again and we&apos;ll bring you straight back here.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-3 py-1.5 rounded text-xs font-medium"
+          style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
+        >
+          Refresh and sign in
+        </button>
+      </div>
+    )
+  }
+  if (loadError === 'server_error') {
+    return (
+      <div className="p-8 max-w-lg mx-auto" role="alert">
+        <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Something went wrong</h2>
+        <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
+          We couldn&apos;t load this hypothesis right now. Your session is preserved — please try again. If it keeps failing, the trace is in the console.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-3 py-1.5 rounded text-xs font-medium"
+          style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+  if (loadError === 'not_found' || !hyp) {
+    return (
+      <div className="p-8 max-w-lg mx-auto">
+        <h2 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Hypothesis not found</h2>
+        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          The hypothesis ID in this URL doesn&apos;t correspond to anything we can show you. It may have been deleted, or the link may be wrong.
+        </p>
+      </div>
+    )
+  }
 
   const scoreColor = (s: number | null) => s == null ? '#6b7280' : s >= 0.8 ? '#22c55e' : s >= 0.5 ? '#eab308' : '#ef4444'
   const feasLabel = (s: number | null) => s == null ? 'Unknown' : s >= 0.8 ? 'Feasible' : s >= 0.3 ? 'Partially feasible' : 'Not feasible'
