@@ -287,7 +287,7 @@ For each persona, score:
 | Prompts home | AWS Secrets Manager + at-runtime fetch with version pin |
 | Branding | Full `genup-*` → `humanovo-*` migration during Sprint 1, with maintenance window |
 | Code-signing certs | User procures; engineering plans pending-cert fallback |
-| Launch posture | Closed beta May 26-31 → public launch ~June 12 |
+| Launch posture (revised in §9) | Closed beta May 26-31 → public launch ~June 12 |
 | Audit doc location | `docs/planning/PRODUCTION_AUDIT_2026-05.md` (this file) |
 | Reporting cadence (Sprint 1 / Day 2) | End-of-day summary |
 
@@ -297,4 +297,88 @@ For each persona, score:
 
 ### Sprint 1 — Security & IP scrub
 _Day 2 in progress_
+
+## 9. Day-2 amendments (2026-05-04 PM)
+
+Five architectural decisions taken on Day 2 that revise §1, §3, §4, §5, §7 of this document. Recorded here in chronological order; the prose above remains the original Day-1 snapshot.
+
+### 9.1 Multi-account AWS Organization (replaces in-place rebrand)
+
+Decision: provision a fresh AWS Organization with 4 accounts — **prod / staging / dev / security** — rather than rebrand the existing `genup-*` account in place. Baseline tooling: AWS Identity Center for SSO, AWS Control Tower for guardrail SCPs, GuardDuty + Security Hub aggregating to the security account.
+
+Plan impact:
+- Sprint 1 / D6 in-place TF rebrand → **deleted**.
+- Sprint 1 / D2-3 → **adds** Organization bootstrap + Identity Center + Control Tower setup (~1 day).
+- Old `genup-*` account becomes archive-only for 90 days, then decommissioned.
+- The runbook in `REBRAND_RUNBOOK.md` will be revised to a multi-account-bootstrap runbook in a follow-up commit.
+
+### 9.2 Per-user logical isolation on shared infrastructure
+
+Decision: every researcher gets `tenant_id` scoping on Postgres rows (enforced by row-level security policies), per-user pgvector namespace, per-user S3 prefix, and per-user Neo4j label-based filtering. Physical infrastructure stays shared and auto-scales. **No** per-user dedicated infra at academic-researcher pricing.
+
+Plan impact:
+- Sprint 1 / D4 → **expands** auth migration to land alongside tenant scoping + RLS policies + S3 prefix scoping. Migration is one PR per module so frontend can keep up.
+- Adds ~2 days to S1 D4 work (was 1 day, now 3).
+- `AUTH_MIGRATION_PLAN.md` will be revised in a follow-up commit to incorporate ownership-check requirements per endpoint.
+
+### 9.3 CredentialPool / key broker for upstream providers
+
+Decision: every external provider we call (Bedrock, Azure OpenAI, Azure AI, NCBI, etc.) is fronted by a pool of N keys with a broker that picks healthy keys, fails over on 429/401/503, and tracks per-key utilization. Keys are stored in AWS Secrets Manager. **Auto-rotation cadence = quarterly default + 7-day grace overlap**, configurable per pool. Emergency revoke path completes in <60s regardless of schedule.
+
+Implication for v1 wired sources: only NCBI takes an optional key (`PUBMED_API_KEY`). The other 13 wired sources are public APIs with polite-pool email only — no credential rotation needed for the *integrations* themselves. The CredentialPool earns its keep on the **LLM providers** (Bedrock, Azure OpenAI, Azure AI) where multi-key resilience is necessary at scale.
+
+Plan impact:
+- Sprint 2 / D9-12 → **replaces** half of the UX-polish work with the CredentialPool build (broker, rotation Lambda, per-pool config). UX polish compresses but completes.
+- Existing `TokenPool` in `backend/app/agents/discovery_orchestrator.py:233` stays as the request-budget tracker and is wrapped by the CredentialPool.
+
+### 9.4 Source-set reality vs claim — drop Brave, build 15 next
+
+Decision: README's "60+ APIs" is aspirational; codebase has **15 wired** (9 core clients + 6 ingestion agents). After dropping **Brave Search** in Sprint 1 / D8 (only paid source; cleaner all-open-sources story), we're at **14 wired**. Sprint 3 builds **15 more** picked for public-domain or CC-BY licensing only (openFDA, RCSB PDB, WikiPathways, Semantic Scholar, cBioPortal, BiGG Models, IMPC, MGI, ClinVar, dbSNP, GTEx, NCI GDC, cellxgene Census, ProteomicsDB, DepMap). v1 ships with **30 sources fully tested**.
+
+15 STUB integrations in `backend/app/services/biomedical_apis.py` and `backend/app/ingestion/sources.py` get **deleted** in Sprint 1 / D7 — dead code, simplifies attack surface and audit story.
+
+Marketing copy update: README revised from "60+ APIs" to "30+ open biomedical data sources at v1, expanding to 60+ by Q4 2026 (see SOURCES_ROADMAP.md)".
+
+Plan impact:
+- Sprint 3 → **expands from 7 days to 10-12 days** to cover building + 5-tier testing of 15 new sources alongside the originally-planned smoke tests for the 14 wired.
+- See `INTEGRATION_INVENTORY.md` for the authoritative list and `SOURCES_ROADMAP.md` for the build queue.
+
+### 9.5 Revised launch dates
+
+The Sprint 3 expansion plus the Sprint 2 CredentialPool work together push launch by ~3 days net.
+
+| Original (Day 1) | Revised (Day 2) |
+|---|---|
+| Closed beta May 26-31 | **Closed beta June 2-7** |
+| Public launch ~June 12 | **Public launch ~June 17-20** |
+
+Still inside the "end of May / early June" envelope you set on Day 1. If the AWS Organization bootstrap stalls or the CredentialPool runs over, I'll surface it at the Sprint 1 checkpoint and either compress UX polish further or push beta one more week.
+
+### 9.6 Integration testing — 5-tier harness for 30 sources
+
+To address your directive ("do full testing like others on those 60+ sources"), Sprint 3 expands to:
+
+| Tier | What it tests | Cost / source | CI cadence |
+|---|---|---|---|
+| T1 — Connectivity | Hit the API; expect 2xx for canonical query | ~30s | Daily smoke (cron) |
+| T2 — Schema | Response parses against Pydantic model; required fields present | ~30s | Per-PR |
+| T3 — Error path | Bad query, 429 backoff, timeout fallback, malformed entity | ~2 min | Per-PR |
+| T4 — Pipeline E2E | `enrich_target()` / `enrich_disease()` actually use the data | ~5 min | Per-PR (mocked) + nightly (live) |
+| T5 — Quality regression | Snapshot tests on canonical entities (TP53, EGFR, BRCA1, KRAS, lung cancer, COVID-19) — detects upstream drift | ~5 min | Nightly |
+
+Total Sprint 3 budget: ~10-12 days for 30 sources. CI cost manageable: T1 daily smoke = ~15 min/day; T4-T5 nightly live = ~1 hr/night.
+
+### 9.7 Updated decisions table (cumulative)
+
+| Decision | Choice |
+|---|---|
+| AWS posture | 4-account Org (prod / staging / dev / security) + Identity Center + Control Tower + GuardDuty/Security Hub |
+| Per-user model | Logical isolation on shared infra (tenant_id, RLS, per-user S3 prefix, pgvector namespace, Neo4j label) |
+| Auto-scaling | Fargate ASG + RDS Proxy + read replica + ElastiCache cluster + SQS-driven worker scaling |
+| Upstream credentials | CredentialPool per provider, multi-key with failover; quarterly rotation + 7-day grace overlap; emergency revoke <60s |
+| User-facing API tokens | Out of scope for v1; JWT in `auth.py` is sufficient |
+| Source set v1 | 14 wired + 15 built in Sprint 3 = **30 sources** at beta. All public-domain or CC-BY (commercial-use-OK). Brave dropped. |
+| Native packaging v1 | Win + macOS + iOS PWA; Linux deferred to v1.1 |
+| Launch dates (revised) | Closed beta **June 2-7**; public launch **~June 17-20** |
+
 
