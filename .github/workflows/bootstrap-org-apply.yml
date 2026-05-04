@@ -1,0 +1,161 @@
+name: Bootstrap Org (APPLY — guarded)
+
+# Sister workflow to bootstrap-org-plan.yml. APPLIES the Terraform plan
+# for the AWS Organization bootstrap. Phase-gated; requires explicit
+# operator confirmation; no PR or push event can trigger it.
+#
+# Operating procedure:
+#   1. Run bootstrap-org-plan.yml first with the desired phase + inputs.
+#   2. Review the plan output in the workflow step summary.
+#   3. If the plan is correct, run THIS workflow with the SAME inputs
+#      AND `confirm = "I-have-reviewed-the-plan"` (typo blocks apply).
+#   4. The Org / Identity Center / GuardDuty resources land per the
+#      selected phase. State migrates from genup-terraform-state to
+#      humanovo-terraform-state at the end of phase 1 if the security
+#      account ID matches what's in plan output.
+#
+# Reversibility reminder:
+#   - Phase 1 creates AWS accounts. Closing them requires AWS Support
+#     and a 90-day cooldown. Re-running this workflow with the same
+#     phase is idempotent (TF will say no changes); accidentally
+#     creating accounts is the danger, not duplicates.
+#   - Phase 2 (SSO) and phase 3 (GuardDuty) are easy to recreate.
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "Bootstrap phase to APPLY"
+        type: choice
+        options:
+          - "1-org-only"
+          - "2-org-and-sso"
+          - "3-org-sso-and-guardrails"
+        default: "1-org-only"
+      org_email_prefix:
+        description: "Email prefix for new account roots (must match plan run)"
+        type: string
+        required: true
+      org_email_domain:
+        description: "Email domain for account roots (must match plan run)"
+        type: string
+        required: true
+      sso_admin_email:
+        description: "Email of the human admin assuming the Admin permission set"
+        type: string
+        required: true
+      confirm:
+        description: "Type exactly: I-have-reviewed-the-plan"
+        type: string
+        required: true
+
+env:
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  guard:
+    name: Confirm operator reviewed the plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Reject if confirm phrase is wrong
+        run: |
+          if [ "${{ inputs.confirm }}" != "I-have-reviewed-the-plan" ]; then
+            echo "::error::Apply blocked. Set the 'confirm' input to exactly 'I-have-reviewed-the-plan'."
+            echo "::error::This safeguard exists because Org/account creation is hard-to-reverse."
+            exit 1
+          fi
+          echo "Confirmation accepted." >> $GITHUB_STEP_SUMMARY
+
+  apply:
+    name: Terraform apply (phase ${{ inputs.phase }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: guard
+    defaults:
+      run:
+        working-directory: infrastructure/terraform/org
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.7.0"
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=genup-terraform-state" \
+            -backend-config="key=org/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="dynamodb_table=genup-terraform-locks"
+
+      - name: Terraform plan (re-plan inline so apply targets the latest state)
+        id: plan
+        run: |
+          set -o pipefail
+          terraform plan \
+            -var "phase=${{ inputs.phase }}" \
+            -var "org_email_prefix=${{ inputs.org_email_prefix }}" \
+            -var "org_email_domain=${{ inputs.org_email_domain }}" \
+            -var "sso_admin_email=${{ inputs.sso_admin_email }}" \
+            -no-color \
+            -out=tfplan.binary 2>&1 | tee plan.txt
+          terraform show -no-color tfplan.binary > plan-readable.txt
+
+      - name: Plan summary to step summary (pre-apply)
+        run: |
+          {
+            echo "## Pre-apply plan summary — phase \`${{ inputs.phase }}\`"
+            echo ""
+            echo "Confirm phrase accepted; about to run \`terraform apply\` against the plan below."
+            echo ""
+            echo '```hcl'
+            head -c 30000 plan-readable.txt
+            echo ''
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Terraform apply
+        run: |
+          set -o pipefail
+          terraform apply -no-color tfplan.binary 2>&1 | tee apply.txt
+
+      - name: Apply summary
+        if: always()
+        run: |
+          {
+            echo "## Apply result — phase \`${{ inputs.phase }}\`"
+            echo ""
+            echo "### Outputs"
+            echo '```'
+            terraform output -no-color || true
+            echo '```'
+            echo ""
+            echo "### Last 60 lines of apply log"
+            echo '```'
+            tail -60 apply.txt || true
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload apply artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: terraform-apply-${{ inputs.phase }}-${{ github.run_id }}
+          path: |
+            infrastructure/terraform/org/plan.txt
+            infrastructure/terraform/org/plan-readable.txt
+            infrastructure/terraform/org/apply.txt
+          retention-days: 90

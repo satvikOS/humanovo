@@ -12,12 +12,17 @@ the conversation from another tab/device replays seamlessly.
 
 SSE event shapes (each line is `data: {...json...}`):
 
-  { "event": "start",    "run_id": "...", "model": "..." }
+  { "event": "start",    "run_id": "..." }
   { "event": "token",    "delta": "partial text..." }
   { "event": "status",   "message": "searching evidence corpus" }
   { "event": "card",     "card": { kind, payload } }         # inline rich card
   { "event": "done",     "finish_reason": "stop", "tokens": { prompt, completion } }
-  { "event": "error",    "message": "..." }
+  { "event": "error",    "message": "..." }                   # opaque, no provider details
+
+Sanitization: events emitted to the client NEVER include model names,
+provider names, internal stage codenames, or `str(exc)` from upstream
+calls. Those identifiers are pipeline IP and stay server-side. The
+`run_id` is enough to correlate a UI session with server-side logs.
 
 Fallback mode:
   If no OpenAI/Anthropic credentials are configured, the endpoint
@@ -108,9 +113,13 @@ async def _stream_openai(
                     "tokens": {"prompt": 0, "completion": completion_tokens},
                 }
                 return
-    except Exception as e:  # noqa: BLE001 — surface provider errors to the client
-        logger.warning(f"OpenAI streaming failed: {e}")
-        yield "error", {"message": str(e)}
+    except Exception as e:  # noqa: BLE001
+        # Log the full provider error server-side; emit a generic
+        # message to the client. `str(e)` from OpenAI/Anthropic SDKs
+        # routinely contains model names, deployment URLs, and internal
+        # rate-limit details that would leak the pipeline architecture.
+        logger.warning("upstream streaming failed", exception_type=type(e).__name__, error=str(e))
+        yield "error", {"message": "The model service hit an error. Please retry — your session is preserved."}
 
 
 # ─── Fallback scripted stream ────────────────────────────────────
@@ -333,7 +342,10 @@ async def stream_chat(req: ChatStreamRequest, db: AsyncSession = Depends(get_db)
     paper_intent = _detect_paper_intent(req.user_message)
 
     async def generator() -> AsyncGenerator[str, None]:
-        yield _sse_event("start", run_id=run_id, model=model, session_id=str(session.id))
+        # Note: `model` is passed to the upstream provider via _stream_openai
+        # but NEVER emitted on the SSE stream. Clients only see run_id +
+        # session_id; the routing decision is internal.
+        yield _sse_event("start", run_id=run_id, session_id=str(session.id))
 
         if paper_intent:
             yield _sse_event(
