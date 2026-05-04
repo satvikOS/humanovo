@@ -1,5 +1,14 @@
 import { Component, type ReactNode } from 'react'
 
+declare global {
+  interface Window {
+    /** Optional global observability sink for unhandled render errors.
+     *  Apps wire this in main.tsx if they want to forward to a remote
+     *  collector. Calls to it are best-effort and wrapped in try/catch. */
+    __humanovoOnError?: (error: Error, componentStack?: string | null) => void
+  }
+}
+
 /**
  * Per-page error boundary. Catches render-time crashes (missing data,
  * null dereference, throw inside useMemo, etc.) and swaps the subtree
@@ -45,8 +54,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     // consumer wants it.
     console.error('Page error:', error, info.componentStack)
     try {
-      const sink = (window as any).__humanovoOnError as undefined | ((e: Error, stack?: string | null) => void)
-      sink?.(error, info.componentStack)
+      window.__humanovoOnError?.(error, info.componentStack)
     } catch { /* noop */ }
   }
 
