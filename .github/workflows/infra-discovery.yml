@@ -1,0 +1,172 @@
+name: Infra Discovery
+
+# Read-only inspection of the AWS account behind the existing
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY secrets. Makes ZERO changes.
+# Used to plan the AWS Organization bootstrap (Sprint 1 / Day 3) safely
+# before we create anything that's hard to reverse.
+#
+# Trigger: workflow_dispatch only. Run from the Actions tab.
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  inspect:
+    name: Inspect AWS account scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Identity & account
+        run: |
+          echo "## Caller identity" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          aws sts get-caller-identity --output json | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Region & enabled regions
+        run: |
+          echo "## Region context" >> $GITHUB_STEP_SUMMARY
+          echo "**Configured region:** \`$AWS_REGION\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Enabled regions" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          aws account list-regions \
+            --region-opt-status-contains ENABLED ENABLED_BY_DEFAULT \
+            --query "Regions[].RegionName" \
+            --output table 2>&1 | tee -a $GITHUB_STEP_SUMMARY || echo "(account:list-regions not permitted; not blocking)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: AWS Organizations status
+        run: |
+          echo "## AWS Organizations" >> $GITHUB_STEP_SUMMARY
+          set +e
+          ORG_OUT=$(aws organizations describe-organization --output json 2>&1)
+          ORG_RC=$?
+          set -e
+          if [ "$ORG_RC" -eq 0 ]; then
+            echo "**Status:** Organization exists" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            echo "$ORG_OUT" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Member accounts" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            aws organizations list-accounts --query "Accounts[].{Id:Id,Name:Name,Email:Email,Status:Status}" --output table 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Status:** No Organization (or no permission to describe)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$ORG_OUT" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Identity Center status
+        run: |
+          echo "## Identity Center (SSO)" >> $GITHUB_STEP_SUMMARY
+          set +e
+          SSO_OUT=$(aws sso-admin list-instances --output json 2>&1)
+          set -e
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo "$SSO_OUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Control Tower status
+        run: |
+          echo "## Control Tower" >> $GITHUB_STEP_SUMMARY
+          set +e
+          CT_OUT=$(aws controltower list-landing-zones --output json 2>&1)
+          set -e
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo "$CT_OUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: GuardDuty status
+        run: |
+          echo "## GuardDuty" >> $GITHUB_STEP_SUMMARY
+          set +e
+          GD_OUT=$(aws guardduty list-detectors --output json 2>&1)
+          set -e
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo "$GD_OUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: S3 bucket inventory
+        run: |
+          echo "## S3 buckets in this account" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          aws s3api list-buckets --query "Buckets[].{Name:Name,Created:CreationDate}" --output table 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: IAM principal inventory (counts only)
+        run: |
+          echo "## IAM principals (counts only)" >> $GITHUB_STEP_SUMMARY
+          set +e
+          USER_COUNT=$(aws iam list-users --query "length(Users)" --output text 2>&1)
+          ROLE_COUNT=$(aws iam list-roles --query "length(Roles)" --output text 2>&1)
+          POLICY_COUNT=$(aws iam list-policies --scope Local --query "length(Policies)" --output text 2>&1)
+          set -e
+          echo "- IAM users: \`$USER_COUNT\`" >> $GITHUB_STEP_SUMMARY
+          echo "- IAM roles: \`$ROLE_COUNT\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Customer-managed policies: \`$POLICY_COUNT\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Secrets Manager inventory (names only)
+        run: |
+          echo "## Secrets Manager (names only)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          aws secretsmanager list-secrets --query "SecretList[].{Name:Name,LastChangedDate:LastChangedDate}" --output table 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: KMS key aliases
+        run: |
+          echo "## KMS key aliases" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          aws kms list-aliases --query "Aliases[?starts_with(AliasName, 'alias/genup') || starts_with(AliasName, 'alias/humanovo')].{Alias:AliasName,Key:TargetKeyId}" --output table 2>&1 | tee -a $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Bootstrap permission probe (read-only describes)
+        run: |
+          echo "## Permissions probe (read-only)" >> $GITHUB_STEP_SUMMARY
+          echo "Checks whether the calling principal *could* perform the bootstrap operations we need (without actually running them)." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          for ACTION in \
+            "organizations:DescribeOrganization" \
+            "organizations:CreateOrganization" \
+            "organizations:CreateAccount" \
+            "sso-admin:ListInstances" \
+            "sso-admin:CreateInstance" \
+            "controltower:ListLandingZones" \
+            "controltower:CreateLandingZone" \
+            "guardduty:ListDetectors" \
+            "guardduty:CreateDetector" \
+            "iam:CreateRole" \
+            "secretsmanager:CreateSecret" \
+            "s3:CreateBucket" \
+            "kms:CreateKey" \
+            ; do
+            set +e
+            DECISION=$(aws iam simulate-principal-policy \
+              --policy-source-arn "$(aws sts get-caller-identity --query Arn --output text)" \
+              --action-names "$ACTION" \
+              --query "EvaluationResults[0].EvalDecision" \
+              --output text 2>&1)
+            set -e
+            echo "- \`$ACTION\` → \`$DECISION\`" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Final note
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "**This workflow made zero changes.** Output above is the input to Sprint 1 / Day 3 bootstrap planning." >> $GITHUB_STEP_SUMMARY
