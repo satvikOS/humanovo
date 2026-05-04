@@ -18,6 +18,7 @@
  * Workstation, etc. share one implementation.
  */
 import Plotly from 'plotly.js-dist-min'
+import type { Layout, ToImgopts } from 'plotly.js'
 
 type PlotFormat = 'png' | 'svg'
 
@@ -56,7 +57,12 @@ export async function getPlotBlob(
     // currently has, so transient-relayout is the most reliable way to get a
     // truly transparent snapshot without affecting the on-screen appearance
     // once we reset.
-    const gd = plotlyNode as any
+    // Plotly's PlotlyHTMLElement type lives in plotly.js-dist-min but
+    // its public type surface is incomplete. Treat as a minimal subset
+    // we actually use (layout for paper/plot bgcolor reads).
+    const gd = plotlyNode as HTMLDivElement & {
+      layout?: { paper_bgcolor?: string | null; plot_bgcolor?: string | null }
+    }
     const origPaper = gd.layout?.paper_bgcolor
     const origPlot = gd.layout?.plot_bgcolor
     try {
@@ -65,12 +71,12 @@ export async function getPlotBlob(
           await Plotly.relayout(gd, {
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
-          } as any)
+          } as Partial<Layout>)
         } catch { /* best-effort */ }
       }
       const dataUrl = await Plotly.toImage(gd, {
         format, width: w, height: h,
-      } as any)
+      } as ToImgopts)
       if (format === 'svg') {
         const commaIdx = dataUrl.indexOf(',')
         const body = commaIdx >= 0 ? decodeURIComponent(dataUrl.slice(commaIdx + 1)) : ''
@@ -103,7 +109,7 @@ export async function getPlotBlob(
           await Plotly.relayout(gd, {
             paper_bgcolor: origPaper ?? null,
             plot_bgcolor: origPlot ?? null,
-          } as any)
+          } as Partial<Layout>)
         } catch { /* best-effort */ }
       }
     }
