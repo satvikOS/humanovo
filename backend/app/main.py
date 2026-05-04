@@ -72,13 +72,21 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     setup_logging()
 
+    # Interactive API docs (Swagger / ReDoc / OpenAPI JSON) are gated
+    # behind DEBUG so production doesn't publish the full API surface.
+    # The discovery pipeline routes describe the proprietary architecture
+    # in their schemas; exposing them on production is an IP leak.
+    docs_url = "/api/docs" if settings.DEBUG else None
+    redoc_url = "/api/redoc" if settings.DEBUG else None
+    openapi_url = "/api/openapi.json" if settings.DEBUG else None
+
     app = FastAPI(
         title="humanovo API",
         description="Biomedical Discovery Platform API",
         version=settings.VERSION,
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json",
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
         lifespan=lifespan,
         # Disable the 307 trailing-slash redirect: we'd rather accept
         # both `/clinical-trials` and `/clinical-trials/` inline than
