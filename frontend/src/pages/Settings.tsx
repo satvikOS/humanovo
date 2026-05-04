@@ -236,15 +236,17 @@ function AppearanceSettings() {
 }
 
 function NotificationSettings() {
-  const [prefs, setPrefs] = useState(() => {
+  type NotifPrefs = { email: boolean; push: boolean; sound: boolean; evidence: boolean; simulation: boolean; mention: boolean }
+  const defaultNotifPrefs: NotifPrefs = { email: true, push: true, sound: false, evidence: true, simulation: true, mention: true }
+  const [prefs, setPrefs] = useState<NotifPrefs>(() => {
     try {
       const stored = localStorage.getItem('humanovo-notification-settings')
-      return stored ? JSON.parse(stored) : { email: true, push: true, sound: false, evidence: true, simulation: true, mention: true }
-    } catch { return { email: true, push: true, sound: false, evidence: true, simulation: true, mention: true } }
+      return stored ? { ...defaultNotifPrefs, ...(JSON.parse(stored) as Partial<NotifPrefs>) } : defaultNotifPrefs
+    } catch { return defaultNotifPrefs }
   })
 
-  const update = (key: string, value: boolean) => {
-    setPrefs((p: any) => {
+  const update = (key: keyof NotifPrefs, value: boolean) => {
+    setPrefs((p) => {
       const next = { ...p, [key]: value }
       localStorage.setItem('humanovo-notification-settings', JSON.stringify(next))
       return next
@@ -390,11 +392,13 @@ function DataSettings() {
 }
 
 function AccountSettings() {
-  const [profile, setProfile] = useState(() => {
+  type Profile = { name: string; email: string; institution: string; role: string }
+  const defaultProfile: Profile = { name: 'Researcher', email: 'researcher@institution.edu', institution: '', role: 'Principal Investigator' }
+  const [profile, setProfile] = useState<Profile>(() => {
     try {
       const stored = localStorage.getItem('humanovo-user-profile')
-      return stored ? JSON.parse(stored) : { name: 'Researcher', email: 'researcher@institution.edu', institution: '', role: 'Principal Investigator' }
-    } catch { return { name: 'Researcher', email: 'researcher@institution.edu', institution: '', role: 'Principal Investigator' } }
+      return stored ? { ...defaultProfile, ...(JSON.parse(stored) as Partial<Profile>) } : defaultProfile
+    } catch { return defaultProfile }
   })
   const [saved, setSaved] = useState(false)
 
@@ -411,19 +415,19 @@ function AccountSettings() {
         <div className="glass-card space-y-4 p-4">
           <div>
             <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Full Name</label>
-            <input type="text" value={profile.name} onChange={e => setProfile((p: any) => ({ ...p, name: e.target.value }))} className="input w-full text-sm" />
+            <input type="text" value={profile.name} onChange={e => setProfile((p) => ({ ...p, name: e.target.value }))} className="input w-full text-sm" />
           </div>
           <div>
             <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Email</label>
-            <input type="email" value={profile.email} onChange={e => setProfile((p: any) => ({ ...p, email: e.target.value }))} className="input w-full text-sm" />
+            <input type="email" value={profile.email} onChange={e => setProfile((p) => ({ ...p, email: e.target.value }))} className="input w-full text-sm" />
           </div>
           <div>
             <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Institution</label>
-            <input type="text" value={profile.institution} onChange={e => setProfile((p: any) => ({ ...p, institution: e.target.value }))} className="input w-full text-sm" placeholder="University or organization" />
+            <input type="text" value={profile.institution} onChange={e => setProfile((p) => ({ ...p, institution: e.target.value }))} className="input w-full text-sm" placeholder="University or organization" />
           </div>
           <div>
             <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Role</label>
-            <select value={profile.role} onChange={e => setProfile((p: any) => ({ ...p, role: e.target.value }))} className="input w-full text-sm">
+            <select value={profile.role} onChange={e => setProfile((p) => ({ ...p, role: e.target.value }))} className="input w-full text-sm">
               <option>Principal Investigator</option>
               <option>Postdoctoral Researcher</option>
               <option>PhD Student</option>
@@ -444,15 +448,17 @@ function AccountSettings() {
 }
 
 function PrivacySettings() {
-  const [prefs, setPrefs] = useState(() => {
+  type PrivacyPrefs = { analytics: boolean; crashReports: boolean; shareUsage: boolean; autoLock: number }
+  const defaultPrivacyPrefs: PrivacyPrefs = { analytics: false, crashReports: true, shareUsage: false, autoLock: 30 }
+  const [prefs, setPrefs] = useState<PrivacyPrefs>(() => {
     try {
       const stored = localStorage.getItem('humanovo-privacy-settings')
-      return stored ? JSON.parse(stored) : { analytics: false, crashReports: true, shareUsage: false, autoLock: 30 }
-    } catch { return { analytics: false, crashReports: true, shareUsage: false, autoLock: 30 } }
+      return stored ? { ...defaultPrivacyPrefs, ...(JSON.parse(stored) as Partial<PrivacyPrefs>) } : defaultPrivacyPrefs
+    } catch { return defaultPrivacyPrefs }
   })
 
-  const update = (key: string, value: any) => {
-    setPrefs((p: any) => {
+  const update = <K extends keyof PrivacyPrefs>(key: K, value: PrivacyPrefs[K]) => {
+    setPrefs((p) => {
       const next = { ...p, [key]: value }
       localStorage.setItem('humanovo-privacy-settings', JSON.stringify(next))
       return next
@@ -1433,22 +1439,24 @@ function AdminSeedSettings() {
 }
 
 function IntegrationSettings() {
-  const [integrations, setIntegrations] = useState(() => {
+  type Integrations = { github: boolean; slack: boolean; pubmed: boolean; orcid: boolean; zenodo: boolean }
+  const defaultIntegrations: Integrations = { github: false, slack: false, pubmed: true, orcid: false, zenodo: false }
+  const [integrations, setIntegrations] = useState<Integrations>(() => {
     try {
       const stored = localStorage.getItem('humanovo-integrations')
-      return stored ? JSON.parse(stored) : { github: false, slack: false, pubmed: true, orcid: false, zenodo: false }
-    } catch { return { github: false, slack: false, pubmed: true, orcid: false, zenodo: false } }
+      return stored ? { ...defaultIntegrations, ...(JSON.parse(stored) as Partial<Integrations>) } : defaultIntegrations
+    } catch { return defaultIntegrations }
   })
 
-  const toggle = (key: string) => {
-    setIntegrations((p: any) => {
+  const toggle = (key: keyof Integrations) => {
+    setIntegrations((p) => {
       const next = { ...p, [key]: !p[key] }
       localStorage.setItem('humanovo-integrations', JSON.stringify(next))
       return next
     })
   }
 
-  const items = [
+  const items: Array<{ key: keyof Integrations; name: string; description: string }> = [
     { key: 'pubmed', name: 'PubMed', description: 'Search and import publications from NCBI PubMed' },
     { key: 'github', name: 'GitHub', description: 'Sync notebooks and analysis scripts with GitHub repos' },
     { key: 'orcid', name: 'ORCID', description: 'Link your ORCID profile for publication management' },
