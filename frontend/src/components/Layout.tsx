@@ -837,7 +837,10 @@ function ConstantChat() {
 
   const generateSmartFallbackResponse = (query: string): string => {
     const q = query.toLowerCase().trim()
-    const ctx = getLocalContext() as any
+    // The chat fallback only reads counts + recent items off the local
+    // context — no need for stricter typing here. ReturnType captures
+    // exactly what getLocalContext yields.
+    const ctx = getLocalContext() as ReturnType<typeof getLocalContext>
 
     // Scope check: reject out-of-scope topics
     if (isOutOfScope(q)) {
@@ -848,9 +851,11 @@ function ConstantChat() {
     const totalHypotheses = ctx.totalHypotheses || 0
     const totalPapers = ctx.totalPapers || 0
     const totalSimulations = ctx.totalSimulations || 0
-    const projects = (ctx.projects as any[]) || []
-    const hypotheses = (ctx.hypotheses as any[]) || []
-    const papers = (ctx.papers as any[]) || []
+    // Now that ctx is typed via ReturnType<typeof getLocalContext>,
+    // .projects/.hypotheses/.papers are already proper arrays — no casts.
+    const projects = ctx.projects || []
+    const hypotheses = ctx.hypotheses || []
+    const papers = ctx.papers || []
 
     // --- Conversational responses: greetings, introductions, casual chat ---
     if (/^(hi|hey|hello|howdy|yo|sup|what'?s up|good (morning|afternoon|evening))[\s!.?]*$/i.test(q) || q === 'hi' || q === 'hey') {
@@ -916,12 +921,12 @@ function ConstantChat() {
     }
 
     // --- Search user data for relevant context ---
-    const matchingHyps = hypotheses.filter((h: any) => {
+    const matchingHyps = hypotheses.filter((h) => {
       const searchable = [h.title, h.mechanism, h.disease, ...(h.tags || [])].filter(Boolean).join(' ').toLowerCase()
       return q.split(/\s+/).some((word: string) => word.length > 3 && searchable.includes(word))
     })
 
-    const matchingProjects = projects.filter((p: any) => {
+    const matchingProjects = projects.filter((p) => {
       const searchable = [p.name, p.disease].filter(Boolean).join(' ').toLowerCase()
       return q.split(/\s+/).some((word: string) => word.length > 3 && searchable.includes(word))
     })
@@ -930,7 +935,7 @@ function ConstantChat() {
       const intro = matchingHyps.length === 1
         ? 'I found a relevant hypothesis in your data:'
         : `I found **${matchingHyps.length}** relevant hypotheses in your data:`
-      const items = matchingHyps.slice(0, 3).map((h: any, i: number) => {
+      const items = matchingHyps.slice(0, 3).map((h, i) => {
         let item = `${i + 1}. **${h.title}**`
         if (h.confidence) item += ` (${Math.round(h.confidence * 100)}% confidence)`
         if (h.disease) item += `\n   Disease: ${h.disease}`
@@ -942,7 +947,7 @@ function ConstantChat() {
     }
 
     if (matchingProjects.length > 0) {
-      const items = matchingProjects.slice(0, 5).map((p: any, i: number) =>
+      const items = matchingProjects.slice(0, 5).map((p, i) =>
         `${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}${p.hypotheses ? ` (${p.hypotheses} hypotheses)` : ''}`
       ).join('\n')
       return `I found ${matchingProjects.length} related project${matchingProjects.length > 1 ? 's' : ''}:\n\n${items}\n\nOpen **Projects** in the sidebar to view details.`
@@ -951,7 +956,7 @@ function ConstantChat() {
     // --- Context-aware queries about platform sections ---
     if (/hypothes[ie]s/i.test(q)) {
       if (totalHypotheses > 0) {
-        const recent = hypotheses.slice(0, 3).map((h: any, i: number) =>
+        const recent = hypotheses.slice(0, 3).map((h, i) =>
           `${i + 1}. **${h.title}**${h.confidence ? ` — ${Math.round(h.confidence * 100)}% confidence` : ''}`
         ).join('\n')
         return `You've generated **${totalHypotheses}** hypotheses so far. Here are a few:\n\n${recent}${totalHypotheses > 3 ? `\n\n...and ${totalHypotheses - 3} more.` : ''}\n\nHead to **Discovery** to explore them or generate new ones.`
@@ -961,7 +966,7 @@ function ConstantChat() {
 
     if (/\bproject/i.test(q)) {
       if (totalProjects > 0) {
-        const recent = projects.slice(0, 3).map((p: any, i: number) =>
+        const recent = projects.slice(0, 3).map((p, i) =>
           `${i + 1}. **${p.name}**${p.disease ? ` — ${p.disease}` : ''}`
         ).join('\n')
         return `You have **${totalProjects}** project${totalProjects > 1 ? 's' : ''}:\n\n${recent}${totalProjects > 3 ? `\n\n...and ${totalProjects - 3} more.` : ''}\n\nVisit **Projects** in the sidebar to manage them.`
@@ -971,7 +976,7 @@ function ConstantChat() {
 
     if (/paper|publication|manuscript/i.test(q)) {
       if (totalPapers > 0) {
-        const recent = papers.slice(0, 3).map((p: any, i: number) =>
+        const recent = papers.slice(0, 3).map((p, i) =>
           `${i + 1}. **${p.title}**${p.disease ? ` — ${p.disease}` : ''}`
         ).join('\n')
         return `You've generated **${totalPapers}** research paper${totalPapers > 1 ? 's' : ''}:\n\n${recent}\n\nYou can find them inside their respective projects.`
@@ -1255,7 +1260,7 @@ export default function Layout() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string; type?: string; metadata?: any }>>([])
+  const [notifications, setNotifications] = useState<Array<{ id: string; title: string; description: string; time: string; timestamp: string; type?: string; metadata?: Record<string, unknown> }>>([])
   const [hasUnread, setHasUnread] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -1267,7 +1272,7 @@ export default function Layout() {
         const activities = getActivityLog()
         const lastRead = localStorage.getItem('humanovo-notifs-read') || '0'
         const recent = activities.slice(0, 20)
-        setNotifications(recent.map((a: any) => ({
+        setNotifications(recent.map((a) => ({
           id: a.id,
           title: a.title || `${(a.type || 'activity').replace(/_/g, ' ')} ${(a.action || '').replace(/_/g, ' ')}`,
           description: a.project || '',

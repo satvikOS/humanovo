@@ -90,10 +90,17 @@ function RecentSimulationsWidget() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Gather all simulation types from localStorage
+    // Gather all simulation types from localStorage. Each storage shape
+    // is loose (different writers across the codebase) so we type each
+    // entry as the minimal subset of fields we read here.
+    type LocalMCSim = { id: string; name?: string; simulationType?: string; simulation_type?: string; stats?: SimulationSummary['stats']; createdAt?: string; created_at?: string }
+    type LocalEqEntry = { id: string; expr?: string; createdAt?: string }
+    type LocalCompRun = { id: string; template?: string; env?: string; createdAt?: string }
+    type RemoteSim = { id: string; name?: string; simulation_type?: string; simulationType?: string; results?: { stats?: SimulationSummary['stats'] }; stats?: SimulationSummary['stats']; created_at?: string; createdAt?: string }
+
     const allSims: SimulationSummary[] = []
 
-    const mcSims = persistGet<any[]>('mc-simulations', [])
+    const mcSims = persistGet<LocalMCSim[]>('mc-simulations', [])
     for (const s of mcSims) {
       allSims.push({
         id: s.id,
@@ -105,7 +112,7 @@ function RecentSimulationsWidget() {
       })
     }
 
-    const eqHistory = persistGet<any[]>('eq-history', [])
+    const eqHistory = persistGet<LocalEqEntry[]>('eq-history', [])
     for (const eq of eqHistory) {
       allSims.push({
         id: eq.id,
@@ -116,7 +123,7 @@ function RecentSimulationsWidget() {
       })
     }
 
-    const compHistory = persistGet<any[]>('comp-history', [])
+    const compHistory = persistGet<LocalCompRun[]>('comp-history', [])
     for (const cr of compHistory) {
       allSims.push({
         id: cr.id,
@@ -133,7 +140,7 @@ function RecentSimulationsWidget() {
     const fetchSimulations = async () => {
       try {
         const res = await api.getSimulations({ page_size: 3 })
-        const items = (res?.items || []).map((s: any) => ({
+        const items = ((res?.items || []) as RemoteSim[]).map((s) => ({
           id: s.id,
           name: s.name || 'Untitled Simulation',
           simulationType: s.simulation_type || s.simulationType || 'unknown',
@@ -143,7 +150,7 @@ function RecentSimulationsWidget() {
         }))
         if (items.length > 0) {
           setSimulations(prev => {
-            const ids = new Set(items.map((i: any) => i.id))
+            const ids = new Set(items.map((i) => i.id))
             const merged = [...items, ...prev.filter(p => !ids.has(p.id))]
             merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
             return merged.slice(0, 4)
@@ -239,10 +246,12 @@ function RecentNotebooksWidget() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    type RemoteNotebook = { id: string; title?: string; updated_at?: string; created_at?: string; tags?: string[] }
+    type LocalNotebook = { id: string; title?: string; updatedAt?: string; updated_at?: string; createdAt?: string; tags?: string[] }
     const fetchNotebooks = async () => {
       try {
         const res = await api.getNotebookPages({ page_size: 4 })
-        const items = (res?.items || []).map((p: any) => ({
+        const items = ((res?.items || []) as RemoteNotebook[]).map((p) => ({
           id: p.id,
           title: p.title || 'Untitled',
           updated_at: p.updated_at || p.created_at || '',
@@ -253,13 +262,13 @@ function RecentNotebooksWidget() {
           return
         }
       } catch (err) { console.warn('Dashboard: notebooks API unavailable; using local index', err) }
-      const pageIndex = persistGet<any[]>('notebook-index', [])
+      const pageIndex = persistGet<LocalNotebook[]>('notebook-index', [])
       const sorted = [...pageIndex].sort((a, b) =>
         new Date(b.updatedAt || b.updated_at || 0).getTime() - new Date(a.updatedAt || a.updated_at || 0).getTime()
       )
-      setNotebooks(sorted.slice(0, 4).map((p: any) => ({
+      setNotebooks(sorted.slice(0, 4).map((p) => ({
         id: p.id,
-        title: p.title,
+        title: p.title || 'Untitled',
         updated_at: p.updatedAt || p.updated_at || p.createdAt || '',
         tags: p.tags || [],
       })))
@@ -343,7 +352,7 @@ const ACTIVITY_ROUTES: Record<string, string> = {
  *  hypothesis events always should), we navigate straight to that
  *  project folder so the user doesn't have to hunt for it. */
 function activityDest(activity: ActivityEntry): string | undefined {
-  const pid = (activity.metadata as any)?.project_id
+  const pid = (activity.metadata as { project_id?: string } | undefined)?.project_id
   if (pid && (activity.type === 'hypothesis' || activity.type === 'discovery')) {
     return `/projects/${pid}`
   }
@@ -368,10 +377,21 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
   useEffect(() => {
     let cancelled = false
     const fetchActivities = async () => {
+      type RemoteActivity = {
+        id: string
+        type?: ActivityEntry['type']
+        action?: ActivityEntry['action']
+        title?: string
+        description?: string
+        project_name?: string
+        project_id?: string
+        created_at?: string
+        metadata?: Record<string, unknown>
+      }
       try {
         const res = await api.getActivities({ page_size: 10 })
         if (cancelled) return
-        const items = (res?.items || []).map((a: any) => ({
+        const items = ((res?.items || []) as RemoteActivity[]).map((a) => ({
           id: a.id,
           type: a.type || 'project',
           action: a.action || 'created',
