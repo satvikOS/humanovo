@@ -91,7 +91,7 @@ const NOTIFICATION_ROUTES: Record<string, string> = {
 /** Resolve the best navigation destination for a notification entry.
  *  discovery and hypothesis notifications that carry a project_id in
  *  their metadata route directly to the project folder. */
-function notifDest(n: { type?: string; metadata?: any }): string | undefined {
+function notifDest(n: { type?: string; metadata?: { project_id?: string } & Record<string, unknown> }): string | undefined {
   const pid = n.metadata?.project_id
   if (pid && (n.type === 'hypothesis' || n.type === 'discovery')) {
     return `/projects/${pid}`
@@ -350,7 +350,8 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     }
 
     // Search MC simulations
-    const mcSims = persistGet<any[]>('mc-simulations', [])
+    type MCSim = { name?: string; simulationType?: string }
+    const mcSims = persistGet<MCSim[]>('mc-simulations', [])
     for (const s of mcSims) {
       if (results.length >= 8) break
       if (s.name?.toLowerCase().includes(lq) || s.simulationType?.toLowerCase().includes(lq)) {
@@ -365,7 +366,8 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     }
 
     // Search notebook pages
-    const notebooks = persistGet<any[]>('notebook-index', [])
+    type NotebookEntry = { id?: string; title?: string; tags?: string[] }
+    const notebooks = persistGet<NotebookEntry[]>('notebook-index', [])
     for (const n of notebooks) {
       if (results.length >= 10) break
       if (n.title?.toLowerCase().includes(lq) || n.tags?.some((t: string) => t.toLowerCase().includes(lq))) {
@@ -380,14 +382,15 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     }
 
     // Search experiments
-    const experiments = persistGet<any[]>('experiments', [])
+    type ExperimentEntry = { title?: string; hypothesis?: string; status?: string }
+    const experiments = persistGet<ExperimentEntry[]>('experiments', [])
     for (const e of experiments) {
       if (results.length >= 12) break
       if (e.title?.toLowerCase().includes(lq) || e.hypothesis?.toLowerCase().includes(lq)) {
         results.push({
-          label: e.title,
+          label: e.title || 'Untitled experiment',
           icon: FiClipboard,
-          description: `Experiment · ${e.status}`,
+          description: `Experiment · ${e.status ?? 'unknown'}`,
           category: 'Results',
           action: () => { navigate('/experiments'); onClose() },
         })
@@ -401,9 +404,11 @@ function CommandPalette({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     ? actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase()) || a.description?.toLowerCase().includes(query.toLowerCase()))
     : actions
 
-  // Combine navigation + data results
-  const allItems = [...filtered, ...dataResults]
-  const categories = [...new Set(allItems.map(a => a.category))]
+  // Combine navigation + data results. Wrapped in useMemo so the
+  // downstream flatItems useMemo's dep array stays stable across
+  // renders that don't actually change inputs.
+  const allItems = useMemo(() => [...filtered, ...dataResults], [filtered, dataResults])
+  const categories = useMemo(() => [...new Set(allItems.map(a => a.category))], [allItems])
 
   // If query is long enough and no data results, offer to do a full search
   const showFullSearchOption = query.length >= 2
@@ -742,32 +747,44 @@ function ConstantChat() {
       const projects = JSON.parse(localStorage.getItem('humanovo-projects') || '[]')
       const hypotheses = JSON.parse(localStorage.getItem('humanovo-hypotheses') || '[]')
       const papers = JSON.parse(localStorage.getItem('humanovo-research-papers') || '[]')
+      // Local-context shapes — these come out of localStorage so we
+      // tolerate every field being optional. Concrete shapes here let
+      // the downstream chat/assistant code consume them without `any`.
+      type LocalProject = { name?: string; title?: string; disease_focus?: string; disease?: string; hypothesis_count?: number; status?: string }
+      type LocalHypothesis = { statement?: string; title?: string; mechanism?: string; confidence?: number; confidence_score?: number; disease?: string; tags?: string[] }
+      type LocalPaper = { hypothesis_title?: string; disease?: string }
+      type LocalDocument = { title?: string; doc_type?: string; authors?: string; description?: string; tags?: string[]; knowledge_base?: string; project_id?: string }
+
+      const projectsTyped: LocalProject[] = Array.isArray(projects) ? projects : []
+      const hypothesesTyped: LocalHypothesis[] = Array.isArray(hypotheses) ? hypotheses : []
+      const papersTyped: LocalPaper[] = Array.isArray(papers) ? papers : []
       const simulations = JSON.parse(localStorage.getItem('humanovo-mc-simulations') || '[]')
       const docs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
+      const docsTyped: LocalDocument[] = Array.isArray(docs) ? docs : []
       return {
-        totalProjects: projects.length,
-        totalHypotheses: hypotheses.length,
-        totalPapers: papers.length,
+        totalProjects: projectsTyped.length,
+        totalHypotheses: hypothesesTyped.length,
+        totalPapers: papersTyped.length,
         totalSimulations: simulations.length,
-        totalDocuments: docs.length,
-        projects: projects.map((p: any) => ({
+        totalDocuments: docsTyped.length,
+        projects: projectsTyped.map((p) => ({
           name: p.name || p.title,
           disease: p.disease_focus || p.disease,
           hypotheses: p.hypothesis_count,
           status: p.status,
-        })).filter((p: any) => p.name),
-        hypotheses: hypotheses.map((h: any) => ({
+        })).filter((p) => p.name),
+        hypotheses: hypothesesTyped.map((h) => ({
           title: h.statement || h.title,
           mechanism: h.mechanism,
           confidence: h.confidence || h.confidence_score,
           disease: h.disease,
           tags: h.tags?.slice(0, 5),
-        })).filter((h: any) => h.title),
-        papers: papers.map((p: any) => ({
+        })).filter((h) => h.title),
+        papers: papersTyped.map((p) => ({
           title: p.hypothesis_title,
           disease: p.disease,
-        })).filter((p: any) => p.title),
-        documents: docs.map((d: any) => ({
+        })).filter((p) => p.title),
+        documents: docsTyped.map((d) => ({
           title: d.title,
           doc_type: d.doc_type,
           authors: d.authors,
@@ -775,7 +792,7 @@ function ConstantChat() {
           tags: d.tags,
           knowledge_base: d.knowledge_base || 'private',
           project_id: d.project_id,
-        })).filter((d: any) => d.title),
+        })).filter((d) => d.title),
       }
     } catch { /* parse error */ return {} }
   }

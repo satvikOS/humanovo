@@ -645,6 +645,11 @@ export default function HypothesisDocViewer({
 
   const documentHtml = useMemo(() => buildDocumentHtml(hypothesis), [hypothesis])
 
+  // Zoom callbacks declared before the keyboard-shortcut effect so the
+  // effect's dep array can include them without a TDZ.
+  const zoomIn = useCallback(() => setZoom(z => Math.min(z + ZOOM_STEP, ZOOM_MAX)), [])
+  const zoomOut = useCallback(() => setZoom(z => Math.max(z - ZOOM_STEP, ZOOM_MIN)), [])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -657,10 +662,7 @@ export default function HypothesisDocViewer({
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [isFullscreen, onClose])
-
-  const zoomIn = useCallback(() => setZoom(z => Math.min(z + ZOOM_STEP, ZOOM_MAX)), [])
-  const zoomOut = useCallback(() => setZoom(z => Math.max(z - ZOOM_STEP, ZOOM_MIN)), [])
+  }, [isFullscreen, onClose, zoomIn, zoomOut])
 
   const handlePrint = useCallback(() => {
     const printWindow = window.open('', '_blank')

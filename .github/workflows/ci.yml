@@ -79,12 +79,85 @@ jobs:
         run: mypy app || true
 
       - name: Pytest (unit)
+        id: pytest
         env:
           DATABASE_URL: postgresql+asyncpg://humanovo:humanovo@localhost:5432/humanovo
           REDIS_URL: redis://localhost:6379/0
           # Live-LLM tests auto-skip when provider keys are missing. Do NOT
           # leak real keys into this job; use the dedicated e2e job below.
-        run: pytest tests -v --tb=short --timeout=120 -m "not requires_llm" || pytest tests -v --tb=short --timeout=120
+        run: |
+          set +e
+          # Primary pass: skip live-LLM tests. The `||` fallback runs the
+          # full suite ONLY if the primary returns a non-zero/non-5 exit
+          # (5 = "no tests collected", which the marker filter shouldn't
+          # cause but historically did when a marker name drifted).
+          pytest tests -v --tb=short --timeout=120 -m "not requires_llm" 2>&1 | tee pytest-output.txt
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" = "5" ]; then
+            pytest tests -v --tb=short --timeout=120 2>&1 | tee pytest-output.txt
+            rc=${PIPESTATUS[0]}
+          fi
+          echo "PYTEST_EXIT=$rc" >> $GITHUB_ENV
+          exit $rc
+
+      - name: Surface backend failure detail
+        if: always() && env.PYTEST_EXIT != '0'
+        run: |
+          {
+            echo "## Backend test failure (exit code ${PYTEST_EXIT})"
+            echo ""
+            echo "### Failing tests"
+            echo '```'
+            grep -E "^FAILED|^ERROR " backend/pytest-output.txt | head -50 || echo "(no FAILED/ERROR lines found)"
+            echo '```'
+            echo ""
+            echo "### First failure traceback"
+            echo '```'
+            # Extract from the first FAILED... line through the next blank-line block.
+            awk '/^FAILED |^ERROR / { found=1 } found' backend/pytest-output.txt | head -120 || true
+            echo '```'
+            echo ""
+            echo "### Last 60 lines of pytest output"
+            echo '```'
+            tail -60 backend/pytest-output.txt || true
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+        working-directory: .
+
+      - name: Upload pytest output
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: pytest-output-${{ github.sha }}
+          path: backend/pytest-output.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Post failure summary to PR
+        if: always() && env.PYTEST_EXIT != '0' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Compose a body that's readable in the GitHub MCP `pull_request_read` view
+          {
+            echo "### CI: backend tests failed on \`${GITHUB_SHA::8}\`"
+            echo ""
+            echo "Exit code: \`${PYTEST_EXIT}\`"
+            echo ""
+            echo "**Failing tests:**"
+            echo '```'
+            grep -E "^FAILED|^ERROR " backend/pytest-output.txt | head -20 || echo "(no FAILED/ERROR lines)"
+            echo '```'
+            echo ""
+            echo "**First failure traceback:**"
+            echo '```'
+            awk '/^FAILED |^ERROR / { found=1 } found' backend/pytest-output.txt | head -80 || true
+            echo '```'
+            echo ""
+            echo "Full output: see workflow artifact \`pytest-output-${GITHUB_SHA}\`."
+          } > /tmp/ci-comment.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/ci-comment.md || true
+        working-directory: .
 
   backend-pipeline-e2e:
     name: Backend — pipeline e2e (live LLM)
