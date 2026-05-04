@@ -1,17 +1,18 @@
 /**
- * DiscoveryRunner — Live pipeline viewer per Jamison spec Section 14.3
- * Phase 1: Config panel → Phase 2: Live 11-stage progress viewer via WebSocket
+ * DiscoveryRunner — Live pipeline viewer.
+ * Config panel → Live progress viewer via WebSocket.
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import api, { apiClient } from '../services/api'
+import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
 
 const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
 const WS_BASE = _BACKEND
   ? _BACKEND.replace(/^http/, 'ws')
   : (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host
 
-const STAGES = ['SEED', 'EXPAND', 'EVIDENCE', 'COUNTER', 'REVISE', 'MECHANISM', 'VALIDATE', 'GROUND', 'SCORE', 'REFINE', 'TRANSLATE', 'FINALIZE']
+const STAGES = STAGE_CODES
 
 interface StageStatus {
   status: 'pending' | 'running' | 'completed' | 'error'
@@ -147,8 +148,10 @@ export default function DiscoveryRunner() {
     const event = msg.event as string
     switch (event) {
       case 'stage_started':
+        // Internal `model` field is intentionally NOT logged to UI — model
+        // / provider names are pipeline IP and must not surface to users.
         setStages(prev => ({ ...prev, [msg.stage as string]: { status: 'running', model: msg.model as string } }))
-        addLog('stage_started', `${msg.stage} started (${msg.model})`)
+        addLog('stage_started', `${stageLabel(msg.stage as string)} started`)
         break
       case 'stage_completed':
         setStages(prev => ({
@@ -163,7 +166,7 @@ export default function DiscoveryRunner() {
             grounding_ratio: msg.grounding_ratio as number,
           },
         }))
-        addLog('stage_completed', `${msg.stage} completed in ${(msg.duration_seconds as number)?.toFixed(1)}s`)
+        addLog('stage_completed', `${stageLabel(msg.stage as string)} completed in ${(msg.duration_seconds as number)?.toFixed(1)}s`)
         break
       case 'hypothesis_completed':
         setHypotheses(prev => [...prev, {
@@ -390,25 +393,29 @@ export default function DiscoveryRunner() {
         </div>
       </div>
 
-      {/* 12-stage progress bar */}
+      {/* Phase progress bar — numbered blocks with descriptive labels on hover.
+          Internal stage codenames and model identities stay server-side. */}
       <div className="flex gap-0.5">
-        {STAGES.map(stage => {
+        {STAGES.map((stage, idx) => {
           const s = stages[stage]
           const bg = !s ? 'var(--color-bg-secondary)' : s.status === 'running' ? '#3b82f6' : s.status === 'completed' ? '#22c55e' : '#ef4444'
           return (
             <div key={stage} className="flex-1 group relative">
               <div className="h-8 rounded-sm flex items-center justify-center text-xs font-mono transition-colors"
                 style={{ background: bg, color: s?.status === 'running' || s?.status === 'completed' ? '#fff' : 'var(--color-text-muted)' }}>
-                {stage.slice(0, 4)}
+                {idx + 1}
               </div>
-              {s && (
-                <div className="absolute top-full mt-1 left-0 right-0 text-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                  <div className="inline-block px-2 py-1 rounded text-xs" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
-                    {s.model}{s.duration_seconds ? ` (${s.duration_seconds.toFixed(1)}s)` : ''}
-                    {s.grounding_ratio != null && Number.isFinite(s.grounding_ratio) ? ` GR:${(s.grounding_ratio * 100).toFixed(0)}%` : ''}
-                  </div>
+              <div className="absolute top-full mt-1 left-0 right-0 text-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                <div className="inline-block px-2 py-1 rounded text-xs whitespace-nowrap" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+                  <div className="font-medium" style={{ color: 'var(--color-text-secondary)' }}>{stageLabel(stage)}</div>
+                  {s && (s.duration_seconds || s.grounding_ratio != null) && (
+                    <div>
+                      {s.duration_seconds ? `${s.duration_seconds.toFixed(1)}s` : ''}
+                      {s.grounding_ratio != null && Number.isFinite(s.grounding_ratio) ? ` · grounded ${(s.grounding_ratio * 100).toFixed(0)}%` : ''}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           )
         })}

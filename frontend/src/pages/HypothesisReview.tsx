@@ -1,10 +1,11 @@
 /**
- * HypothesisReview — Full hypothesis detail page per Jamison spec Section 14.4
+ * HypothesisReview — Full hypothesis detail page.
  * Sections: Header, Pipeline Trace, Mechanism, Evidence, Translational Roadmap, Version History, Feedback
  */
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { apiClient } from '../services'
+import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
 
 interface HypothesisDetail {
   id: string
@@ -157,7 +158,9 @@ export default function HypothesisReview() {
   const scoreColor = (s: number | null) => s == null ? '#6b7280' : s >= 0.8 ? '#22c55e' : s >= 0.5 ? '#eab308' : '#ef4444'
   const feasLabel = (s: number | null) => s == null ? 'Unknown' : s >= 0.8 ? 'Feasible' : s >= 0.3 ? 'Partially feasible' : 'Not feasible'
 
-  const STAGES = ['SEED', 'EXPAND', 'EVIDENCE', 'COUNTER', 'REVISE', 'MECHANISM', 'VALIDATE', 'GROUND', 'SCORE', 'REFINE', 'TRANSLATE']
+  // STAGE_CODES are the internal keys we match against pipeline_trace; the
+  // user only sees stageLabel(stage) — never the raw codename.
+  const STAGES = STAGE_CODES.filter(c => c !== 'FINALIZE')
 
   return (
     <div className="p-6 space-y-6 max-w-4xl">
@@ -194,7 +197,7 @@ export default function HypothesisReview() {
             const t = hyp.pipeline_trace?.[stage]
             if (!t) return (
               <div key={stage} className="px-3 py-2 text-xs rounded" style={{ background: 'var(--color-bg)', color: 'var(--color-text-muted)' }}>
-                {stage} — no data
+                {stageLabel(stage)} — no data
               </div>
             )
             return (
@@ -202,10 +205,10 @@ export default function HypothesisReview() {
                 <button onClick={() => setExpandedStage(expandedStage === stage ? null : stage)}
                   className="w-full text-left px-3 py-2 text-sm rounded flex items-center justify-between"
                   style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}>
-                  <span className="font-mono text-xs font-medium">{stage}</span>
+                  <span className="text-xs font-medium">{stageLabel(stage)}</span>
                   <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                    {t.model} &middot; {t.duration_seconds?.toFixed(1)}s &middot; {t.tokens_in + t.tokens_out} tokens
-                    {t.grounding_ratio != null ? ` · GR:${(t.grounding_ratio * 100).toFixed(0)}%` : ''}
+                    {t.duration_seconds?.toFixed(1)}s &middot; {t.tokens_in + t.tokens_out} tokens
+                    {t.grounding_ratio != null ? ` · grounded ${(t.grounding_ratio * 100).toFixed(0)}%` : ''}
                   </span>
                 </button>
                 {expandedStage === stage && t.output && (

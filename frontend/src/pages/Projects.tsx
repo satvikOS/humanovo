@@ -231,10 +231,17 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
 
 /* ─── Project Card (Grid) ──────────────────────────────────────────── */
 
-const NOISE_TAGS = new Set([
-  'AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline',
+// Auto-generated / system tags that we filter out of the user-facing tag
+// chips. The /\d+-stage-pipeline/ pattern catches stale tags from earlier
+// pipeline versions without hardcoding the specific stage counts.
+const NOISE_TAG_LITERALS = new Set([
+  'AI generated', 'ai-generated',
   'well-grounded', 'partially-grounded', 'needs-grounding',
 ])
+const NOISE_TAG_PATTERN = /^\d+-stage-pipeline$/
+function isNoiseTag(tag: string): boolean {
+  return NOISE_TAG_LITERALS.has(tag) || NOISE_TAG_PATTERN.test(tag)
+}
 
 interface CardProps {
   project: Project
@@ -264,7 +271,7 @@ function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, o
   const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
   const docCount = allDocs.filter(d => d.project_id === project.id).length
   const isArchived = (project.status || 'active') === 'archived'
-  const visibleTags = (project.tags || []).filter(t => !NOISE_TAGS.has(t))
+  const visibleTags = (project.tags || []).filter(t => !isNoiseTag(t))
 
   return (
     <div
@@ -642,8 +649,7 @@ export default function Projects() {
 
   const uniqueTags = useMemo(() => {
     const set = new Set<string>()
-    const excluded = new Set(['AI generated', 'ai-generated', '12-stage-pipeline', '10-stage-pipeline', 'well-grounded', 'partially-grounded', 'needs-grounding'])
-    projects.forEach(p => (p.tags || []).forEach(t => { if (!excluded.has(t)) set.add(t) }))
+    projects.forEach(p => (p.tags || []).forEach(t => { if (!isNoiseTag(t)) set.add(t) }))
     return [...set].sort()
   }, [projects])
 

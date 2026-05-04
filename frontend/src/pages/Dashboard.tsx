@@ -465,9 +465,9 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
 
 // ── Discovery Pipeline Status ───────────────────────────────────
 // Small live widget that polls /orchestrator/status every 5 s so the
-// user sees whether any 12-stage Discovery run is in flight. Clicks
-// straight into the Agents page for detail. Silently tolerates the
-// orchestrator being idle (most common state).
+// user sees whether any discovery run is in flight. Clicks straight
+// into the Agents page for detail. Silently tolerates the orchestrator
+// being idle (most common state).
 
 function DiscoveryStatusWidget() {
   const [state, setState] = useState<string>('idle')
@@ -549,13 +549,12 @@ function DiscoveryStatusWidget() {
             })}
           </div>
           <div className="text-xxs text-[var(--color-text-muted)]">
-            {pct}% · SEED → EXPAND → EVIDENCE → COUNTER → REVISE → MECHANISM →
-            VALIDATE → GROUND → SCORE → REFINE → TRANSLATE → FINALIZE
+            {pct}% · multi-phase reasoning in progress
           </div>
         </div>
       ) : (
         <div className="mt-2 text-xxs text-[var(--color-text-muted)]">
-          No run in flight. Tap to start the 12-stage adversarial pipeline.
+          No run in flight. Tap to start a discovery run.
         </div>
       )}
     </Link>
@@ -706,7 +705,7 @@ export default function Dashboard() {
           <EmptyState
             icon={<FiFolder />}
             title="No projects yet"
-            description="Projects group hypotheses, evidence, and simulations into a single research context. Start one to kick off a 12-stage discovery run."
+            description="Projects group hypotheses, evidence, and simulations into a single research context. Start one to kick off a discovery run."
             action={{
               label: 'Create your first project',
               onClick: () => navigate('/projects?new=1'),
