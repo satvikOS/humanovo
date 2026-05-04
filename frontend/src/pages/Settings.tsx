@@ -511,7 +511,9 @@ function _currentUserId(): string {
       const p = JSON.parse(stored)
       return p.email || p.name || 'self'
     }
-  } catch {}
+  } catch {
+    // localStorage unavailable / parse failure — fall through to default.
+  }
   return 'self'
 }
 
@@ -876,7 +878,9 @@ function KGContributionsSettings() {
 
   const changeDefault = (scope: 'private' | 'common') => {
     setDefaultScope(scope)
-    try { localStorage.setItem('humanovo-default-upload-scope', scope) } catch {}
+    try { localStorage.setItem('humanovo-default-upload-scope', scope) } catch {
+      // localStorage write blocked (private browsing / quota) — non-fatal.
+    }
   }
 
   if (loading) {
