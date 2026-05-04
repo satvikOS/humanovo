@@ -51,7 +51,8 @@ export default function DiscoveryRunner() {
   const [citationStyle, setCitationStyle] = useState('numbered')
 
   // Pipeline state
-  const [phase, setPhase] = useState<'config' | 'running' | 'completed'>('config')
+  const [phase, setPhase] = useState<'config' | 'running' | 'completed' | 'error'>('config')
+  const [runError, setRunError] = useState<string | null>(null)
   const [, setRunId] = useState<string | null>(null)
   const [stages, setStages] = useState<Record<string, StageStatus>>({})
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -189,7 +190,13 @@ export default function DiscoveryRunner() {
       case 'run_error':
         addLog('error', msg.error as string)
         if (!(msg.recoverable as boolean)) {
-          setPhase('completed')
+          // A non-recoverable run error is a real failure, not a
+          // "completed" run. The previous code transitioned to
+          // 'completed' which made the header lie ("Discovery
+          // Complete") and hid the retry affordance. Now we land on
+          // a dedicated 'error' phase the UI can surface honestly.
+          setPhase('error')
+          setRunError(typeof msg.error === 'string' ? msg.error : 'Pipeline failed')
           if (timerRef.current) clearInterval(timerRef.current)
         }
         break
@@ -379,7 +386,9 @@ export default function DiscoveryRunner() {
       {/* Header with cost and timer */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
-          {phase === 'completed' ? 'Discovery Complete' : 'Discovery Running...'}
+          {phase === 'completed' ? 'Discovery Complete'
+            : phase === 'error' ? 'Discovery Failed'
+            : 'Discovery Running...'}
         </h1>
         <div className="flex items-center gap-4 text-sm">
           <span className="font-mono" style={{ color: 'var(--color-text-muted)' }}>
@@ -466,6 +475,39 @@ export default function DiscoveryRunner() {
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
             {hypotheses.find(h => `${h.round}-${h.index}` === bestHypothesis)?.title || bestHypothesis}
           </p>
+        </div>
+      )}
+
+      {/* Error banner — surfaced when the pipeline fails non-recoverably.
+          Was previously silent: header said "Discovery Complete", best
+          hypothesis section never rendered, user had no clear retry. */}
+      {phase === 'error' && (
+        <div
+          className="rounded-lg p-4 flex items-start gap-3"
+          style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+          role="alert"
+        >
+          <span aria-hidden style={{ color: '#ef4444', fontSize: 20, lineHeight: '1.2em' }}>⚠</span>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-medium mb-1" style={{ color: '#fca5a5' }}>
+              The discovery run did not complete
+            </h3>
+            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+              {runError || 'The pipeline encountered a non-recoverable error. Your session is preserved; please retry, or contact support if the problem persists.'}
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                onClick={() => { setPhase('config'); setRunError(null); setStages({}); setHypotheses([]); setLogs([]) }}
+                className="px-3 py-1.5 rounded text-xs font-medium"
+                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
+              >
+                Configure new run
+              </button>
+              <span className="text-xxs" style={{ color: 'var(--color-text-muted)' }}>
+                Trace logs are in the panel below.
+              </span>
+            </div>
+          </div>
         </div>
       )}
     </div>
