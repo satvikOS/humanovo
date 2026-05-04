@@ -25,6 +25,7 @@ import { persistGet, persistSet, formatDate, logActivity } from '../utils/persis
 import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { toast } from '../contexts/ToastContext'
+import { modalBackdropProps } from '../utils/clickable'
 
 // ─── Types ──────────────────────────────────────────────────────
 interface DataPoint {
@@ -2607,7 +2608,12 @@ export default function DataVisualization() {
 
       {/* ── Create Visualization Overlay ── */}
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowAdd(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          aria-modal="true"
+          aria-label="Create visualization"
+          {...modalBackdropProps(() => setShowAdd(false))}
+        >
           <div
             className="glass-card-static max-w-2xl w-full mx-4 max-h-[85vh] flex flex-col"
             style={{ backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', boxShadow: 'var(--glass-shadow)' }}

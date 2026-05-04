@@ -22,6 +22,7 @@ import clsx from 'clsx'
 import * as XLSX from 'xlsx'
 import { useAlertDialog } from '../components/AlertDialog'
 import api from '../services/api'
+import { modalBackdropProps } from '../utils/clickable'
 
 type ColumnType = 'number' | 'string' | 'date' | 'boolean'
 
@@ -731,7 +732,13 @@ export default function DataManager() {
 
       {/* ── Add Modal ── */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setShowAddModal(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          aria-modal="true"
+          aria-label="Add dataset"
+          {...modalBackdropProps(() => setShowAddModal(false))}
+        >
           <div
             className="w-96 p-4 rounded-lg"
             style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}

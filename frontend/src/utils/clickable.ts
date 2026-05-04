@@ -25,6 +25,7 @@
  * it into a real <button> instead — that's always cleaner.
  */
 
+import { useEffect } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 
 export function keyboardClickProps<E extends Element = HTMLDivElement>(
@@ -72,4 +73,31 @@ export function modalBackdropProps<E extends Element = HTMLDivElement>(
     },
     tabIndex: -1,
   }
+}
+
+/**
+ * Register a window-level Escape-key handler for the lifetime the
+ * `enabled` prop is true. Use this for modals where the backdrop is a
+ * sibling of the dialog content (rather than wrapping it) — in that
+ * shape, focus typically lives in a form field and `modalBackdropProps`
+ * onKeyDown never fires because keystrokes don't bubble to the
+ * backdrop.
+ *
+ *   useEscapeKey(closeModal, isModalOpen)
+ *
+ * The listener is added on mount / `enabled === true` and removed on
+ * unmount / `enabled === false`, so it never leaks between modals.
+ */
+export function useEscapeKey(handler: () => void, enabled: boolean = true): void {
+  useEffect(() => {
+    if (!enabled) return
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        handler()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handler, enabled])
 }

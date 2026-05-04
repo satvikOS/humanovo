@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { modalBackdropProps } from '../utils/clickable'
+import { modalBackdropProps, useEscapeKey } from '../utils/clickable'
 import {
   FiDatabase,
   FiSearch,
@@ -234,6 +234,14 @@ export default function Evidence() {
   const [editingDocId, setEditingDocId] = useState<string | null>(null)
   const [editDocForm, setEditDocForm] = useState({ title: '', doc_type: '', authors: '', description: '', tags: '' })
   const [deleteDocConfirmId, setDeleteDocConfirmId] = useState<string | null>(null)
+  // Wire global Escape closers for the two modals whose backdrops are
+  // siblings of the dialog (focus lives in form fields, so the
+  // backdrop's own keydown never fires).
+  useEscapeKey(() => {
+    if (viewingDocBlobUrl) URL.revokeObjectURL(viewingDocBlobUrl)
+    setViewingDocOverlay(null)
+  }, !!viewingDocOverlay)
+  useEscapeKey(() => setEditingDocId(null), !!editingDocId)
   const pageSize = 30
 
   const fetchEvidence = useCallback(async () => {
