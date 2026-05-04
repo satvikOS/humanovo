@@ -50,17 +50,18 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
+import { filterV1 } from '../utils/featureFlags'
 import { useWorkspace, WorkspaceTab } from '../contexts/WorkspaceContext'
 import HumanovoGlyph from './HumanovoGlyph'
 
-const mainNavItems = [
+const mainNavItems = filterV1([
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
   { to: '/projects', icon: FiFolder, label: 'Projects', shortcut: '2' },
   { to: '/evidence', icon: FiLayers, label: 'Evidence', shortcut: '3' },
   { to: '/agents', icon: FiZap, label: 'Discovery', shortcut: '4' },
   { to: '/workbench', icon: FiTerminal, label: 'Workbench', shortcut: '5' },
   { to: '/anatomy', icon: FiAperture, label: '3D Anatomy', shortcut: '6' },
-]
+])
 
 // Default routes by activity type. When a notification has
 // metadata.project_id (set for hypothesis and discovery events in
@@ -104,19 +105,19 @@ const secondaryNavItems = [
   { to: '/search', icon: FiSearch, label: 'Search' },
 ]
 
-const researchNavItems = [
+const researchNavItems = filterV1([
   { to: '/literature-review', icon: FiBookOpen, label: 'Literature' },
   { to: '/citation-manager', icon: FiList, label: 'Citations' },
   { to: '/experiment-tracker', icon: FiTrendingUp, label: 'Experiments' },
   { to: '/data-visualization', icon: FiBarChart2, label: 'Visualization' },
-]
+])
 
-const analysisNavItems = [
+const analysisNavItems = filterV1([
   { to: '/compute-lab', icon: FiCpu, label: 'Compute Lab' },
   { to: '/genomics', icon: FiGrid, label: 'Genomics' },
-]
+])
 
-const managementNavItems = [
+const managementNavItems = filterV1([
   { to: '/data-manager', icon: FiDatabase, label: 'Data Manager' },
   { to: '/imaging', icon: FiImage, label: 'Imaging' },
   { to: '/clinical-trials', icon: FiActivity, label: 'Clinical Trials' },
@@ -124,16 +125,16 @@ const managementNavItems = [
   { to: '/biobank', icon: FiArchive, label: 'Biobank' },
   { to: '/collaboration', icon: FiUsers, label: 'Collaboration' },
   { to: '/regulatory', icon: FiShield, label: 'Regulatory' },
-]
+])
 
 // Knowledge section. The standalone Hypotheses entry was removed —
 // hypotheses now live inside their parent project and surface from
 // the Discovery chat or the project detail view. Old /hypotheses
 // links redirect to /projects so external bookmarks don't 404.
-const knowledgeNavItems = [
+const knowledgeNavItems = filterV1([
   { to: '/knowledge-graph', icon: FiLayers, label: 'Knowledge Graph' },
   { to: '/ml-models', icon: FiCpu, label: 'ML Models' },
-]
+])
 
 /**
  * Sidebar section with a clickable header that toggles visibility of

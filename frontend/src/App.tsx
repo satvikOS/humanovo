@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
+import { isHiddenInV1 } from './utils/featureFlags'
 
 // Eagerly-loaded pages: landing surfaces users hit on cold-start. Keeping
 // them in the main bundle avoids a network round-trip on first paint.
@@ -82,6 +83,13 @@ function LazyPageWrapper({ children }: { children: ReactNode }) {
   )
 }
 
+/** Routes hidden in v1 redirect to /dashboard. Code stays so v1.1 can
+ *  re-enable them via VITE_V1_HIDDEN_ROUTES_ENABLED=true. */
+function V1Gate({ path, children }: { path: string; children: ReactNode }) {
+  if (isHiddenInV1(path)) return <Navigate to="/dashboard" replace />
+  return <>{children}</>
+}
+
 function App() {
   return (
     <Routes>
@@ -105,8 +113,8 @@ function App() {
         <Route path="statistical-analysis" element={<LegacyComputeRedirect />} />
         <Route path="numeric-compute" element={<LegacyComputeRedirect />} />
         <Route path="matlab-compute" element={<LegacyComputeRedirect />} />
-        <Route path="workbench" element={<LazyPageWrapper><Workbench /></LazyPageWrapper>} />
-        <Route path="anatomy" element={<LazyPageWrapper><HumanAnatomy /></LazyPageWrapper>} />
+        <Route path="workbench" element={<V1Gate path="/workbench"><LazyPageWrapper><Workbench /></LazyPageWrapper></V1Gate>} />
+        <Route path="anatomy" element={<V1Gate path="/anatomy"><LazyPageWrapper><HumanAnatomy /></LazyPageWrapper></V1Gate>} />
         <Route path="notebook" element={<PageWrapper><Notebook /></PageWrapper>} />
         <Route path="agents" element={<PageWrapper><Agents /></PageWrapper>} />
         <Route path="timeline" element={<PageWrapper><Timeline /></PageWrapper>} />
@@ -114,16 +122,16 @@ function App() {
         <Route path="settings" element={<PageWrapper><Settings /></PageWrapper>} />
         <Route path="literature-review" element={<LazyPageWrapper><LiteratureReview /></LazyPageWrapper>} />
         <Route path="citation-manager" element={<LazyPageWrapper><CitationManager /></LazyPageWrapper>} />
-        <Route path="experiment-tracker" element={<LazyPageWrapper><ExperimentTracker /></LazyPageWrapper>} />
+        <Route path="experiment-tracker" element={<V1Gate path="/experiment-tracker"><LazyPageWrapper><ExperimentTracker /></LazyPageWrapper></V1Gate>} />
         <Route path="data-visualization" element={<LazyPageWrapper><DataVisualization /></LazyPageWrapper>} />
         <Route path="data-manager" element={<PageWrapper><DataManager /></PageWrapper>} />
-        <Route path="collaboration" element={<LazyPageWrapper><Collaboration /></LazyPageWrapper>} />
-        <Route path="clinical-trials" element={<LazyPageWrapper><ClinicalTrials /></LazyPageWrapper>} />
+        <Route path="collaboration" element={<V1Gate path="/collaboration"><LazyPageWrapper><Collaboration /></LazyPageWrapper></V1Gate>} />
+        <Route path="clinical-trials" element={<V1Gate path="/clinical-trials"><LazyPageWrapper><ClinicalTrials /></LazyPageWrapper></V1Gate>} />
         <Route path="genomics" element={<LazyPageWrapper><GenomicsAnalysis /></LazyPageWrapper>} />
-        <Route path="manuscripts" element={<LazyPageWrapper><ManuscriptManager /></LazyPageWrapper>} />
-        <Route path="regulatory" element={<LazyPageWrapper><RegulatoryCompliance /></LazyPageWrapper>} />
-        <Route path="imaging" element={<LazyPageWrapper><ResearchImaging /></LazyPageWrapper>} />
-        <Route path="biobank" element={<LazyPageWrapper><BiobankManager /></LazyPageWrapper>} />
+        <Route path="manuscripts" element={<V1Gate path="/manuscripts"><LazyPageWrapper><ManuscriptManager /></LazyPageWrapper></V1Gate>} />
+        <Route path="regulatory" element={<V1Gate path="/regulatory"><LazyPageWrapper><RegulatoryCompliance /></LazyPageWrapper></V1Gate>} />
+        <Route path="imaging" element={<V1Gate path="/imaging"><LazyPageWrapper><ResearchImaging /></LazyPageWrapper></V1Gate>} />
+        <Route path="biobank" element={<V1Gate path="/biobank"><LazyPageWrapper><BiobankManager /></LazyPageWrapper></V1Gate>} />
         {/* Standalone Hypotheses list removed per redesign — hypotheses
             live within projects. Old /hypotheses links redirect to
             /projects so external bookmarks still land somewhere useful;
@@ -133,7 +141,7 @@ function App() {
         <Route path="hypotheses/:hypothesisId" element={<LazyPageWrapper><HypothesisDetail /></LazyPageWrapper>} />
         <Route path="knowledge-graph" element={<LazyPageWrapper><KnowledgeGraph /></LazyPageWrapper>} />
         <Route path="knowledge-graph/viewer" element={<LazyPageWrapper><KnowledgeGraphViewer /></LazyPageWrapper>} />
-        <Route path="ml-models" element={<LazyPageWrapper><MLModelManager /></LazyPageWrapper>} />
+        <Route path="ml-models" element={<V1Gate path="/ml-models"><LazyPageWrapper><MLModelManager /></LazyPageWrapper></V1Gate>} />
         {/* Project Jamison — platform-level pages */}
         <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />
       </Route>
