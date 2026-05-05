@@ -469,7 +469,7 @@ export default function Agents() {
         knowledge_base_ids: docIds.length > 0 ? docIds : undefined,
         document_context: docIds.length > 0 ? true : undefined,
       }
-      const startRes = await api.startDiscovery(discoveryConfig as any)
+      const startRes = await api.startDiscovery(discoveryConfig)
       setState('running')
       setShowConfig(false)
       setHypotheses([])

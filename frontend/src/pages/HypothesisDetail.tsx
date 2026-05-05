@@ -620,7 +620,7 @@ export default function HypothesisDetail() {
   }
 
   // ---- Default: Document viewer ----
-  const roadmapData = (hypothesis as any).translational_roadmap || undefined
+  const roadmapData = (hypothesis as { translational_roadmap?: TranslationalRoadmapDoc }).translational_roadmap || undefined
   // Derive per-phase pass/fail from confidence_score — temporary until
   // the backend returns per-stage scores on the hypothesis payload.
   // Higher confidence → more phases cleanly passed; confidence<0.5 shows

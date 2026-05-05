@@ -123,10 +123,11 @@ export default function Timeline() {
           type: filterType || undefined,
           date_from: dateFrom,
         })
-        const mapped: ActivityEntry[] = (res.items || []).map((a: any) => ({
+        type ApiActivity = { id: string; type?: string; action?: string; title?: string; project_name?: string; created_at?: string; metadata?: Record<string, unknown> }
+        const mapped: ActivityEntry[] = ((res.items || []) as ApiActivity[]).map((a) => ({
           id: a.id,
-          type: a.type || 'project',
-          action: a.action || 'created',
+          type: (a.type || 'project') as ActivityEntry['type'],
+          action: (a.action || 'created') as ActivityEntry['action'],
           title: a.title || '',
           project: a.project_name || '',
           timestamp: a.created_at || new Date().toISOString(),

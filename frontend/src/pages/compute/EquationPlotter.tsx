@@ -505,8 +505,8 @@ export default function EquationPlotter() {
       evaluate(ast, (xMin + xMax) / 2)
       setError(null)
       return computeSeries(expr, xMin, xMax)
-    } catch (e: any) {
-      setError(e.message || 'Invalid expression')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Invalid expression')
       return []
     }
   }, [expr, xMin, xMax])

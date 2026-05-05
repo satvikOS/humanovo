@@ -7,7 +7,27 @@ import { FiZap, FiBookOpen, FiShare2, FiTag, FiExternalLink, FiSave } from 'reac
 
 interface RichCardProps {
   card: DiscoveryMessageCard
-  onAction?: (cardKind: string, payload: Record<string, any>) => void
+  onAction?: (cardKind: string, payload: Record<string, unknown>) => void
+}
+
+// Defensive structural shape for the rich-card payload. The card schema
+// is heterogeneous across kinds (hypothesis vs evidence vs citation),
+// so we type each rendered field as optional and coerce with String() /
+// Number() / Array.isArray() at the leaf.
+interface RichCardPayload {
+  title?: string
+  statement?: string
+  name?: string
+  body?: string
+  abstract?: string
+  description?: string
+  snippet?: string
+  index?: number | string
+  confidence?: number | null
+  authors?: string | string[]
+  journal?: string
+  year?: number | string
+  url?: string
 }
 
 function iconFor(kind: string) {
@@ -34,7 +54,7 @@ function labelFor(kind: string): string {
 
 export default function RichCard({ card, onAction }: RichCardProps) {
   const Icon = iconFor(card.kind)
-  const payload = card.payload || {}
+  const payload = (card.payload || {}) as RichCardPayload
   const title = payload.title || payload.statement || payload.name || 'Untitled'
   const body = payload.body || payload.abstract || payload.description || payload.snippet || ''
 
@@ -49,7 +69,7 @@ export default function RichCard({ card, onAction }: RichCardProps) {
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-xxs uppercase tracking-wider text-[var(--color-text-muted)]">{labelFor(card.kind)}</span>
               {payload.index && <span className="text-xxs text-[var(--color-text-muted)]">#{payload.index}</span>}
-              {payload.confidence !== undefined && (
+              {typeof payload.confidence === 'number' && (
                 <span className="text-xxs text-[var(--color-text-muted)]">· {Math.round(payload.confidence * 100)}% confidence</span>
               )}
             </div>
@@ -74,7 +94,7 @@ export default function RichCard({ card, onAction }: RichCardProps) {
         <div className="flex gap-1 flex-shrink-0">
           {card.kind === 'hypothesis' && onAction && (
             <button
-              onClick={() => onAction('save-hypothesis', payload)}
+              onClick={() => onAction('save-hypothesis', card.payload as Record<string, unknown>)}
               className="text-xxs px-2 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]"
               title="Save to active project"
               aria-label="Save hypothesis to active project"
