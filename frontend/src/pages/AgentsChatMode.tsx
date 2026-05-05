@@ -143,7 +143,7 @@ export default function Agents() {
         sp.set('session', id)
         return sp
       }, { replace: true })
-    } catch (err) {
+    } catch {
       toast('error', 'Could not load session', { title: 'Discovery' })
     }
   }, [setSearchParams])
@@ -302,34 +302,35 @@ export default function Agents() {
 
   // ── Hypothesis save routing ──
 
-  const handleCardAction = useCallback(async (kind: string, payload: Record<string, any>) => {
+  const handleCardAction = useCallback(async (kind: string, payload: Record<string, unknown>) => {
     if (kind !== 'save-hypothesis') return
     if (!activeProjectId) {
       // Prompt the user to pick a project.
       setProjectPickerOpen(true)
       // Stash the pending hypothesis; the picker's confirm handler
       // will re-run the save.
-      ;(window as any).__pendingHypothesisCard = payload
+      ;(window as unknown as { __pendingHypothesisCard?: Record<string, unknown> }).__pendingHypothesisCard = payload
       return
     }
     await saveHypothesisToProject(payload, activeProjectId)
   }, [activeProjectId])
 
-  const saveHypothesisToProject = async (payload: Record<string, any>, projectId: string) => {
+  const saveHypothesisToProject = async (payload: Record<string, unknown>, projectId: string) => {
     try {
       // api.ts exposes `createHypothesis` via POST /hypotheses; we
       // stitch the card payload into the backend schema.
       const created = await apiCreateHypothesis({
         project_id: projectId,
-        statement: payload.title || payload.statement || 'Untitled hypothesis',
-        mechanism: payload.body || payload.mechanism || '',
-        rationale: payload.rationale || '',
-        tags: payload.tags || [],
+        statement: String(payload.title ?? payload.statement ?? 'Untitled hypothesis'),
+        mechanism: String(payload.body ?? payload.mechanism ?? ''),
+        rationale: String(payload.rationale ?? ''),
+        tags: Array.isArray(payload.tags) ? payload.tags as string[] : [],
       })
       toast('success', `Saved to project`, { title: 'Hypothesis saved' })
       return created
-    } catch (err: any) {
-      toast('error', err?.message || 'Save failed')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Save failed'
+      toast('error', msg)
     }
   }
 
@@ -547,10 +548,11 @@ export default function Agents() {
                       try { await api.updateDiscoverySession(current.id, { project_id: p.id }) } catch { /* ignore */ }
                     }
                     // If there's a pending hypothesis save, complete it.
-                    const pending = (window as any).__pendingHypothesisCard
+                    const w = window as unknown as { __pendingHypothesisCard?: Record<string, unknown> }
+                    const pending = w.__pendingHypothesisCard
                     if (pending) {
                       await saveHypothesisToProject(pending, p.id)
-                      ;(window as any).__pendingHypothesisCard = undefined
+                      w.__pendingHypothesisCard = undefined
                     }
                   }}
                   className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
