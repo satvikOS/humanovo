@@ -6,7 +6,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { api, apiClient } from '../services/api'
-import HypothesisDocViewer from '../components/HypothesisDocViewer'
+import HypothesisDocViewer, { type TranslationalRoadmapDoc } from '../components/HypothesisDocViewer'
 import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
 
 const PAPER_PHASES = [
@@ -412,7 +412,7 @@ export default function HypothesisDetail() {
     setPaperHtml(null)
     startPhaseAnimation()
 
-    const roadmapData = (hypothesis as any).translational_roadmap || undefined
+    const roadmapData = (hypothesis as { translational_roadmap?: TranslationalRoadmapDoc }).translational_roadmap || undefined
 
     // Helper: generate client-side HTML paper — runs through full pipeline animation
     const generateClientSide = () => {

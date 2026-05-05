@@ -460,11 +460,12 @@ function StemChart3D({ data, colorScheme }: { data: DataPoint3D[]; colorScheme: 
 function WaterfallChart3D({ data, colorScheme }: { data: DataPoint3D[]; colorScheme: string }) {
   const { normalized } = useMemo(() => normalizeData(data), [data])
   const groups = useMemo(() => {
-    const zBuckets = new Map<number, typeof normalized>()
+    type BucketItem = (typeof normalized)[number] & { _origIdx: number }
+    const zBuckets = new Map<number, BucketItem[]>()
     normalized.forEach((d, i) => {
       const zKey = Math.round(d.nz * 5) / 5
       if (!zBuckets.has(zKey)) zBuckets.set(zKey, [])
-      zBuckets.get(zKey)!.push({ ...d, _origIdx: i } as any)
+      zBuckets.get(zKey)!.push({ ...d, _origIdx: i })
     })
     return [...zBuckets.entries()].sort((a, b) => a[0] - b[0])
   }, [normalized])
@@ -590,7 +591,10 @@ function SliceChart3D({ data, colorScheme }: { data: DataPoint3D[]; colorScheme:
 
 // ── Chart Type Selector ─────────────────────────────────────
 function getChartRenderer(type: Chart3DType) {
-  const map: Record<Chart3DType, React.FC<any>> = {
+  // Each chart component has its own props shape (some take surfaceFunction,
+  // some don't); the renderer dispatches on Chart3DType so a structural
+  // FC type is the right escape hatch here.
+  const map: Record<Chart3DType, React.FC<{ data: DataPoint3D[]; pointSize: number; colorScheme: string; surfaceFunction?: (x: number, y: number) => number }>> = {
     scatter_3d: ScatterChart3D,
     bubble_3d: BubbleChart3D,
     line_3d: LineChart3D,

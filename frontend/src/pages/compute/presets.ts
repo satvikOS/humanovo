@@ -35,7 +35,7 @@ const fmt = (v: number, digits = 4) => {
   return Math.abs(v) < 10 ? v.toFixed(digits) : v.toFixed(2)
 }
 
-const parseArray = (raw: any): number[] => {
+const parseArray = (raw: unknown): number[] => {
   if (Array.isArray(raw)) return raw.map(Number).filter(n => !isNaN(n))
   return String(raw || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean).map(Number).filter(n => !isNaN(n))
 }
@@ -763,7 +763,7 @@ const signalPresets: Preset[] = [
         ],
         chartType: 'line',
         chartTitle: 'Signal with Peaks',
-        chartData: data.map((v, i) => ({ x: i, y: v, y2: r.indices.includes(i) ? v : null as any })),
+        chartData: data.map((v, i) => ({ x: i, y: v, y2: r.indices.includes(i) ? v : (null as unknown as number) })),
         seriesLabels: ['Signal', 'Peaks'],
       }
     },
