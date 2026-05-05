@@ -15,7 +15,13 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Previously `cancel-in-progress: true`, which cancelled the in-flight
+  # run on every new push. That's the right default when iterating on a
+  # PR (only the latest commit's signal matters), but during rapid-push
+  # phases it produces a sea of "cancelled" runs and hides the actual
+  # per-commit CI outcome we care about. Letting runs queue costs more
+  # minutes but keeps the per-commit signal honest.
+  cancel-in-progress: false
 
 jobs:
   backend:
