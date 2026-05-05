@@ -71,7 +71,7 @@ export function _computePathwayAnalysis(genes: string[], database: string) {
       gene_count: size, overlap, matched_genes: matched,
       enrichment_score: -Math.log10(Math.max(clampedP, 1e-10)),
     }
-  }).filter(Boolean).sort((a: any, b: any) => a.p_value - b.p_value)
+  }).filter((r): r is NonNullable<typeof r> => r !== null).sort((a, b) => a.p_value - b.p_value)
 
   return { database, input_genes: genes.length, pathways: results }
 }
@@ -233,6 +233,12 @@ export default function GenomicsAnalysis() {
      
   }, [])
   const [loading, setLoading] = useState(false)
+  // Result is heterogeneous across the 4 analysis types (pathway / GSEA /
+  // variants / biomarker). Tightening to a discriminated union here
+  // requires locking the backend API contract first — Sprint 2 work.
+  // For now `any` keeps the render path readable; consumer-side coercion
+  // in the JSX is already defensive (?? fallbacks, `?.toFixed()`).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
 
@@ -320,7 +326,8 @@ export default function GenomicsAnalysis() {
   const run = async () => {
     setLoading(true); setError(''); setResult(null)
     try {
-      let endpoint = '', body: any = {}
+      let endpoint = ''
+      let body: Record<string, unknown> = {}
       if (tab === 'pathway') {
         endpoint = '/pathway-analysis'
         body = { genes: genes.split(',').map(g => g.trim()).filter(Boolean), database }
@@ -338,7 +345,7 @@ export default function GenomicsAnalysis() {
       const { data } = await apiClient.post(`${BASE}${endpoint}`, body)
       setResult(data)
       logActivity({ type: 'discovery', action: 'started', title: `Ran genomics analysis: ${tab}` })
-    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Analysis failed') } finally { setLoading(false) }
   }
 
   const tabs = [
@@ -409,13 +416,13 @@ export default function GenomicsAnalysis() {
               <div className="space-y-3">
                 {(() => {
                   const pathways = result.results || result.pathways || []
-                  const sigCount = result.significant_pathways ?? pathways.filter((p: any) => p.p_value < 0.05).length
+                  const sigCount = result.significant_pathways ?? pathways.filter((p: { p_value: number }) => p.p_value < 0.05).length
                   const totalTested = result.pathways_tested ?? pathways.length
                   return (
                     <>
                       <div className="text-xs text-[var(--color-text-muted)]">{sigCount} significant pathways from {totalTested} tested</div>
-                      {pathways.map((r: any) => (
-                        <div key={r.pathway_id} className={`p-3 rounded-lg bg-[var(--glass-bg)] border ${(r.significant || r.p_value < 0.05) ? 'border-[var(--color-border-strong)]' : 'border-[var(--glass-border)]'}`}>
+                      {pathways.map((r: { pathway_id: string; pathway_name: string; p_value?: number; significant?: boolean; gene_count?: number; pathway_size?: number; overlap?: number; overlap_count?: number; matched_genes?: string[]; overlap_genes?: string[]; enrichment_score?: number; fold_enrichment?: number }) => (
+                        <div key={r.pathway_id} className={`p-3 rounded-lg bg-[var(--glass-bg)] border ${(r.significant || (r.p_value ?? 1) < 0.05) ? 'border-[var(--color-border-strong)]' : 'border-[var(--glass-border)]'}`}>
                           <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.pathway_name}</span><span className="text-xxs font-mono">p={typeof r.p_value === 'number' ? r.p_value.toFixed(4) : r.p_value}</span></div>
                           <div className="text-xxs text-[var(--color-text-muted)] mt-1">
                             Overlap: {r.overlap_count || r.overlap || 0}/{r.pathway_size || r.gene_count || 0}
@@ -455,7 +462,7 @@ export default function GenomicsAnalysis() {
                               <YAxis dataKey="running_es" name="Running ES" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }}
                                 label={{ value: 'ES', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: 'var(--color-text-muted)' } }} />
                               <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }}
-                                formatter={(v: any) => [Number(v).toFixed(4), 'ES']} />
+                                formatter={(v) => [Number(v ?? 0).toFixed(4), 'ES']} />
                               <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="4 4" />
                               <Area type="monotone" dataKey="running_es" stroke="#6BA594" fill="rgba(107,165,148,0.1)" strokeWidth={2} dot={false} />
                             </AreaChart>
@@ -465,7 +472,7 @@ export default function GenomicsAnalysis() {
                       {result.leading_edge_genes && (
                         <div className="text-xxs text-[var(--color-text-muted)]">Leading edge ({result.leading_edge_size} genes): {result.leading_edge_genes.join(', ')}</div>
                       )}
-                      {gseaResults.map((r: any) => (
+                      {gseaResults.map((r: { pathway_id?: string; gene_set?: string; pathway_name?: string; normalized_es?: number; hits?: number; leading_edge_size?: number; leading_edge_genes?: string[] }) => (
                         <div key={r.pathway_id || r.gene_set} className="p-3 rounded-lg bg-[var(--glass-bg)]">
                           <div className="text-xs font-medium">{r.pathway_name || r.gene_set}</div>
                           <div className="text-xxs text-[var(--color-text-muted)]">NES: {r.normalized_es} | Hits: {r.hits || r.leading_edge_size}</div>
@@ -483,12 +490,12 @@ export default function GenomicsAnalysis() {
                 {(() => {
                   const annotations = result.annotations || []
                   const nVariants = result.variants_annotated || result.n_variants || annotations.length
-                  const highImpact = result.high_impact ?? result.summary?.high_impact ?? annotations.filter((a: any) => a.impact === 'HIGH').length
-                  const pathogenic = result.pathogenic ?? result.summary?.pathogenic ?? annotations.filter((a: any) => a.clinical_significance === 'pathogenic').length
+                  const highImpact = result.high_impact ?? result.summary?.high_impact ?? annotations.filter((a: { impact?: string }) => a.impact === 'HIGH').length
+                  const pathogenic = result.pathogenic ?? result.summary?.pathogenic ?? annotations.filter((a: { clinical_significance?: string }) => a.clinical_significance === 'pathogenic').length
                   return (
                     <>
                       <div className="text-xs text-[var(--color-text-muted)]">{nVariants} annotated | {highImpact} high impact | {pathogenic} pathogenic</div>
-                      {annotations.map((a: any, i: number) => (
+                      {annotations.map((a: { gene?: string; position?: number; ref?: string; alt?: string; change?: string; impact?: string; consequence?: string; clinical_significance?: string; sift?: string; polyphen?: string; cadd_score?: number; gnomad_af?: number; allele_frequency?: number }, i: number) => (
                         <div key={i} className={`p-3 rounded-lg bg-[var(--glass-bg)] border ${a.impact === 'HIGH' ? 'border-red-500/30' : 'border-[var(--glass-border)]'}`}>
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-medium font-mono">{a.change || `${a.gene}:${a.position} ${a.ref}>${a.alt}`}</span>
@@ -508,10 +515,11 @@ export default function GenomicsAnalysis() {
               <div className="space-y-3">
                 {(() => {
                   const volcanoData = result.volcano_data || []
-                  const nSig = result.significant_biomarkers ?? result.n_significant ?? volcanoData.filter((d: any) => d.significant).length
+                  type VolcanoPoint = { gene?: string; significant?: boolean; x?: number; y?: number; log2_fold_change?: number; neg_log10_p?: number; p_value?: number }
+                  const nSig = result.significant_biomarkers ?? result.n_significant ?? volcanoData.filter((d: VolcanoPoint) => d.significant).length
                   const nTotal = result.total_genes ?? result.n_genes ?? volcanoData.length
                   // Map data for scatter chart: x = log2FC, y = -log10(p)
-                  const scatterData = volcanoData.map((d: any) => ({
+                  const scatterData = volcanoData.map((d: VolcanoPoint) => ({
                     ...d,
                     x: d.x ?? d.log2_fold_change ?? 0,
                     y: d.y ?? d.neg_log10_p ?? (d.p_value ? -Math.log10(d.p_value) : 0),
@@ -530,7 +538,7 @@ export default function GenomicsAnalysis() {
                               <YAxis dataKey="y" name="-log10(p)" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }}
                                 label={{ value: '-log₁₀(p-value)', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: 'var(--color-text-muted)' } }} />
                               <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }}
-                                formatter={(value: any, name: any) => [Number(value).toFixed(3), name === 'x' ? 'log₂FC' : '-log₁₀(p)']}
+                                formatter={(value, name) => [Number(value ?? 0).toFixed(3), String(name) === 'x' ? 'log₂FC' : '-log₁₀(p)']}
                                 labelFormatter={(_, payload) => payload?.[0]?.payload?.gene || ''} />
                               {/* Significance thresholds */}
                               <ReferenceLine y={-Math.log10(0.05)} stroke="#C4956A" strokeDasharray="6 3" strokeWidth={1}
@@ -538,8 +546,8 @@ export default function GenomicsAnalysis() {
                               <ReferenceLine x={-1} stroke="#666" strokeDasharray="4 4" strokeWidth={0.5} />
                               <ReferenceLine x={1} stroke="#666" strokeDasharray="4 4" strokeWidth={0.5} />
                               <Scatter data={scatterData} fill="var(--color-text)">
-                                {scatterData.map((d: any, i: number) => (
-                                  <Cell key={i} fill={d.significant ? (d.x > 0 ? '#B07E8B' : '#5B8DB8') : 'rgba(107,114,128,0.4)'} r={d.significant ? 5 : 3} />
+                                {scatterData.map((d: VolcanoPoint, i: number) => (
+                                  <Cell key={i} fill={d.significant ? ((d.x ?? 0) > 0 ? '#B07E8B' : '#5B8DB8') : 'rgba(107,114,128,0.4)'} r={d.significant ? 5 : 3} />
                                 ))}
                               </Scatter>
                             </ScatterChart>
@@ -553,21 +561,21 @@ export default function GenomicsAnalysis() {
                         </div>
                       )}
                       {/* Show top significant genes */}
-                      {(result.top_upregulated || result.top_downregulated || result.results?.filter((r: any) => r.significant)) && (
+                      {(result.top_upregulated || result.top_downregulated || result.results?.filter((r: { significant?: boolean }) => r.significant)) && (
                         <div className="space-y-2">
-                          {(result.top_upregulated || []).map((r: any) => (
+                          {(result.top_upregulated || []).map((r: { gene?: string; log2_fold_change?: number; p_value?: number }) => (
                             <div key={r.gene} className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
                               <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">up</span></div>
                               <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change?.toFixed(3)} | p: {r.p_value?.toFixed(4)}</div>
                             </div>
                           ))}
-                          {(result.top_downregulated || []).map((r: any) => (
+                          {(result.top_downregulated || []).map((r: { gene?: string; log2_fold_change?: number; p_value?: number }) => (
                             <div key={r.gene} className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
                               <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-secondary)]">down</span></div>
                               <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change?.toFixed(3)} | p: {r.p_value?.toFixed(4)}</div>
                             </div>
                           ))}
-                          {(result.results?.filter((r: any) => r.significant) || []).map((r: any) => (
+                          {(result.results?.filter((r: { significant?: boolean }) => r.significant) || []).map((r: { gene?: string; direction?: string; log2_fold_change?: number; p_value?: number }) => (
                             <div key={r.gene} className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
                               <div className="flex items-center justify-between"><span className="text-xs font-medium">{r.gene}</span><span className={`text-xxs px-1.5 py-0.5 rounded ${r.direction === 'up' ? 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-secondary)]'}`}>{r.direction === 'up' ? 'up' : 'down'}</span></div>
                               <div className="text-xxs text-[var(--color-text-muted)]">log2FC: {r.log2_fold_change} | p: {r.p_value}</div>
