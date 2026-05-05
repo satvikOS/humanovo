@@ -1,0 +1,142 @@
+name: Bootstrap Azure AI Foundry
+
+# Stand up the Azure AI Foundry Hub + Project + the per-stage agent
+# definitions in the new humanovo Azure tenant. Idempotent — rerunning
+# detects existing resources and skips creation.
+#
+# Trigger: workflow_dispatch only.
+#
+# Required Actions Secrets (see docs/planning/CREDENTIALS_HANDOFF.md §2.5):
+#   AZURE_TENANT_ID
+#   AZURE_SUBSCRIPTION_ID
+#   AZURE_CLIENT_ID
+#   AZURE_CLIENT_SECRET
+#   AZURE_FOUNDRY_HUB_NAME
+#   AZURE_FOUNDRY_PROJECT_NAME
+#   (model deployment endpoint + key secrets are populated by the founder
+#    at deployment time; this workflow validates they exist but doesn't
+#    create the deployments — that's a click-through in the Foundry UI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: 'Bootstrap phase: dry-run | apply'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - apply
+      confirm_intent:
+        description: 'Type humanovo-bootstrap-azure to confirm'
+        required: true
+        type: string
+
+concurrency:
+  group: bootstrap-azure-foundry
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Confirm intent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify confirmation
+        run: |
+          if [ "${{ inputs.confirm_intent }}" != "humanovo-bootstrap-azure" ]; then
+            echo "::error::Confirmation phrase does not match. Bootstrap aborted."
+            exit 1
+          fi
+          echo "Confirmation verified."
+
+  bootstrap:
+    name: Bootstrap (${{ inputs.phase }})
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Azure login (service principal)
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Verify subscription + tenant
+        run: |
+          az account show -o json
+          ACCOUNT=$(az account show --query 'id' -o tsv)
+          if [ "$ACCOUNT" != "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]; then
+            echo "::error::Logged-in subscription ($ACCOUNT) does not match secret"
+            exit 1
+          fi
+
+      - name: Verify AI Foundry Hub exists
+        run: |
+          HUB="${{ secrets.AZURE_FOUNDRY_HUB_NAME }}"
+          if [ -z "$HUB" ]; then
+            echo "::error::AZURE_FOUNDRY_HUB_NAME secret not set. Create the Hub first via Azure Portal."
+            exit 1
+          fi
+          echo "Foundry Hub name: $HUB"
+          # Resource Group expected: rg-humanovo-prod-eastus2
+          RG="rg-humanovo-prod-eastus2"
+          az ml workspace show --name "$HUB" --resource-group "$RG" -o json || {
+            echo "::error::Hub '$HUB' not found in resource group '$RG'."
+            echo "::error::Per CREDENTIALS_HANDOFF.md §2.2, create the Hub manually before running this bootstrap."
+            exit 1
+          }
+
+      - name: Verify model deployment secrets
+        run: |
+          MISSING=0
+          for KEY in AZURE_GPT4O_KEY AZURE_GPT41_KEY AZURE_O3MINI_KEY AZURE_COHERE_KEY \
+                    AZURE_MISTRAL_KEY AZURE_PHI4_KEY AZURE_GROK_KEY AZURE_EMBEDDING_KEY; do
+            VAL_REF="\${{ secrets.$KEY }}"
+            if [ -z "$VAL_REF" ] || [ "$VAL_REF" = "\${{ secrets.$KEY }}" ]; then
+              echo "::warning::Secret $KEY is not populated. Deploy the model in Foundry and add the key to Actions Secrets."
+              MISSING=$((MISSING + 1))
+            else
+              echo "$KEY: present"
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::warning::$MISSING model-deployment secrets are missing. Bootstrap will continue but pipeline runs will fail until populated."
+          fi
+
+      - name: Apply (no-op for now — placeholder for Terraform azurerm)
+        if: inputs.phase == 'apply'
+        run: |
+          echo "TODO: replace this step with Terraform azurerm + azapi modules"
+          echo "for the AI Foundry Project resources, agent definitions, and"
+          echo "Key Vault references that the lane-pool secrets manager reads."
+          echo ""
+          echo "For now the human-clickthrough setup in CREDENTIALS_HANDOFF.md"
+          echo "§2.2-§2.4 covers everything we need for the closed-beta launch."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Bootstrap Azure AI Foundry — ${{ inputs.phase }}"
+            echo ""
+            echo "Tenant: \`${{ secrets.AZURE_TENANT_ID }}\`"
+            echo "Subscription: \`${{ secrets.AZURE_SUBSCRIPTION_ID }}\`"
+            echo "Hub: \`${{ secrets.AZURE_FOUNDRY_HUB_NAME }}\`"
+            echo "Project: \`${{ secrets.AZURE_FOUNDRY_PROJECT_NAME }}\`"
+            echo ""
+            if [ "${{ inputs.phase }}" = "apply" ]; then
+              echo "### Next steps"
+              echo "1. Verify all 8 model deployments are running in the Foundry Project"
+              echo "2. Trigger Backend pipeline-e2e via workflow_dispatch to canary the swarm"
+              echo "3. Trigger \`bootstrap-gcp-project.yml\` once GCP secrets are populated"
+            fi
+          } >> $GITHUB_STEP_SUMMARY
