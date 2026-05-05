@@ -9,7 +9,8 @@ import hashlib
 from datetime import datetime
 from typing import Any
 
-import aiohttp
+import httpx
+from app.core.http_allowlist import make_httpx_client
 
 from app.agents.ingestion.base import (
     IngestionAgent,
@@ -105,19 +106,19 @@ class PatentsIngestionAgent(IngestionAgent):
         config = config or PatentsConfig()
         super().__init__(config=config, **kwargs)
         self.patents_config: PatentsConfig = config
-        self._session: aiohttp.ClientSession | None = None
+        self._session: httpx.AsyncClient | None = None
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create HTTP session."""
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=60)
-            self._session = aiohttp.ClientSession(timeout=timeout)
+    async def _get_session(self) -> httpx.AsyncClient:
+        """Get or create the SSRF-allowlisted httpx client."""
+        if self._session is None:
+            self._session = make_httpx_client(timeout=60.0, follow_redirects=True)
         return self._session
 
     async def _close_session(self) -> None:
         """Close HTTP session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+        if self._session is not None:
+            await self._session.aclose()
+            self._session = None
 
     def _build_query(self, search_query: str) -> dict[str, Any]:
         """Build PatentsView API query."""
@@ -245,13 +246,13 @@ class PatentsIngestionAgent(IngestionAgent):
         }
 
         try:
-            async with session.post(
+            response = await session.post(
                 self.PATENTSVIEW_API,
                 json=request_body,
                 headers={"Content-Type": "application/json"},
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
+            )
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
@@ -260,7 +261,7 @@ class PatentsIngestionAgent(IngestionAgent):
 
             return patents, total_count
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("PatentsView API error", error=str(e))
             raise
 
@@ -430,13 +431,13 @@ class PatentsIngestionAgent(IngestionAgent):
         }
 
         try:
-            async with session.post(
+            response = await session.post(
                 self.PATENTSVIEW_API,
                 json=request_body,
                 headers={"Content-Type": "application/json"},
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
+            )
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
@@ -446,7 +447,7 @@ class PatentsIngestionAgent(IngestionAgent):
 
             return None
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("Failed to fetch patent", patent_number=patent_number, error=str(e))
             return None
 
@@ -532,20 +533,20 @@ class PatentsIngestionAgent(IngestionAgent):
         }
 
         try:
-            async with session.post(
+            response = await session.post(
                 self.PATENTSVIEW_API,
                 json=request_body,
                 headers={"Content-Type": "application/json"},
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
+            )
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
             patents = data.get("patents", [])
             return [self._patent_to_record(p) for p in patents]
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("Failed to fetch citing patents", error=str(e))
             return []
 

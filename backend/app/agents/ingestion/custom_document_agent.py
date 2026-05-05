@@ -3,6 +3,13 @@ Custom Document Ingestion Agent
 
 Specialized agent for ingesting custom documents including PDFs, Word docs,
 and other file formats uploaded by users.
+
+HTTP transport: httpx via the SSRF-allowlisted factory. URL-import paths
+that target hosts NOT in app.core.http_allowlist.ALLOWED_DOMAINS will
+raise SSRFBlockedError to the user with a clear message — this is
+intentional: importing arbitrary user-supplied URLs is a classic SSRF
+window we close by default. Add new biomedical sources to the
+allowlist (per INTEGRATION_INVENTORY.md) instead of widening here.
 """
 
 import hashlib
@@ -12,7 +19,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
-import aiohttp
+import httpx
+from app.core.http_allowlist import make_httpx_client
 
 from app.agents.ingestion.base import (
     IngestionAgent,
@@ -482,29 +490,29 @@ class CustomDocumentIngestionAgent(IngestionAgent):
 
         await self._rate_limit()
 
-        async with aiohttp.ClientSession() as session:
+        async with make_httpx_client(timeout=60.0, follow_redirects=True) as session:
             try:
-                async with session.get(url) as response:
-                    response.raise_for_status()
-                    content = await response.read()
+                response = await session.get(url)
+                response.raise_for_status()
+                content = response.content
 
-                    # Get content type
-                    content_type = response.headers.get("Content-Type", "")
-                    mime_type = content_type.split(";")[0].strip()
+                # Get content type
+                content_type = response.headers.get("Content-Type", "")
+                mime_type = content_type.split(";")[0].strip()
 
-                    # Update doc_info
-                    content_hash = hashlib.sha256(content).hexdigest()
-                    doc_info["id"] = f"doc_{content_hash[:16]}"
-                    doc_info["content"] = content
-                    doc_info["mime_type"] = mime_type
-                    doc_info["size"] = len(content)
+                # Update doc_info
+                content_hash = hashlib.sha256(content).hexdigest()
+                doc_info["id"] = f"doc_{content_hash[:16]}"
+                doc_info["content"] = content
+                doc_info["mime_type"] = mime_type
+                doc_info["size"] = len(content)
 
-                    self.state.metrics.bytes_downloaded += len(content)
-                    self.state.metrics.api_calls_made += 1
+                self.state.metrics.bytes_downloaded += len(content)
+                self.state.metrics.api_calls_made += 1
 
-                    return doc_info
+                return doc_info
 
-            except aiohttp.ClientError as e:
+            except httpx.HTTPError as e:
                 self.logger.error("Failed to fetch document", url=url, error=str(e))
                 return None
 
