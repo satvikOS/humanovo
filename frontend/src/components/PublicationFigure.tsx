@@ -439,15 +439,17 @@ export default function PublicationFigure({
             to the publication palette without changing their props. */}
         <div style={{
           height: aspectRatio ? '100%' : undefined,
-          // Expose context as data attrs for downstream styling hooks.
-          ['--pub-axis-color' as any]: themeStyle.axisColor,
-          ['--pub-grid-color' as any]: themeStyle.gridColor,
-          ['--pub-text-color' as any]: themeStyle.textColor,
-          ['--pub-muted-color' as any]: themeStyle.mutedColor,
-          ['--pub-tooltip-bg' as any]: themeStyle.tooltipBg,
-          ['--pub-font-mult' as any]: fs,
-        }}>
-          {typeof children === 'function' ? (children as any)(ctx) : children}
+          // Expose context as CSS custom properties for downstream styling
+          // hooks. `--*` keys aren't in React's CSSProperties type, so we
+          // cast the whole object once.
+          '--pub-axis-color': themeStyle.axisColor,
+          '--pub-grid-color': themeStyle.gridColor,
+          '--pub-text-color': themeStyle.textColor,
+          '--pub-muted-color': themeStyle.mutedColor,
+          '--pub-tooltip-bg': themeStyle.tooltipBg,
+          '--pub-font-mult': fs,
+        } as React.CSSProperties}>
+          {typeof children === 'function' ? (children as (c: typeof ctx) => React.ReactNode)(ctx) : children}
         </div>
 
         {/* Watermark */}
