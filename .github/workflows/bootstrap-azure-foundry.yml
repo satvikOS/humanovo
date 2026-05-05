@@ -96,12 +96,24 @@ jobs:
           }
 
       - name: Verify model deployment secrets
+        env:
+          AZURE_GPT4O_KEY: ${{ secrets.AZURE_GPT4O_KEY }}
+          AZURE_GPT41_KEY: ${{ secrets.AZURE_GPT41_KEY }}
+          AZURE_O3MINI_KEY: ${{ secrets.AZURE_O3MINI_KEY }}
+          AZURE_COHERE_KEY: ${{ secrets.AZURE_COHERE_KEY }}
+          AZURE_MISTRAL_KEY: ${{ secrets.AZURE_MISTRAL_KEY }}
+          AZURE_PHI4_KEY: ${{ secrets.AZURE_PHI4_KEY }}
+          AZURE_GROK_KEY: ${{ secrets.AZURE_GROK_KEY }}
+          AZURE_EMBEDDING_KEY: ${{ secrets.AZURE_EMBEDDING_KEY }}
         run: |
+          # Can't dynamically index `secrets.X` from a shell loop —
+          # GitHub Actions evaluates expressions at YAML-load time, so
+          # we expose each secret as an env var above and check the env
+          # by indirection here.
           MISSING=0
           for KEY in AZURE_GPT4O_KEY AZURE_GPT41_KEY AZURE_O3MINI_KEY AZURE_COHERE_KEY \
                     AZURE_MISTRAL_KEY AZURE_PHI4_KEY AZURE_GROK_KEY AZURE_EMBEDDING_KEY; do
-            VAL_REF="\${{ secrets.$KEY }}"
-            if [ -z "$VAL_REF" ] || [ "$VAL_REF" = "\${{ secrets.$KEY }}" ]; then
+            if [ -z "${!KEY}" ]; then
               echo "::warning::Secret $KEY is not populated. Deploy the model in Foundry and add the key to Actions Secrets."
               MISSING=$((MISSING + 1))
             else
