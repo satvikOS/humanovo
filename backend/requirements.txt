@@ -30,6 +30,11 @@ openai>=1.55.0
 # boto3 — required for AWS Bedrock (Claude Opus/Sonnet, Cohere Embed v3)
 boto3>=1.35.0
 
+# moto — AWS service mocks for tests (Secrets Manager round-trip,
+# rotation Lambda harness). Pinned major version 5+ for the unified
+# `from moto import mock_aws` import surface.
+moto[secretsmanager]>=5.0.0
+
 # ─── AI/ML Orchestration ────────────────────────────────────────
 langchain>=0.3.0
 langchain-openai>=0.2.0
