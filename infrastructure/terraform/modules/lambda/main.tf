@@ -479,10 +479,13 @@ resource "aws_lambda_function" "functions" {
   }
 
   lifecycle {
+    # NOTE: do NOT add `last_modified` here. It's a provider-decided
+    # attribute (no configured value to compare against) and including
+    # it produces a "Redundant ignore_changes element" warning that
+    # fails CI under -warn-as-error.
     ignore_changes = [
       s3_key,
       source_code_hash,
-      last_modified,
     ]
   }
 }
