@@ -6,9 +6,11 @@ import { apiClient } from '../services'
 
 type TabId = 'irb' | 'agreements' | 'consent' | 'checklists'
 
-interface IRBSubmission { id: string; protocol_title: string; irb_number: string; status: string; submission_date: string; approval_date: string | null; pi: string; risk_level: string; review_type?: string; history: any[] }
+interface IRBHistoryEntry { date: string; action: string; notes?: string }
+interface ConsentVersion { version: string; date: string; changes?: string }
+interface IRBSubmission { id: string; protocol_title: string; irb_number: string; status: string; submission_date: string; approval_date: string | null; pi: string; risk_level: string; review_type?: string; history: IRBHistoryEntry[] }
 interface Agreement { id: string; title: string; agreement_type: string; status: string; party: string; data_types: string[]; start_date: string; end_date: string }
-interface ConsentForm { id: string; title: string; version: string; status: string; language: string; irb_approved: boolean; versions: any[] }
+interface ConsentForm { id: string; title: string; version: string; status: string; language: string; irb_approved: boolean; versions: ConsentVersion[] }
 interface Checklist { id: string; framework: string; items: { name: string; completed: boolean; notes: string }[]; completion_pct: number; last_reviewed: string }
 
 const BASE = '/regulatory'
@@ -127,7 +129,7 @@ export default function RegulatoryCompliance() {
                       {irb.history && (
                         <div className="space-y-1">
                           <p className="text-xxs font-medium text-[var(--color-text-muted)]">History</p>
-                          {irb.history.map((h: any, i: number) => (
+                          {irb.history.map((h, i) => (
                             <div key={i} className="flex items-center gap-2 text-xxs py-1 border-l-2 border-[var(--color-border)] pl-3">
                               <span className="text-[var(--color-text-muted)]">{h.date}</span>
                               <span className="font-medium">{h.action}</span>
@@ -177,7 +179,7 @@ export default function RegulatoryCompliance() {
                   </div>
                   {c.versions && (
                     <div className="mt-2 space-y-0.5">
-                      {c.versions.map((v: any, i: number) => (
+                      {c.versions.map((v, i) => (
                         <div key={i} className="text-xxs text-[var(--color-text-muted)]">v{v.version} ({v.date}): {v.changes}</div>
                       ))}
                     </div>
