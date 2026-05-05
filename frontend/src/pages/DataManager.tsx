@@ -39,7 +39,7 @@ interface Dataset {
   description: string
   source: 'upload' | 'manual' | 'derived'
   columns: Column[]
-  rows: Record<string, any>[]
+  rows: Record<string, unknown>[]
   tags: string[]
   createdAt: string
   updatedAt: string
@@ -58,13 +58,13 @@ function saveDatasets(d: Dataset[]) {
 }
 
 /* ── CSV / TSV Parser ───────────────────────────────────────────────── */
-function parseDelimited(text: string, delimiter: string): { columns: Column[]; rows: Record<string, any>[] } {
+function parseDelimited(text: string, delimiter: string): { columns: Column[]; rows: Record<string, unknown>[] } {
   const lines = text.split(/\r?\n/).filter(l => l.trim())
   if (!lines.length) return { columns: [], rows: [] }
   const headers = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
   const dataRows = lines.slice(1).map(line => {
     const cells = line.split(delimiter).map(c => c.trim().replace(/^"|"$/g, ''))
-    const row: Record<string, any> = {}
+    const row: Record<string, unknown> = {}
     headers.forEach((h, i) => { row[h] = cells[i] ?? '' })
     return row
   })
@@ -78,7 +78,7 @@ function parseDelimited(text: string, delimiter: string): { columns: Column[]; r
   })
   // Coerce values
   const typed = dataRows.map(row => {
-    const r: Record<string, any> = {}
+    const r: Record<string, unknown> = {}
     columns.forEach(c => {
       const v = row[c.name]
       if (v === '' || v == null) { r[c.name] = null; return }
@@ -91,9 +91,9 @@ function parseDelimited(text: string, delimiter: string): { columns: Column[]; r
   return { columns, rows: typed }
 }
 
-function parseJSON(text: string): { columns: Column[]; rows: Record<string, any>[] } {
+function parseJSON(text: string): { columns: Column[]; rows: Record<string, unknown>[] } {
   const parsed = JSON.parse(text)
-  const arr: Record<string, any>[] = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.data) ? parsed.data : [parsed])
+  const arr: Record<string, unknown>[] = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.data) ? parsed.data : [parsed])
   if (!arr.length) return { columns: [], rows: [] }
   const headers = Array.from(new Set(arr.flatMap(r => Object.keys(r))))
   const columns: Column[] = headers.map(name => {
@@ -118,7 +118,7 @@ interface ColumnProfile {
   topValues?: { value: string; count: number }[]
 }
 
-function profileColumn(col: Column, rows: Record<string, any>[]): ColumnProfile {
+function profileColumn(col: Column, rows: Record<string, unknown>[]): ColumnProfile {
   const values = rows.map(r => r[col.name])
   const nonNull = values.filter(v => v !== null && v !== undefined && v !== '')
   const unique = new Set(nonNull.map(String)).size
@@ -171,7 +171,11 @@ function profileColumn(col: Column, rows: Record<string, any>[]): ColumnProfile 
 type Op = {
   id: string
   type: 'filter' | 'sort' | 'select' | 'derive' | 'rename' | 'drop_nulls'
-  config: any
+  // Heterogeneous shape per op type. Each branch in applyOps narrows
+  // to the fields it expects. The EtlView form populates this lazily
+  // as the user fills inputs, so a discriminated union here would force
+  // every partial-fill state to satisfy the full shape — too noisy.
+  config: Record<string, unknown>
 }
 
 function applyOps(ds: Dataset, ops: Op[]): Dataset {
@@ -179,7 +183,9 @@ function applyOps(ds: Dataset, ops: Op[]): Dataset {
   let rows = [...ds.rows]
   for (const op of ops) {
     if (op.type === 'filter') {
-      const { column, operator, value } = op.config
+      const column = String(op.config.column ?? '')
+      const operator = String(op.config.operator ?? '=')
+      const value = op.config.value
       rows = rows.filter(r => {
         const v = r[column]
         if (v == null) return false
@@ -195,7 +201,8 @@ function applyOps(ds: Dataset, ops: Op[]): Dataset {
         }
       })
     } else if (op.type === 'sort') {
-      const { column, direction } = op.config
+      const column = String(op.config.column ?? '')
+      const direction = op.config.direction === 'desc' ? 'desc' : 'asc'
       rows = [...rows].sort((a, b) => {
         const va = a[column], vb = b[column]
         if (va == null) return 1
@@ -204,22 +211,23 @@ function applyOps(ds: Dataset, ops: Op[]): Dataset {
         return direction === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
       })
     } else if (op.type === 'select') {
-      const keep: string[] = op.config.columns
+      const keep: string[] = Array.isArray(op.config.columns) ? (op.config.columns as string[]) : []
       cols = cols.filter(c => keep.includes(c.name))
       rows = rows.map(r => {
-        const o: Record<string, any> = {}
+        const o: Record<string, unknown> = {}
         keep.forEach(k => { o[k] = r[k] })
         return o
       })
     } else if (op.type === 'drop_nulls') {
-      const col: string = op.config.column
+      const col = String(op.config.column ?? '')
       rows = rows.filter(r => r[col] != null && r[col] !== '')
     } else if (op.type === 'derive') {
-      const { name, expression } = op.config
+      const name = String(op.config.name ?? '')
+      const expression = String(op.config.expression ?? '')
       cols.push({ name, type: 'number' })
       rows = rows.map(r => {
         try {
-           
+
           const fn = new Function(...Object.keys(r), `return ${expression}`)
           return { ...r, [name]: fn(...Object.values(r)) }
         } catch {
@@ -227,10 +235,11 @@ function applyOps(ds: Dataset, ops: Op[]): Dataset {
         }
       })
     } else if (op.type === 'rename') {
-      const { from, to } = op.config
+      const from = String(op.config.from ?? '')
+      const to = String(op.config.to ?? '')
       cols = cols.map(c => c.name === from ? { ...c, name: to } : c)
       rows = rows.map(r => {
-        const o: Record<string, any> = {}
+        const o: Record<string, unknown> = {}
         Object.entries(r).forEach(([k, v]) => { o[k === from ? to : k] = v })
         return o
       })
@@ -352,7 +361,7 @@ export default function DataManager() {
       try {
         const res = await api.getDatasets({ page_size: 200 })
         if (cancelled) return
-        const apiItems: any[] = (res as any)?.items || []
+        const apiItems: Record<string, unknown>[] = ((res as { items?: Record<string, unknown>[] })?.items) || []
         if (apiItems.length === 0) { setBackendStale(false); return }
         setDatasets(prev => {
           const byId = new Map(prev.map(d => [d.id, d]))
@@ -361,14 +370,14 @@ export default function DataManager() {
             const existing = byId.get(id)
             const merged: Dataset = {
               id,
-              name: row.name ?? existing?.name ?? 'Untitled',
-              description: row.description ?? existing?.description ?? '',
-              source: (row.source ?? existing?.source ?? 'upload') as Dataset['source'],
-              columns: Array.isArray(row.columns) && row.columns.length ? row.columns : (existing?.columns ?? []),
+              name: typeof row.name === 'string' ? row.name : (existing?.name ?? 'Untitled'),
+              description: typeof row.description === 'string' ? row.description : (existing?.description ?? ''),
+              source: ((typeof row.source === 'string' ? row.source : (existing?.source ?? 'upload')) as Dataset['source']),
+              columns: Array.isArray(row.columns) && row.columns.length ? (row.columns as Column[]) : (existing?.columns ?? []),
               rows: existing?.rows ?? [],
-              tags: row.tags ?? existing?.tags ?? [],
-              createdAt: row.created_at ?? existing?.createdAt ?? new Date().toISOString(),
-              updatedAt: row.updated_at ?? existing?.updatedAt ?? new Date().toISOString(),
+              tags: Array.isArray(row.tags) ? (row.tags as string[]) : (existing?.tags ?? []),
+              createdAt: typeof row.created_at === 'string' ? row.created_at : (existing?.createdAt ?? new Date().toISOString()),
+              updatedAt: typeof row.updated_at === 'string' ? row.updated_at : (existing?.updatedAt ?? new Date().toISOString()),
             }
             byId.set(id, merged)
           }
@@ -435,7 +444,7 @@ export default function DataManager() {
     reader.onload = (ev) => {
       try {
         const text = ev.target?.result as string
-        let parsed: { columns: Column[]; rows: Record<string, any>[] }
+        let parsed: { columns: Column[]; rows: Record<string, unknown>[] }
         if (file.name.endsWith('.json')) parsed = parseJSON(text)
         else if (file.name.endsWith('.tsv')) parsed = parseDelimited(text, '\t')
         else parsed = parseDelimited(text, ',')
@@ -790,7 +799,7 @@ function OverviewView({ ds, profiles, setView }: { ds: Dataset; profiles: Column
         const c1 = numCols[i].name, c2 = numCols[j].name
         const vs = ds.rows.filter(r => r[c1] != null && r[c2] != null)
         if (vs.length < 3) continue
-        const x = vs.map(r => r[c1]), y = vs.map(r => r[c2])
+        const x = vs.map(r => Number(r[c1])), y = vs.map(r => Number(r[c2]))
         const mx = x.reduce((a, b) => a + b, 0) / x.length
         const my = y.reduce((a, b) => a + b, 0) / y.length
         const cov = x.reduce((s, xi, k) => s + (xi - mx) * (y[k] - my), 0) / x.length
@@ -1052,7 +1061,7 @@ function TableView({ ds, previewRows, setPreviewRows }: { ds: Dataset; previewRo
                     <td key={c.name} className="px-2 py-1">
                       {v == null ? <span style={{ color: 'var(--color-text-muted)' }}>—</span>
                         : c.type === 'boolean' ? <span style={{ color: v ? '#22c55e' : '#ef4444' }}>{v ? 'true' : 'false'}</span>
-                        : c.type === 'number' ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{typeof v === 'number' ? v.toLocaleString() : v}</span>
+                        : c.type === 'number' ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{typeof v === 'number' ? v.toLocaleString() : String(v)}</span>
                         : String(v)}
                     </td>
                   )
@@ -1155,7 +1164,7 @@ function ProfileView({ profiles, totalRows }: { profiles: ColumnProfile[]; total
 
 function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: (op: Op) => void; removeOp: (id: string) => void }) {
   const [opType, setOpType] = useState<Op['type']>('filter')
-  const [config, setConfig] = useState<any>({})
+  const [config, setConfig] = useState<Record<string, unknown>>({})
 
   const submit = () => {
     addOp({ id: crypto.randomUUID(), type: opType, config: { ...config } })
@@ -1184,11 +1193,11 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
 
         {opType === 'filter' && (
           <div className="space-y-1.5">
-            <select aria-label="Filter column" value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Filter column" value={String(config.column ?? '')} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="">Column…</option>
               {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
-            <select aria-label="Filter operator" value={config.operator || '='} onChange={e => setConfig({ ...config, operator: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Filter operator" value={String(config.operator ?? '=')} onChange={e => setConfig({ ...config, operator: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="=">=</option>
               <option value="!=">!=</option>
               <option value=">">{`>`}</option>
@@ -1197,16 +1206,16 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
               <option value="<=">{`<=`}</option>
               <option value="contains">contains</option>
             </select>
-            <input aria-label="Filter value" value={config.value || ''} onChange={e => setConfig({ ...config, value: e.target.value })} placeholder="Value" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
+            <input aria-label="Filter value" value={String(config.value ?? '')} onChange={e => setConfig({ ...config, value: e.target.value })} placeholder="Value" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
           </div>
         )}
         {opType === 'sort' && (
           <div className="space-y-1.5">
-            <select aria-label="Sort column" value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Sort column" value={String(config.column ?? '')} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="">Column…</option>
               {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
-            <select aria-label="Sort direction" value={config.direction || 'asc'} onChange={e => setConfig({ ...config, direction: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Sort direction" value={String(config.direction ?? 'asc')} onChange={e => setConfig({ ...config, direction: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="asc">Ascending</option>
               <option value="desc">Descending</option>
             </select>
@@ -1218,9 +1227,9 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
               <label key={c.name} className="flex items-center gap-1.5 text-xs">
                 <input
                   type="checkbox"
-                  checked={(config.columns || []).includes(c.name)}
+                  checked={(Array.isArray(config.columns) ? config.columns as string[] : []).includes(c.name)}
                   onChange={e => {
-                    const cur: string[] = config.columns || []
+                    const cur: string[] = Array.isArray(config.columns) ? (config.columns as string[]) : []
                     setConfig({ ...config, columns: e.target.checked ? [...cur, c.name] : cur.filter(x => x !== c.name) })
                   }}
                 />
@@ -1230,15 +1239,15 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
           </div>
         )}
         {opType === 'drop_nulls' && (
-          <select aria-label="Column to drop nulls from" value={config.column || ''} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+          <select aria-label="Column to drop nulls from" value={String(config.column ?? '')} onChange={e => setConfig({ ...config, column: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
             <option value="">Column…</option>
             {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
         )}
         {opType === 'derive' && (
           <div className="space-y-1.5">
-            <input aria-label="New column name" value={config.name || ''} onChange={e => setConfig({ ...config, name: e.target.value })} placeholder="New column name" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
-            <input aria-label="JavaScript expression" value={config.expression || ''} onChange={e => setConfig({ ...config, expression: e.target.value })} placeholder="JS expression e.g. age*2 + bmi" className="w-full px-2 py-1.5 text-xs rounded outline-none font-mono" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
+            <input aria-label="New column name" value={String(config.name ?? '')} onChange={e => setConfig({ ...config, name: e.target.value })} placeholder="New column name" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
+            <input aria-label="JavaScript expression" value={String(config.expression ?? '')} onChange={e => setConfig({ ...config, expression: e.target.value })} placeholder="JS expression e.g. age*2 + bmi" className="w-full px-2 py-1.5 text-xs rounded outline-none font-mono" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
             <div className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
               Available: {ds.columns.map(c => c.name).join(', ')}
             </div>
@@ -1246,11 +1255,11 @@ function EtlView({ ds, ops, addOp, removeOp }: { ds: Dataset; ops: Op[]; addOp: 
         )}
         {opType === 'rename' && (
           <div className="space-y-1.5">
-            <select aria-label="Rename from column" value={config.from || ''} onChange={e => setConfig({ ...config, from: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
+            <select aria-label="Rename from column" value={String(config.from ?? '')} onChange={e => setConfig({ ...config, from: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }}>
               <option value="">From…</option>
               {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
             </select>
-            <input aria-label="Rename to (new column name)" value={config.to || ''} onChange={e => setConfig({ ...config, to: e.target.value })} placeholder="To" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
+            <input aria-label="Rename to (new column name)" value={String(config.to ?? '')} onChange={e => setConfig({ ...config, to: e.target.value })} placeholder="To" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)' }} />
           </div>
         )}
 
