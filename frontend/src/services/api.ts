@@ -966,7 +966,7 @@ export const api = {
     return data
   },
 
-  async getProjectStats(id: string): Promise<any> {
+  async getProjectStats(id: string): Promise<unknown> {
     const { data } = await apiClient.get(`/projects/${id}/stats`)
     return data
   },
@@ -993,7 +993,7 @@ export const api = {
     return data
   },
 
-  async getGenerationStatus(taskId: string): Promise<any> {
+  async getGenerationStatus(taskId: string): Promise<unknown> {
     const { data } = await apiClient.get(`/hypotheses/generation/${taskId}`)
     return data
   },
@@ -1012,7 +1012,7 @@ export const api = {
     return data
   },
 
-  async addEvidenceToHypothesis(hypothesisId: string, evidenceRef: Partial<EvidenceRef>): Promise<any> {
+  async addEvidenceToHypothesis(hypothesisId: string, evidenceRef: Partial<EvidenceRef>): Promise<unknown> {
     const { data } = await apiClient.post(`/hypotheses/${hypothesisId}/add-evidence`, evidenceRef)
     return data
   },
@@ -1053,7 +1053,7 @@ export const api = {
     return data
   },
 
-  async bulkCreateEvidence(items: EvidenceCreate[]): Promise<any> {
+  async bulkCreateEvidence(items: EvidenceCreate[]): Promise<unknown> {
     const { data } = await apiClient.post('/evidence/bulk', { items })
     return data
   },
@@ -1104,7 +1104,7 @@ export const api = {
     return data
   },
 
-  async queryCypher(query: string): Promise<any> {
+  async queryCypher(query: string): Promise<unknown> {
     const { data } = await apiClient.post('/knowledge/query', { query })
     return data
   },
@@ -1116,27 +1116,27 @@ export const api = {
     return data
   },
 
-  async ragContext(query: string, params?: { max_tokens?: number; source_types?: string[] }): Promise<any> {
+  async ragContext(query: string, params?: { max_tokens?: number; source_types?: string[] }): Promise<unknown> {
     const { data } = await apiClient.post('/rag/context', { query, ...params })
     return data
   },
 
-  async ragSimilar(documentId: string, params?: { top_k?: number }): Promise<any> {
+  async ragSimilar(documentId: string, params?: { top_k?: number }): Promise<unknown> {
     const { data } = await apiClient.post('/rag/similar', { document_id: documentId, ...params })
     return data
   },
 
-  async ragGraphContext(entities: string[]): Promise<any> {
+  async ragGraphContext(entities: string[]): Promise<unknown> {
     const { data } = await apiClient.post('/rag/graph-context', { entities })
     return data
   },
 
-  async ragStats(): Promise<any> {
+  async ragStats(): Promise<unknown> {
     const { data } = await apiClient.get('/rag/stats')
     return data
   },
 
-  async ragHealth(): Promise<any> {
+  async ragHealth(): Promise<unknown> {
     const { data } = await apiClient.get('/rag/health')
     return data
   },
@@ -1173,7 +1173,7 @@ export const api = {
     return data
   },
 
-  async uploadDocument(file: File, params?: { project_id?: string }): Promise<any> {
+  async uploadDocument(file: File, params?: { project_id?: string }): Promise<{ id?: string; document_id?: string; job_id?: string; [k: string]: unknown }> {
     const formData = new FormData()
     formData.append('file', file)
     if (params?.project_id) formData.append('project_id', params.project_id)
@@ -1183,7 +1183,7 @@ export const api = {
     return data
   },
 
-  async getIngestionQueueStats(): Promise<any> {
+  async getIngestionQueueStats(): Promise<unknown> {
     const { data } = await apiClient.get('/ingestion/queue/stats')
     return data
   },
@@ -1214,7 +1214,7 @@ export const api = {
     return data
   },
 
-  async getSimulationResults(id: string): Promise<any> {
+  async getSimulationResults(id: string): Promise<unknown> {
     const { data } = await apiClient.get(`/simulations/${id}/results`)
     return data
   },
@@ -1241,7 +1241,7 @@ export const api = {
     return data
   },
 
-  async cancelAgentTask(id: string): Promise<any> {
+  async cancelAgentTask(id: string): Promise<unknown> {
     const { data } = await apiClient.post(`/agents/tasks/${id}/cancel`)
     return data
   },
@@ -1253,7 +1253,7 @@ export const api = {
 
   // ── Orchestrator ──────────────────────────────────────────────
 
-  async startDiscovery(config?: DiscoveryConfig): Promise<any> {
+  async startDiscovery(config?: DiscoveryConfig): Promise<{ project_id?: string; project_name?: string; [k: string]: unknown }> {
     const { data } = await apiClient.post('/orchestrator/start', config)
     return data
   },
@@ -1263,17 +1263,17 @@ export const api = {
     return data
   },
 
-  async pauseDiscovery(): Promise<any> {
+  async pauseDiscovery(): Promise<unknown> {
     const { data } = await apiClient.post('/orchestrator/pause')
     return data
   },
 
-  async resumeDiscovery(): Promise<any> {
+  async resumeDiscovery(): Promise<unknown> {
     const { data } = await apiClient.post('/orchestrator/resume')
     return data
   },
 
-  async stopDiscovery(): Promise<any> {
+  async stopDiscovery(): Promise<unknown> {
     const { data } = await apiClient.post('/orchestrator/stop')
     return data
   },
@@ -1285,12 +1285,12 @@ export const api = {
     return data
   },
 
-  async generatePaper(): Promise<any> {
+  async generatePaper(): Promise<unknown> {
     const { data } = await apiClient.post('/orchestrator/paper/generate')
     return data
   },
 
-  async getPaperStatus(): Promise<any> {
+  async getPaperStatus(): Promise<unknown> {
     const { data } = await apiClient.get('/orchestrator/paper/status')
     return data
   },
@@ -1302,7 +1302,7 @@ export const api = {
 
   // ── Discovery Analysis ────────────────────────────────────────
 
-  async analyzeDisease(config: DiscoveryConfig): Promise<any> {
+  async analyzeDisease(config: DiscoveryConfig): Promise<unknown> {
     const { data } = await apiClient.post('/discovery/analyze', config)
     return data
   },
