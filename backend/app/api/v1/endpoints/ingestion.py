@@ -17,15 +17,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.ingestion.base import SourceType
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.models.ingestion_job import (
     IngestionJob,
     IngestionJobStatus as IngestionJobStatusModel,
     IngestionSource as IngestionSourceModel,
 )
+from app.models.user import User
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
+
+
+async def _owned_job_or_404(
+    db: AsyncSession, job_id: UUID, current_user: User,
+) -> IngestionJob:
+    """Look up an ingestion job and confirm `current_user` owns it."""
+    result = await db.execute(
+        select(IngestionJob).where(
+            IngestionJob.id == job_id,
+            IngestionJob.owner_id == current_user.id,
+        )
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Ingestion job not found")
+    return job
 # In-memory tracking for agent status and source configs
 _agent_tracker: dict[str, dict[str, Any]] = {}
 _source_configs: dict[str, dict[str, Any]] = {}
@@ -189,8 +206,9 @@ async def create_ingestion_job(
     job: IngestionJobCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> IngestionJobResponse:
-    """Create and start a new ingestion job."""
+    """Create and start a new ingestion job owned by the caller."""
     logger.info(
         "Creating ingestion job",
         query=job.query[:50],
@@ -209,6 +227,7 @@ async def create_ingestion_job(
 
     db_job = IngestionJob(
         id=uuid4(),
+        owner_id=current_user.id,
         name=job.name,
         query=job.query,
         source=map_source_to_model(job.sources[0]) if job.sources else IngestionSourceModel.PUBMED,
@@ -365,38 +384,29 @@ async def list_ingestion_jobs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> IngestionJobListResponse:
-    """List ingestion jobs with filtering and pagination."""
-    query = select(IngestionJob)
+    """List the caller's ingestion jobs with filtering and pagination."""
+    query = select(IngestionJob).where(IngestionJob.owner_id == current_user.id)
+    count_query = select(func.count(IngestionJob.id)).where(
+        IngestionJob.owner_id == current_user.id
+    )
 
-    # Apply filters
     if status:
         try:
             status_enum = IngestionJobStatusModel(status)
             query = query.where(IngestionJob.status == status_enum)
+            count_query = count_query.where(IngestionJob.status == status_enum)
         except ValueError:
             logger.debug("Invalid status filter ignored", status=status)
     if source:
         query = query.where(IngestionJob.source == map_source_to_model(source))
-
-    # Get total count
-    count_query = select(func.count()).select_from(IngestionJob)
-    if status:
-        try:
-            status_enum = IngestionJobStatusModel(status)
-            count_query = count_query.where(IngestionJob.status == status_enum)
-        except ValueError:
-            logger.debug("Invalid status filter ignored for count", status=status)
-    if source:
         count_query = count_query.where(IngestionJob.source == map_source_to_model(source))
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Sort by created_at descending
     query = query.order_by(desc(IngestionJob.created_at))
-
-    # Paginate
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
 
@@ -415,15 +425,10 @@ async def list_ingestion_jobs(
 async def get_ingestion_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> IngestionJobResponse:
-    """Get a specific ingestion job by ID."""
-    query = select(IngestionJob).where(IngestionJob.id == job_id)
-    result = await db.execute(query)
-    job = result.scalar_one_or_none()
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
+    """Get one of the caller's ingestion jobs by ID."""
+    job = await _owned_job_or_404(db, job_id, current_user)
     return job_to_response(job)
 
 
@@ -431,14 +436,10 @@ async def get_ingestion_job(
 async def cancel_ingestion_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict[str, Any]:
-    """Cancel a running or pending ingestion job."""
-    query = select(IngestionJob).where(IngestionJob.id == job_id)
-    result = await db.execute(query)
-    job = result.scalar_one_or_none()
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    """Cancel one of the caller's running or pending ingestion jobs."""
+    job = await _owned_job_or_404(db, job_id, current_user)
 
     if job.is_terminal():
         raise HTTPException(
@@ -458,14 +459,10 @@ async def retry_ingestion_job(
     job_id: UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> IngestionJobResponse:
-    """Retry a failed ingestion job."""
-    query = select(IngestionJob).where(IngestionJob.id == job_id)
-    result = await db.execute(query)
-    job = result.scalar_one_or_none()
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    """Retry one of the caller's failed ingestion jobs."""
+    job = await _owned_job_or_404(db, job_id, current_user)
 
     if job.status != IngestionJobStatusModel.FAILED:
         raise HTTPException(
@@ -510,15 +507,10 @@ async def retry_ingestion_job(
 async def delete_ingestion_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> None:
-    """Delete an ingestion job."""
-    query = select(IngestionJob).where(IngestionJob.id == job_id)
-    result = await db.execute(query)
-    job = result.scalar_one_or_none()
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
+    """Delete one of the caller's ingestion jobs."""
+    job = await _owned_job_or_404(db, job_id, current_user)
     await db.delete(job)
     await db.commit()
     logger.info("Ingestion job deleted", job_id=str(job_id))
@@ -528,8 +520,9 @@ async def delete_ingestion_job(
 async def create_recurring_job(
     job: RecurringJobCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> RecurringJobResponse:
-    """Create a recurring ingestion job."""
+    """Create a recurring ingestion job owned by the caller."""
     logger.info(
         "Creating recurring job",
         query=job.query[:50],
@@ -540,6 +533,7 @@ async def create_recurring_job(
 
     db_job = IngestionJob(
         id=uuid4(),
+        owner_id=current_user.id,
         name=f"Recurring: {job.query[:30]}",
         query=job.query,
         source=map_source_to_model(job.sources[0]) if job.sources else IngestionSourceModel.PUBMED,
@@ -581,9 +575,13 @@ async def create_recurring_job(
 @router.get("/recurring", response_model=list[RecurringJobResponse])
 async def list_recurring_jobs(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> list[RecurringJobResponse]:
-    """List all recurring ingestion jobs."""
-    query = select(IngestionJob).where(IngestionJob.is_scheduled == 1)
+    """List the caller's recurring ingestion jobs."""
+    query = select(IngestionJob).where(
+        IngestionJob.is_scheduled == 1,
+        IngestionJob.owner_id == current_user.id,
+    )
     result = await db.execute(query)
     jobs = result.scalars().all()
 
@@ -612,11 +610,13 @@ async def list_recurring_jobs(
 async def delete_recurring_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict[str, Any]:
-    """Delete a recurring job."""
+    """Delete one of the caller's recurring jobs."""
     query = select(IngestionJob).where(
         IngestionJob.id == job_id,
         IngestionJob.is_scheduled == 1,
+        IngestionJob.owner_id == current_user.id,
     )
     result = await db.execute(query)
     job = result.scalar_one_or_none()
@@ -635,11 +635,13 @@ async def delete_recurring_job(
 async def toggle_recurring_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> RecurringJobResponse:
-    """Enable or disable a recurring job."""
+    """Enable or disable one of the caller's recurring jobs."""
     query = select(IngestionJob).where(
         IngestionJob.id == job_id,
         IngestionJob.is_scheduled == 1,
+        IngestionJob.owner_id == current_user.id,
     )
     result = await db.execute(query)
     job = result.scalar_one_or_none()
@@ -710,8 +712,9 @@ async def upload_document(
     keywords: str | None = None,
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict[str, Any]:
-    """Upload a custom document for ingestion.
+    """Upload a custom document for ingestion under the caller's account.
 
     Accepts a generous whitelist of research-document formats. We check
     both MIME type and filename extension because browsers are wildly
@@ -781,6 +784,7 @@ async def upload_document(
     # Create ingestion job for the document
     db_job = IngestionJob(
         id=uuid4(),
+        owner_id=current_user.id,
         name=f"Document: {title or file.filename}",
         source=IngestionSourceModel.FILE_UPLOAD,
         source_config={

@@ -63,6 +63,9 @@ OWNED_MODELS: set[str] = {
     "CitationFolder",
     "CitationHighlight",
     "DiscoverySession",
+    "NotebookPage",
+    "Activity",
+    "IngestionJob",
 }
 
 # Functions whose use anywhere in a handler proves an ownership filter.
@@ -95,6 +98,12 @@ EXEMPT_FUNCTIONS: set[tuple[str, str]] = {
     # ownership) before the CitationHighlight query — same pattern
     # as the discovery sessions / agent task helpers, just two steps.
     ("citations.py", "list_highlights"),
+    # Background task spawned by POST /ingestion/jobs (which checked
+    # ownership at insert time). The internal job_id was just minted
+    # by the parent endpoint; no external caller can invoke this.
+    ("ingestion.py", "_execute_ingestion_job"),
+    # Document-upload background processor — same trust pattern.
+    ("ingestion.py", "_process_uploaded_document"),
 }
 
 
@@ -219,6 +228,9 @@ def test_no_owned_model_query_without_ownership_proof() -> None:
         "citations.py",
         "document_pipeline.py",
         "agent_chat_stream.py",
+        "notebook.py",
+        "activities.py",
+        "ingestion.py",
     }
 
     regressions: list[str] = []
