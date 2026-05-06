@@ -140,16 +140,37 @@ jobs:
 
       - name: Capture outputs
         id: tf_outputs
+        if: always()
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          DOMAIN=$(terraform output -raw cloudfront_domain)
-          DIST_ID=$(terraform output -raw cloudfront_distribution_id)
-          BUCKET=$(terraform output -raw frontend_bucket)
+          # `if: always()` so we still try to recover the URL even if a
+          # later optional step blew up. The capture itself can fail
+          # cleanly (set +e) so a missing output doesn't kill the job
+          # before we've printed anything useful.
+          set +e
+          DOMAIN=$(terraform output -raw cloudfront_domain 2>/dev/null)
+          DIST_ID=$(terraform output -raw cloudfront_distribution_id 2>/dev/null)
+          BUCKET=$(terraform output -raw frontend_bucket 2>/dev/null)
           echo "domain=$DOMAIN"        >> "$GITHUB_OUTPUT"
           echo "dist_id=$DIST_ID"      >> "$GITHUB_OUTPUT"
           echo "bucket=$BUCKET"        >> "$GITHUB_OUTPUT"
 
+          # Also dump straight to the run log so the URL shows up in
+          # the per-job output, not only in the Summary tab.
+          echo ""
+          echo "==================================================================="
+          if [ -n "$DOMAIN" ]; then
+            echo "  CloudFront URL:  https://${DOMAIN}"
+          else
+            echo "  CloudFront URL:  (terraform output not available yet)"
+          fi
+          echo "  Distribution ID: ${DIST_ID:-(unknown)}"
+          echo "  Origin bucket:   ${BUCKET:-(unknown)}"
+          echo "==================================================================="
+          echo ""
+
       - name: Print results to job summary
+        if: always()
         run: |
           DOMAIN="${{ steps.tf_outputs.outputs.domain }}"
           DIST_ID="${{ steps.tf_outputs.outputs.dist_id }}"
@@ -158,36 +179,56 @@ jobs:
           {
             echo "## humanovo Frontend — NEW AWS Account"
             echo ""
-            echo "### Public CloudFront URL"
-            echo ""
-            echo "**https://${DOMAIN}**"
-            echo ""
-            echo "Paste that into a browser — first deploy will 403/404 until you upload"
-            echo "the Vite \`dist/\` to s3://${BUCKET}. CloudFront cold-distribution propagation"
-            echo "typically takes 5-10 minutes after this workflow completes."
+            if [ -n "$DOMAIN" ]; then
+              echo "### Public CloudFront URL"
+              echo ""
+              echo "**https://${DOMAIN}**"
+              echo ""
+              echo "Paste that into a browser — first deploy will 403/404 until you upload"
+              echo "the Vite \`dist/\` to s3://${BUCKET}. CloudFront cold-distribution propagation"
+              echo "typically takes 5-10 minutes after this workflow completes."
+            else
+              echo "### Could not capture CloudFront domain"
+              echo ""
+              echo "Terraform did not return a \`cloudfront_domain\` output. Likely causes:"
+              echo "  - The apply step failed before reaching the cloudfront resource"
+              echo "  - State backend mismatch (different region or environment)"
+              echo "  - First-run AWS provider error (rare)"
+              echo ""
+              echo "Re-run with debug logs enabled (Actions → Run workflow → Enable debug logging)."
+            fi
             echo ""
             echo "### Stack details"
             echo ""
             echo "| Resource | Value |"
             echo "|---|---|"
-            echo "| AWS Account | \`${ACCOUNT_ID}\` |"
+            echo "| AWS Account | \`${ACCOUNT_ID:-unknown}\` |"
             echo "| Region | \`${{ github.event.inputs.aws_region }}\` |"
             echo "| Environment | \`${{ github.event.inputs.environment }}\` |"
-            echo "| CloudFront distribution | \`${DIST_ID}\` |"
-            echo "| Origin S3 bucket | \`${BUCKET}\` |"
-            echo "| Terraform state | \`${TF_STATE_BUCKET}/frontend/${{ github.event.inputs.environment }}/terraform.tfstate\` |"
-            echo ""
-            echo "### Next steps"
-            echo ""
-            echo "1. Build the frontend: \`cd frontend && npm ci && npm run build\`"
-            echo "2. Upload: \`aws s3 sync frontend/dist/ s3://${BUCKET}/ --delete\`"
-            echo "3. Invalidate CloudFront cache:"
-            echo "   \`aws cloudfront create-invalidation --distribution-id ${DIST_ID} --paths '/*'\`"
-            echo "4. Wait ~5 minutes for first-time CloudFront propagation."
+            echo "| CloudFront distribution | \`${DIST_ID:-not captured}\` |"
+            echo "| Origin S3 bucket | \`${BUCKET:-not captured}\` |"
+            echo "| Terraform state | \`${TF_STATE_BUCKET:-unknown}/frontend/${{ github.event.inputs.environment }}/terraform.tfstate\` |"
+            if [ -n "$DOMAIN" ]; then
+              echo ""
+              echo "### Next steps"
+              echo ""
+              echo "1. Build the frontend: \`cd frontend && npm ci && npm run build\`"
+              echo "2. Upload: \`aws s3 sync frontend/dist/ s3://${BUCKET}/ --delete\`"
+              echo "3. Invalidate CloudFront cache:"
+              echo "   \`aws cloudfront create-invalidation --distribution-id ${DIST_ID} --paths '/*'\`"
+              echo "4. Wait ~5 minutes for first-time CloudFront propagation."
+              echo ""
+              echo "Or just run the **Deploy Frontend to NEW account** workflow —"
+              echo "it does all four steps for you."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo ""
-          echo "============================================================"
-          echo "  CloudFront URL:  https://${DOMAIN}"
-          echo "============================================================"
+          echo "==================================================================="
+          if [ -n "$DOMAIN" ]; then
+            echo "  CloudFront URL:  https://${DOMAIN}"
+          else
+            echo "  CloudFront URL:  (not available — see job summary)"
+          fi
+          echo "==================================================================="
           echo ""
