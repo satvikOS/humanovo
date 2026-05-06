@@ -8,6 +8,47 @@ This is the source of truth for how the 12-stage pipeline runs across AWS / Azur
 
 ---
 
+## 0. The non-negotiable principle: models reason, never recall
+
+This is the wedge against every other research-AI tool. Locked-in 2026-05-06.
+
+Every model call in the swarm — every stage, every cloud, every model — operates under this contract:
+
+```
+SYSTEM: You are a reasoning engine, not a knowledge source.
+  - Use ONLY the provided context (retrieved from the user's RAG
+    corpus + Common KG + that run's hypothesis/paper KG).
+  - If the context doesn't support a claim, mark it "unsupported".
+    Never fabricate to fill the gap.
+  - Do NOT introduce facts from your training data, even if you're
+    confident they're true. The user's research integrity depends
+    on every claim tracing back to a verifiable source in their KG.
+  - Your job is reasoning, summarization, structure, language —
+    not recall.
+
+USER: <retrieved context>
+      <task>
+```
+
+**Why this matters**:
+- Biomni mixes retrieval with model knowledge → users can't tell which claims are sourced. Reviewer rejects.
+- Google AI Co-Scientist is a black box → users can't audit. Reviewer rejects.
+- humanovo: every claim in a paper traces back to a footnoted source in the user's KG, the model only contributed reasoning + language. Reviewer can verify.
+
+**Implementation invariant**: every stage's prompt template MUST include the "use only provided context" preamble. Any stage that calls a model with bare instructions (no retrieval, no grounding directive) is a bug. The orchestrator's per-stage validator rejects requests that don't pass retrieval through.
+
+**What "capability" means here**: we use the models for what they're good at as functions:
+- Long-context comprehension (Opus, GPT-4.1)
+- Adversarial reasoning (Opus, Grok)
+- Structured extraction (Sonnet, GPT-4o)
+- Cheap classification (Haiku, Phi-4)
+- Embeddings (Cohere Embed, text-embedding-3-large)
+- Image rendering of pre-described scientific figures (gpt-image-1, dall-e-3)
+
+We do NOT use them for: "what's known about CRISPR-Cas9?" — that's a retrieval question, answered by hitting the Common KG, not the model's pretraining.
+
+---
+
 ## 1. The shape
 
 ```
