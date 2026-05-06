@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios'
 import { toast } from '../contexts/ToastContext'
+import { getToken, clearToken, isTokenExpired } from './auth'
 
 // In production (CloudFront), set VITE_API_BASE_URL to the backend URL
 // (e.g. https://api.humanovo.com or API Gateway URL).
@@ -11,6 +12,12 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
  * request shapes (form-data uploads, WebSocket auth, raw POST bodies)
  * can use the configured interceptor + baseURL directly instead of
  * hand-rolling fetch().
+ *
+ * Auth: a request interceptor attaches `Authorization: Bearer <jwt>`
+ * from local storage if present. A response interceptor clears the
+ * token on 401 and redirects the app to /login. Endpoints that should
+ * NOT trigger this redirect (e.g. /auth/login itself) use a separate
+ * axios instance defined in services/auth.ts.
  */
 export const apiClient: AxiosInstance = axios.create({
   baseURL: `${API_BASE}/api/v1`,
@@ -18,6 +25,27 @@ export const apiClient: AxiosInstance = axios.create({
     'Content-Type': 'application/json',
   },
 })
+
+// Request interceptor: attach the JWT to every request that has one.
+// Pre-emptively clears expired tokens — saves a server round-trip on
+// the first request after the TTL elapses.
+apiClient.interceptors.request.use(
+  (config) => {
+    if (isTokenExpired()) {
+      clearToken()
+      // Don't attach an expired token; let the request go through and
+      // the response interceptor handle the 401 redirect uniformly.
+      return config
+    }
+    const token = getToken()
+    if (token) {
+      config.headers = config.headers || {}
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error),
+)
 
 // Opt-out header: set `X-Silent-Error: '1'` on a request to suppress the
 // global toast (useful for background polls where failure is expected
@@ -76,6 +104,28 @@ apiClient.interceptors.response.use(
       console.error(`[API] ${message}:`, error.response.data)
     } else if (error.request) {
       console.error(`[API] ${message}`)
+    }
+    // 401 handling: clear the local token and redirect to /login. The
+    // RequireAuth route guard would catch a navigation that lands on a
+    // protected page without a token, but a 401 in-flight on a stale
+    // token (e.g. after the user idled past the JWT TTL) needs to be
+    // converted into a re-auth prompt directly.
+    if (error.response?.status === 401) {
+      const url = error.config?.url || ''
+      // Don't loop on /auth/login itself — that 401 means wrong creds,
+      // surfaced by the login page (which uses authClient, not this
+      // instance, but defensively skip anyway).
+      const isAuthEndpoint = typeof url === 'string' && /\/auth\/(login|register)/.test(url)
+      if (!isAuthEndpoint) {
+        clearToken()
+        // Avoid double-redirects from concurrent failures.
+        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+          // Preserve the page the user was on so we can return them
+          // there after re-login.
+          const next = encodeURIComponent(window.location.pathname + window.location.search)
+          window.location.href = `/login?next=${next}`
+        }
+      }
     }
     if (!silent && error.response?.status !== 401 && error.response?.status !== 404) {
       // Collapse all 5xx + network errors under a single title/message so

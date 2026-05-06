@@ -179,6 +179,28 @@ async def get_current_admin_user(
     return current_user
 
 
+# ─── Router-level dependency lists ────────────────────────────────
+#
+# Apply at router construction time:
+#
+#     router = APIRouter(prefix="/projects", dependencies=AUTH_REQUIRED)
+#
+# rather than decorating each endpoint individually. This pattern is
+# the source of truth for "this whole module requires auth" and makes
+# the no-unauthenticated-endpoints CI guard trivial to enforce.
+#
+# Rules:
+#   - AUTH_REQUIRED: any signed-in active user passes.
+#   - ADMIN_REQUIRED: only role=ADMIN passes (returns 403 for non-admins,
+#     401 for unauthenticated).
+#
+# Module-level constants (not list literals at the call site) so that
+# the CI guard can identify routers that consume them by AST inspection.
+
+AUTH_REQUIRED = [Depends(get_current_active_user)]
+ADMIN_REQUIRED = [Depends(get_current_admin_user)]
+
+
 async def authenticate_user(
     email: str,
     password: str,
