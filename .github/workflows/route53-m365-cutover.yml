@@ -35,7 +35,12 @@ name: Route53 — humanovo.net M365 email cutover
 #   - resend._domainkey.humanovo.net TXT (Resend DKIM)
 #   - _dmarc.humanovo.net TXT
 #
-# Trigger: workflow_dispatch only. Confirmation phrase required.
+# Trigger:
+#   - workflow_dispatch (manual run from the Actions UI; requires a
+#     confirmation phrase input)
+#   - push to humanovo when THIS workflow file changes (auto-fires
+#     once when the agent pushes a config update; idempotent because
+#     all DNS changes are UPSERTs)
 
 on:
   workflow_dispatch:
@@ -61,6 +66,10 @@ on:
         description: 'Type humanovo-net-m365-cutover to confirm'
         required: true
         type: string
+  push:
+    branches: [humanovo]
+    paths:
+      - '.github/workflows/route53-m365-cutover.yml'
 
 env:
   AWS_REGION: us-east-1
@@ -72,16 +81,31 @@ concurrency:
 
 jobs:
   apply:
-    name: ${{ inputs.phase }} — SPF mode ${{ inputs.spf_mode }}
+    name: ${{ github.event_name == 'push' && 'apply (auto, push)' || format('{0} — SPF mode {1}', inputs.phase, inputs.spf_mode) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Resolve effective phase + SPF mode upfront so every step can read
+    # them. Push triggers default to apply + m365+resend (the safe
+    # combination for this setup); workflow_dispatch uses the inputs.
+    env:
+      EFFECTIVE_PHASE: ${{ github.event_name == 'push' && 'apply' || inputs.phase }}
+      EFFECTIVE_SPF_MODE: ${{ github.event_name == 'push' && 'm365+resend' || inputs.spf_mode }}
     steps:
-      - name: Verify confirmation phrase
+      - name: Verify confirmation phrase (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ inputs.confirm_intent }}" != "humanovo-net-m365-cutover" ]; then
             echo "::error::Confirmation phrase did not match. Aborting."
             exit 1
           fi
+
+      - name: Note for push trigger
+        if: github.event_name == 'push'
+        run: |
+          echo "Triggered by push to humanovo (file change in route53-m365-cutover.yml)."
+          echo "Effective phase: $EFFECTIVE_PHASE"
+          echo "Effective SPF mode: $EFFECTIVE_SPF_MODE"
+          echo "All DNS changes are UPSERTs — re-running this workflow is harmless."
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -137,7 +161,7 @@ jobs:
         id: batch
         run: |
           set -e
-          case "${{ inputs.spf_mode }}" in
+          case "${{ env.EFFECTIVE_SPF_MODE }}" in
             "m365+resend")
               SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"'
               ;;
@@ -148,7 +172,7 @@ jobs:
               SPF='"v=spf1 include:spf.protection.outlook.com -all"'
               ;;
             *)
-              echo "::error::Unknown spf_mode '${{ inputs.spf_mode }}'"
+              echo "::error::Unknown spf_mode '${{ env.EFFECTIVE_SPF_MODE }}'"
               exit 1
               ;;
           esac
@@ -216,7 +240,7 @@ jobs:
           echo "==================="
 
       - name: Apply (Route 53 ChangeResourceRecordSets)
-        if: inputs.phase == 'apply'
+        if: env.EFFECTIVE_PHASE == 'apply'
         id: change
         run: |
           set -e
@@ -229,7 +253,7 @@ jobs:
           echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Wait for INSYNC
-        if: inputs.phase == 'apply'
+        if: env.EFFECTIVE_PHASE == 'apply'
         run: |
           set -e
           echo "Waiting for change ${{ steps.change.outputs.change_id }} to propagate to Route 53 edges (typically 30-90s)…"
@@ -237,7 +261,7 @@ jobs:
           echo "Change is INSYNC across Route 53."
 
       - name: Verify via public DNS resolvers
-        if: inputs.phase == 'apply'
+        if: env.EFFECTIVE_PHASE == 'apply'
         run: |
           set +e
           echo "## Post-change verification" >> $GITHUB_STEP_SUMMARY
@@ -264,11 +288,11 @@ jobs:
           {
             echo "## Route 53 — humanovo.net M365 email cutover"
             echo ""
-            echo "Phase: \`${{ inputs.phase }}\`"
-            echo "SPF mode: \`${{ inputs.spf_mode }}\`"
+            echo "Phase: \`${{ env.EFFECTIVE_PHASE }}\`"
+            echo "SPF mode: \`${{ env.EFFECTIVE_SPF_MODE }}\`"
             echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
             echo ""
-            if [ "${{ inputs.phase }}" = "apply" ]; then
+            if [ "${{ env.EFFECTIVE_PHASE }}" = "apply" ]; then
               echo "### Next steps"
               echo "1. Wait 5-10 min for global DNS propagation (some recursive resolvers cache up to TTL)."
               echo "2. In Microsoft 365 admin → Setup → Domains → humanovo.net → click **Re-check DNS**."
