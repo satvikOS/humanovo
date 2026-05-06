@@ -50,11 +50,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Diagnose which AWS-credential secrets exist
+        # GitHub auto-redacts secret VALUES in logs, but we can safely
+        # report whether each candidate secret name is populated.
+        # This narrows down which name the founder used so the cred
+        # config step below can pick the right one.
+        env:
+          DEFAULT_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          NEW_KEY: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          PROD_KEY: ${{ secrets.AWS_PROD_ACCESS_KEY_ID }}
+        run: |
+          set +e
+          echo "Checking which AWS-credential secret names are populated:"
+          [ -n "$DEFAULT_KEY" ] && echo "  ✓ AWS_ACCESS_KEY_ID is set" || echo "  ✗ AWS_ACCESS_KEY_ID is empty/missing"
+          [ -n "$NEW_KEY" ]     && echo "  ✓ AWS_NEW_ACCESS_KEY_ID is set" || echo "  ✗ AWS_NEW_ACCESS_KEY_ID is empty/missing"
+          [ -n "$PROD_KEY" ]    && echo "  ✓ AWS_PROD_ACCESS_KEY_ID is set" || echo "  ✗ AWS_PROD_ACCESS_KEY_ID is empty/missing"
+          if [ -z "$DEFAULT_KEY" ] && [ -z "$NEW_KEY" ] && [ -z "$PROD_KEY" ]; then
+            {
+              echo "## ❌ No AWS credentials secret found"
+              echo ""
+              echo "None of the expected secret names contain a value:"
+              echo "  - AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY"
+              echo "  - AWS_NEW_ACCESS_KEY_ID + AWS_NEW_SECRET_ACCESS_KEY"
+              echo "  - AWS_PROD_ACCESS_KEY_ID + AWS_PROD_SECRET_ACCESS_KEY"
+              echo ""
+              echo "### Fix"
+              echo "1. Open https://github.com/satvikOS/humanovo/settings/secrets/actions"
+              echo "2. Click **New repository secret**"
+              echo "3. Name: \`AWS_ACCESS_KEY_ID\`, paste your new account's access key, save"
+              echo "4. Click **New repository secret** again"
+              echo "5. Name: \`AWS_SECRET_ACCESS_KEY\`, paste the secret, save"
+              echo "6. Push any trivial change to this workflow file to re-fire"
+            } >> $GITHUB_STEP_SUMMARY
+            echo "::error::No AWS credentials secret found — see step summary"
+            exit 1
+          fi
+
       - name: Configure AWS credentials
+        # Try AWS_ACCESS_KEY_ID first; fall back to AWS_NEW_* or AWS_PROD_*
+        # if that's where the founder put them. The || operator picks
+        # the first non-empty value.
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID || secrets.AWS_NEW_ACCESS_KEY_ID || secrets.AWS_PROD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY || secrets.AWS_NEW_SECRET_ACCESS_KEY || secrets.AWS_PROD_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify caller identity
