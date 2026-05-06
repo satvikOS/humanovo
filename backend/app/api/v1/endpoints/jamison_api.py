@@ -348,6 +348,7 @@ async def _run_discovery_pipeline(
 async def _run_synthesis_pipeline(
     run_id: str,
     project_id: str,
+    user_id: str,
     hypothesis: str,
     output_format: str,
     verbosity: str,
@@ -355,12 +356,35 @@ async def _run_synthesis_pipeline(
     citation_style: str,
     field_scope: str | None,
 ):
-    """Background task that runs the 5-stage synthesis pipeline."""
+    """Background task that runs the 5-stage synthesis pipeline under
+    the caller's tier-based budget cap."""
+    from app.services.budget_enforcer_service import (
+        BudgetExceeded,
+        RunKind,
+        UserBudgetBlocked,
+        finalize_run,
+        start_run,
+    )
+
     run_record = _active_synthesis_runs.get(run_id, {})
     run_record["status"] = "running"
     run_record["started_at"] = datetime.utcnow().isoformat()
 
+    enforcer = None
     try:
+        try:
+            enforcer = await start_run(
+                run_id=run_id, user_id=user_id, kind=RunKind.PAPER_GEN,
+            )
+        except UserBudgetBlocked as ub:
+            run_record["status"] = "blocked"
+            run_record["error"] = str(ub)
+            logger.warning(
+                f"Synthesis run {run_id} blocked: monthly budget exhausted "
+                f"for user={user_id}"
+            )
+            return
+
         from app.services.synthesis_pipeline import SynthesisPipeline
         from app.agents.discovery_orchestrator import MultiModelLLM, TokenPool
 
@@ -368,7 +392,7 @@ async def _run_synthesis_pipeline(
         llm = MultiModelLLM(token_pool)
         await llm.initialize()
 
-        pipeline = SynthesisPipeline(llm)
+        pipeline = SynthesisPipeline(llm, budget_enforcer=enforcer, user_id=user_id)
 
         async def on_stage(stage_num, stage_name, model, output):
             try:
@@ -402,10 +426,21 @@ async def _run_synthesis_pipeline(
 
         logger.info(f"Synthesis run {run_id} completed")
 
+    except BudgetExceeded as be:
+        run_record["status"] = "budget_truncated"
+        run_record["error"] = str(be)
+        run_record["spent_cents"] = getattr(be, "spent_cents", None)
+        logger.warning(f"Synthesis run {run_id} budget-truncated: {be}")
     except Exception as e:
         logger.error(f"Synthesis run {run_id} failed: {e}")
         run_record["status"] = "failed"
         run_record["error"] = str(e)
+    finally:
+        if enforcer is not None:
+            try:
+                await finalize_run(enforcer)
+            except Exception as fe:  # noqa: BLE001
+                logger.warning(f"Synthesis run {run_id} finalize failed: {fe}")
 
 
 # ===================================================================
@@ -610,14 +645,25 @@ async def start_synthesis(
     project_id: str,
     body: SynthesizeRequest,
     background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict:
-    """Start a real 5-stage synthesis pipeline run."""
+    """Start a real 5-stage synthesis pipeline run on one of the
+    caller's projects, under their tier-based budget cap."""
+    from uuid import UUID
+    try:
+        project_uuid = UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid project id")
+    await assert_owns_project(db, project_uuid, current_user)
+
     run_id = str(uuid4())
     ws_url = f"/ws/synthesis/{run_id}"
 
     _active_synthesis_runs[run_id] = {
         "run_id": run_id,
         "project_id": project_id,
+        "user_id": str(current_user.id),
         "hypothesis": body.hypothesis,
         "output_format": body.output_format,
         "verbosity": body.verbosity,
@@ -629,6 +675,7 @@ async def start_synthesis(
         _run_synthesis_pipeline,
         run_id=run_id,
         project_id=project_id,
+        user_id=str(current_user.id),
         hypothesis=body.hypothesis,
         output_format=body.output_format,
         verbosity=body.verbosity,
@@ -637,7 +684,10 @@ async def start_synthesis(
         field_scope=body.field_scope,
     )
 
-    logger.info(f"Synthesis run {run_id} queued for project {project_id}")
+    logger.info(
+        f"Synthesis run {run_id} queued for project {project_id} "
+        f"(user={current_user.id})"
+    )
 
     return {
         "run_id": run_id,
