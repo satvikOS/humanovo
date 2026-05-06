@@ -23,6 +23,18 @@ class UserRole(str, PyEnum):
     VIEWER = "viewer"
 
 
+class UserTier(str, PyEnum):
+    """Pricing-tier enum. Authoritative cap mapping lives in
+    `app.services.budget_enforcer_service.TIER_MONTHLY_CAP_CENTS`;
+    this enum names the rows. Migration 014_user_pricing_tier creates
+    the matching Postgres type."""
+
+    TRIAL = "trial"
+    RESEARCHER = "researcher"
+    LAB = "lab"
+    INSTITUTION = "institution"
+
+
 class User(BaseModel):
     """User model for authentication and authorization."""
 
@@ -44,6 +56,15 @@ class User(BaseModel):
         nullable=False,
     )
     permissions = Column(ARRAY(String), default=list, nullable=False)
+
+    # Pricing tier — drives the budget enforcer's per-month cap. See
+    # AWS_INFRASTRUCTURE_PLAN.md §2.3 for the cap math.
+    tier = Column(
+        Enum(UserTier, name="user_tier", values_callable=lambda x: [e.value for e in x]),
+        default=UserTier.TRIAL,
+        nullable=False,
+        index=True,
+    )
 
     # Account status
     is_active = Column(Boolean, default=True, nullable=False)

@@ -135,15 +135,69 @@ class RunBudgetState:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Per-tier monthly cap mapping — authoritative source of the "no surprise
+# bills" guarantee from AWS_INFRASTRUCTURE_PLAN.md §2.3. The CredentialPool
+# layer enforces these before any model call lands.
+#
+# Trial:        $0.50 lifetime  (~1-2 runs at M0 cost)
+# Researcher:   $4.00/month     (~12 runs at M0, ~26 at M12 cache)
+# Lab:          $40.00/month    (~66 runs at M0, ~148 at M12 cache)
+# Institution:  $200.00/month FLOOR (overridden per contract via
+#               `user_budget_configs.monthly_budget_cents`)
+#
+# Per-user OVERRIDES live in user_budget_configs.monthly_budget_cents and
+# take precedence (admins / sales can grant headroom beyond the tier
+# default without an upgrade). The tier is just the seeded default that
+# `get_or_create` writes on first insert.
+# ---------------------------------------------------------------------------
+
+TIER_MONTHLY_CAP_CENTS: dict[str, int] = {
+    "trial": 50,
+    "researcher": 400,
+    "lab": 4_000,
+    "institution": 20_000,
+}
+
+# Fallback cap when the tier lookup fails (e.g. unknown user_id format
+# or DB unreachable). Match the Trial cap so we fail safe on the lower
+# side rather than charging through with a generous default.
+DEFAULT_FALLBACK_CAP_CENTS = TIER_MONTHLY_CAP_CENTS["trial"]
+
+
+async def _resolve_tier_cap_cents(
+    session_factory, user_id: str
+) -> int:
+    """Look up the user's tier and translate it to a monthly cap. Used
+    by `UserBudgetService.get_or_create` when seeding a new row."""
+    try:
+        async with session_factory() as session:
+            row = await session.execute(
+                text("SELECT tier FROM users WHERE id = :uid"),
+                {"uid": user_id},
+            )
+            t = row.scalar()
+        if t and t in TIER_MONTHLY_CAP_CENTS:
+            return TIER_MONTHLY_CAP_CENTS[t]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tier lookup failed; using fallback cap", error=str(exc))
+    return DEFAULT_FALLBACK_CAP_CENTS
+
+
 class UserBudgetService:
     """Handles user-scoped monthly budgets in `user_budget_configs`.
+
+    On first insert for a user, the cap is seeded from the user's tier
+    (Trial $0.50 / Researcher $4 / Lab $40 / Institution $200 floor —
+    see TIER_MONTHLY_CAP_CENTS above). After that, the row is the
+    source of truth and admins can `update_cap` to grant headroom.
 
     DDL (also created at service init if missing):
 
         CREATE TABLE IF NOT EXISTS user_budget_configs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id TEXT NOT NULL UNIQUE,
-            monthly_budget_cents INTEGER NOT NULL DEFAULT 5000,   -- $50
+            monthly_budget_cents INTEGER NOT NULL DEFAULT 50,    -- Trial floor
             alert_threshold_pct INTEGER NOT NULL DEFAULT 80,
             hard_limit BOOLEAN NOT NULL DEFAULT TRUE,
             current_month_spend_cents INTEGER NOT NULL DEFAULT 0,
@@ -176,8 +230,23 @@ class UserBudgetService:
                     )
                 """))
 
-    async def get_or_create(self, user_id: str, default_budget_cents: int = 5000) -> dict:
+    async def get_or_create(
+        self,
+        user_id: str,
+        default_budget_cents: int | None = None,
+    ) -> dict:
+        """Fetch (or insert) the user's budget row.
+
+        If `default_budget_cents` is None the seed value is derived from
+        the user's tier — Trial $0.50 / Researcher $4 / Lab $40 /
+        Institution $200 floor. Pass an explicit value only in tests
+        and admin-grant flows.
+        """
         await self.ensure_schema()
+        if default_budget_cents is None:
+            default_budget_cents = await _resolve_tier_cap_cents(
+                self._session_factory, user_id
+            )
         async with self._session_factory() as session:
             async with session.begin():
                 row = await session.execute(
