@@ -1,5 +1,9 @@
 name: Route53 — humanovo.net M365 email cutover
 
+# Re-trigger marker: humanovo-admin gained Route53Access inline policy
+# (route53:ListHostedZones[ByName], GetHostedZone, ListResourceRecordSets,
+#  ChangeResourceRecordSets, GetChange). Preflight should pass now.
+#
 # One-shot DNS change to switch humanovo.net inbound email to Microsoft 365.
 #
 # What this does in a single atomic ChangeResourceRecordSets batch:
