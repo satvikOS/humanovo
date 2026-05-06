@@ -12,14 +12,21 @@ name: Route53 — humanovo.net M365 email cutover
 #       Microsoft domain-ownership proof.)
 #
 # SPF flavor controlled by the `spf_mode` input:
-#   - `stacked`   → "v=spf1 include:spf.protection.outlook.com include:amazonses.com -all"
-#                   USE THIS if Resend sends as @humanovo.net (apex).
-#                   This is the default — it's safer because M365 + SES
-#                   both pass SPF. Resend transactional won't degrade.
-#   - `m365-only` → "v=spf1 include:spf.protection.outlook.com -all"
-#                   Use this only if Resend strictly sends from
-#                   @send.humanovo.net. The send-subdomain has its own
-#                   SPF, and the apex doesn't need to authorise SES.
+#   - `m365+resend` → "v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"
+#                     **Default and recommended.** Authorizes M365 inbound
+#                     bounces + Resend outbound from the apex (the contact
+#                     form on humanovo.net sends queries via Resend with
+#                     From: ...@humanovo.net, so Resend must be in apex SPF
+#                     for proper DMARC alignment / spam scoring).
+#   - `m365-only`   → "v=spf1 include:spf.protection.outlook.com -all"
+#                     Use ONLY if Resend strictly sends from
+#                     @send.humanovo.net (which has its own SPF). For
+#                     this setup that's not the case — Resend's DKIM at
+#                     resend._domainkey.humanovo.net signs for the apex,
+#                     so apex SPF should authorize Resend.
+#   - `m365+resend+ses` → all three (M365 + Resend + AWS SES). Use only
+#                     if your main app's transactional emails ALSO send
+#                     from the apex (not just `send.` subdomain).
 #
 # Untouched on purpose:
 #   - humanovo.net A (Vercel)
@@ -42,13 +49,14 @@ on:
           - dry-run
           - apply
       spf_mode:
-        description: 'SPF flavor (see workflow header for guidance)'
+        description: 'SPF flavor (see workflow header). Default m365+resend covers Outlook + the contact form via Resend.'
         required: true
-        default: 'stacked'
+        default: 'm365+resend'
         type: choice
         options:
-          - stacked
+          - m365+resend
           - m365-only
+          - m365+resend+ses
       confirm_intent:
         description: 'Type humanovo-net-m365-cutover to confirm'
         required: true
@@ -129,11 +137,21 @@ jobs:
         id: batch
         run: |
           set -e
-          if [ "${{ inputs.spf_mode }}" = "stacked" ]; then
-            SPF='"v=spf1 include:spf.protection.outlook.com include:amazonses.com -all"'
-          else
-            SPF='"v=spf1 include:spf.protection.outlook.com -all"'
-          fi
+          case "${{ inputs.spf_mode }}" in
+            "m365+resend")
+              SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"'
+              ;;
+            "m365+resend+ses")
+              SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com include:amazonses.com -all"'
+              ;;
+            "m365-only")
+              SPF='"v=spf1 include:spf.protection.outlook.com -all"'
+              ;;
+            *)
+              echo "::error::Unknown spf_mode '${{ inputs.spf_mode }}'"
+              exit 1
+              ;;
+          esac
           echo "SPF value: $SPF"
 
           # Compose the apex TXT ResourceRecords array: SPF + every
