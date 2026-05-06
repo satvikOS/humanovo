@@ -1,0 +1,285 @@
+name: Route53 — humanovo.net M365 email cutover
+
+# One-shot DNS change to switch humanovo.net inbound email to Microsoft 365.
+#
+# What this does in a single atomic ChangeResourceRecordSets batch:
+#   1. UPSERT  apex MX  → 0 humanovo-net.mail.protection.outlook.com
+#      (replaces the old `10 inbound-smtp.us-east-1.amazonaws.com`)
+#   2. CREATE  autodiscover.humanovo.net CNAME → autodiscover.outlook.com
+#   3. UPSERT  apex TXT → preserves "MS=ms68533928" + adds the SPF record
+#      (Route 53 record sets are atomic per name+type, so we re-write
+#       the whole TXT set with BOTH values to avoid clobbering the
+#       Microsoft domain-ownership proof.)
+#
+# SPF flavor controlled by the `spf_mode` input:
+#   - `m365+resend` → "v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"
+#                     **Default and recommended.** Authorizes M365 inbound
+#                     bounces + Resend outbound from the apex (the contact
+#                     form on humanovo.net sends queries via Resend with
+#                     From: ...@humanovo.net, so Resend must be in apex SPF
+#                     for proper DMARC alignment / spam scoring).
+#   - `m365-only`   → "v=spf1 include:spf.protection.outlook.com -all"
+#                     Use ONLY if Resend strictly sends from
+#                     @send.humanovo.net (which has its own SPF). For
+#                     this setup that's not the case — Resend's DKIM at
+#                     resend._domainkey.humanovo.net signs for the apex,
+#                     so apex SPF should authorize Resend.
+#   - `m365+resend+ses` → all three (M365 + Resend + AWS SES). Use only
+#                     if your main app's transactional emails ALSO send
+#                     from the apex (not just `send.` subdomain).
+#
+# Untouched on purpose:
+#   - humanovo.net A (Vercel)
+#   - www.humanovo.net CNAME (Vercel)
+#   - send.humanovo.net MX + TXT (Resend/SES outbound)
+#   - resend._domainkey.humanovo.net TXT (Resend DKIM)
+#   - _dmarc.humanovo.net TXT
+#
+# Trigger: workflow_dispatch only. Confirmation phrase required.
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: 'Phase: dry-run shows the change batch; apply executes it'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - apply
+      spf_mode:
+        description: 'SPF flavor (see workflow header). Default m365+resend covers Outlook + the contact form via Resend.'
+        required: true
+        default: 'm365+resend'
+        type: choice
+        options:
+          - m365+resend
+          - m365-only
+          - m365+resend+ses
+      confirm_intent:
+        description: 'Type humanovo-net-m365-cutover to confirm'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  DOMAIN: humanovo.net
+
+concurrency:
+  group: route53-humanovo-net
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: ${{ inputs.phase }} — SPF mode ${{ inputs.spf_mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify confirmation phrase
+        run: |
+          if [ "${{ inputs.confirm_intent }}" != "humanovo-net-m365-cutover" ]; then
+            echo "::error::Confirmation phrase did not match. Aborting."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find hosted zone ID
+        id: hz
+        run: |
+          set -e
+          ZONE_ID=$(aws route53 list-hosted-zones-by-name \
+            --dns-name "$DOMAIN." \
+            --max-items 1 \
+            --query 'HostedZones[0].Id' \
+            --output text | sed 's|/hostedzone/||')
+          if [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "None" ]; then
+            echo "::error::No hosted zone found for $DOMAIN"
+            exit 1
+          fi
+          echo "Hosted zone: $ZONE_ID"
+          echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Read existing apex TXT to preserve MS=... value
+        id: txt
+        run: |
+          set -e
+          # Pull all values currently in the apex TXT record set so we
+          # can rewrite them in the change batch (Route 53 record sets
+          # are atomic — UPSERT replaces the whole set, so we must
+          # include the existing MS=... verification line.)
+          EXISTING=$(aws route53 list-resource-record-sets \
+            --hosted-zone-id "${{ steps.hz.outputs.zone_id }}" \
+            --query "ResourceRecordSets[?Name=='${DOMAIN}.' && Type=='TXT'].ResourceRecords" \
+            --output json)
+          echo "Existing apex TXT values:"
+          echo "$EXISTING"
+          # Filter out any prior v=spf1 entries (we're replacing) and
+          # any prior MS= duplicates; keep all MS= entries deduped.
+          FILTERED=$(echo "$EXISTING" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin) or [[]]
+          flat = [r['Value'] for arr in data for r in arr]
+          # Drop any prior SPF (apex). Keep MS= and others.
+          kept = [v for v in flat if not v.startswith('\"v=spf1') and not v.startswith('v=spf1')]
+          print(json.dumps(kept))
+          ")
+          echo "Preserved (non-SPF) values: $FILTERED"
+          echo "preserved=$FILTERED" >> "$GITHUB_OUTPUT"
+
+      - name: Build change batch
+        id: batch
+        run: |
+          set -e
+          case "${{ inputs.spf_mode }}" in
+            "m365+resend")
+              SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"'
+              ;;
+            "m365+resend+ses")
+              SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com include:amazonses.com -all"'
+              ;;
+            "m365-only")
+              SPF='"v=spf1 include:spf.protection.outlook.com -all"'
+              ;;
+            *)
+              echo "::error::Unknown spf_mode '${{ inputs.spf_mode }}'"
+              exit 1
+              ;;
+          esac
+          echo "SPF value: $SPF"
+
+          # Compose the apex TXT ResourceRecords array: SPF + every
+          # preserved value (e.g. "MS=ms68533928"). Each must be a
+          # quoted string in Route 53 JSON, so we wrap items that
+          # don't already start with a quote.
+          PRESERVED='${{ steps.txt.outputs.preserved }}'
+          TXT_RECORDS=$(python3 -c "
+          import json, sys
+          spf = '''$SPF'''
+          preserved = json.loads('''$PRESERVED''')
+          records = [{'Value': spf}]
+          for v in preserved:
+              # Route 53 wants the value wrapped in escaped quotes if
+              # it isn't already.
+              if not (v.startswith('\"') and v.endswith('\"')):
+                  v = '\"' + v + '\"'
+              records.append({'Value': v})
+          print(json.dumps(records))
+          ")
+
+          cat > /tmp/change-batch.json <<EOF
+          {
+            "Comment": "M365 email cutover for humanovo.net (workflow run ${{ github.run_id }})",
+            "Changes": [
+              {
+                "Action": "UPSERT",
+                "ResourceRecordSet": {
+                  "Name": "${DOMAIN}.",
+                  "Type": "MX",
+                  "TTL": 3600,
+                  "ResourceRecords": [
+                    {"Value": "0 humanovo-net.mail.protection.outlook.com"}
+                  ]
+                }
+              },
+              {
+                "Action": "UPSERT",
+                "ResourceRecordSet": {
+                  "Name": "autodiscover.${DOMAIN}.",
+                  "Type": "CNAME",
+                  "TTL": 3600,
+                  "ResourceRecords": [
+                    {"Value": "autodiscover.outlook.com"}
+                  ]
+                }
+              },
+              {
+                "Action": "UPSERT",
+                "ResourceRecordSet": {
+                  "Name": "${DOMAIN}.",
+                  "Type": "TXT",
+                  "TTL": 3600,
+                  "ResourceRecords": $TXT_RECORDS
+                }
+              }
+            ]
+          }
+          EOF
+          echo "=== Change batch ==="
+          cat /tmp/change-batch.json
+          echo "==================="
+
+      - name: Apply (Route 53 ChangeResourceRecordSets)
+        if: inputs.phase == 'apply'
+        id: change
+        run: |
+          set -e
+          CHANGE_ID=$(aws route53 change-resource-record-sets \
+            --hosted-zone-id "${{ steps.hz.outputs.zone_id }}" \
+            --change-batch file:///tmp/change-batch.json \
+            --query 'ChangeInfo.Id' \
+            --output text)
+          echo "Change ID: $CHANGE_ID"
+          echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for INSYNC
+        if: inputs.phase == 'apply'
+        run: |
+          set -e
+          echo "Waiting for change ${{ steps.change.outputs.change_id }} to propagate to Route 53 edges (typically 30-90s)…"
+          aws route53 wait resource-record-sets-changed --id "${{ steps.change.outputs.change_id }}"
+          echo "Change is INSYNC across Route 53."
+
+      - name: Verify via public DNS resolvers
+        if: inputs.phase == 'apply'
+        run: |
+          set +e
+          echo "## Post-change verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          for resolver in "8.8.8.8" "1.1.1.1" "9.9.9.9"; do
+            echo "### Resolver $resolver" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "MX humanovo.net:"           >> $GITHUB_STEP_SUMMARY
+            dig +short MX "$DOMAIN" "@$resolver" >> $GITHUB_STEP_SUMMARY 2>&1
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "CNAME autodiscover.humanovo.net:" >> $GITHUB_STEP_SUMMARY
+            dig +short CNAME "autodiscover.$DOMAIN" "@$resolver" >> $GITHUB_STEP_SUMMARY 2>&1
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "TXT humanovo.net:"  >> $GITHUB_STEP_SUMMARY
+            dig +short TXT "$DOMAIN" "@$resolver" >> $GITHUB_STEP_SUMMARY 2>&1
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Route 53 — humanovo.net M365 email cutover"
+            echo ""
+            echo "Phase: \`${{ inputs.phase }}\`"
+            echo "SPF mode: \`${{ inputs.spf_mode }}\`"
+            echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
+            echo ""
+            if [ "${{ inputs.phase }}" = "apply" ]; then
+              echo "### Next steps"
+              echo "1. Wait 5-10 min for global DNS propagation (some recursive resolvers cache up to TTL)."
+              echo "2. In Microsoft 365 admin → Setup → Domains → humanovo.net → click **Re-check DNS**."
+              echo "3. Send a test email from any external account (Gmail / iCloud) to satvik@humanovo.net."
+              echo "4. Verify the message arrives in Outlook within 1-2 minutes."
+              echo ""
+              echo "If transactional emails (from Resend) start landing in spam:"
+              echo "- The SPF mode you picked may not match how Resend sends."
+              echo "- Re-run this workflow with the OTHER \`spf_mode\` value."
+            else
+              echo "### Dry-run only"
+              echo "No changes applied. Re-run with phase=apply to execute."
+            fi
+          } >> $GITHUB_STEP_SUMMARY
