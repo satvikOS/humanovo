@@ -1,15 +1,21 @@
 name: Deploy humanovo Infrastructure & Backend
 
+# DISABLED — auto-trigger removed 2026-05-05. This workflow targets
+# the legacy `genup-*` AWS infrastructure in the OLD account, whose
+# credentials are no longer in GitHub Secrets (the founder rotated
+# to the NEW business account). Every push to humanovo was firing
+# this workflow against creds that don't exist, producing noise.
+#
+# We're decommissioning the old infrastructure as part of the
+# AWS-account migration (see docs/planning/PRODUCTION_AUDIT_2026-05.md
+# §10), and a fresh `humanovo-*` infrastructure will be stood up in
+# the new account by `bootstrap-aws-org.yml` / a future deploy-infra
+# variant once that account is fully ready.
+#
+# Until then this workflow is dispatch-only so it doesn't fire on
+# every commit. Eventually it'll be deleted.
+
 on:
-  push:
-    branches:
-      - main
-      - humanovo
-      - 'claude/*'
-    paths:
-      - 'infrastructure/**'
-      - 'backend/**'
-      - '.github/workflows/deploy-infra.yml'
   workflow_dispatch:
 
 env:
