@@ -171,111 +171,115 @@ jobs:
           echo "Hosted zone: $ZONE_ID"
           echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Read existing apex TXT to preserve MS=... value
-        id: txt
+      - name: Build change batch (read TXT + compose JSON in one pass)
+        # Combined to avoid round-tripping JSON through GitHub Actions
+        # step outputs — the previous attempt failed because GHA's
+        # output handling unescapes \" in stored values, breaking
+        # the next step's json.loads(). Now Python reads from the
+        # AWS API directly and writes /tmp/change-batch.json, which
+        # the apply step picks up by file path.
+        env:
+          ZONE_ID: ${{ steps.hz.outputs.zone_id }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -e
-          # Pull all values currently in the apex TXT record set so we
-          # can rewrite them in the change batch (Route 53 record sets
-          # are atomic — UPSERT replaces the whole set, so we must
-          # include the existing MS=... verification line.)
-          EXISTING=$(aws route53 list-resource-record-sets \
-            --hosted-zone-id "${{ steps.hz.outputs.zone_id }}" \
-            --query "ResourceRecordSets[?Name=='${DOMAIN}.' && Type=='TXT'].ResourceRecords" \
-            --output json)
-          echo "Existing apex TXT values:"
-          echo "$EXISTING"
-          # Filter out any prior v=spf1 entries (we're replacing) and
-          # any prior MS= duplicates; keep all MS= entries deduped.
-          FILTERED=$(echo "$EXISTING" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin) or [[]]
-          flat = [r['Value'] for arr in data for r in arr]
-          # Drop any prior SPF (apex). Keep MS= and others.
-          kept = [v for v in flat if not v.startswith('\"v=spf1') and not v.startswith('v=spf1')]
-          print(json.dumps(kept))
-          ")
-          echo "Preserved (non-SPF) values: $FILTERED"
-          echo "preserved=$FILTERED" >> "$GITHUB_OUTPUT"
-
-      - name: Build change batch
-        id: batch
-        run: |
-          set -e
-          case "${{ env.EFFECTIVE_SPF_MODE }}" in
+          case "$EFFECTIVE_SPF_MODE" in
             "m365+resend")
-              SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"'
+              SPF_VALUE="v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"
               ;;
             "m365+resend+ses")
-              SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com include:amazonses.com -all"'
+              SPF_VALUE="v=spf1 include:spf.protection.outlook.com include:_spf.resend.com include:amazonses.com -all"
               ;;
             "m365-only")
-              SPF='"v=spf1 include:spf.protection.outlook.com -all"'
+              SPF_VALUE="v=spf1 include:spf.protection.outlook.com -all"
               ;;
             *)
-              echo "::error::Unknown spf_mode '${{ env.EFFECTIVE_SPF_MODE }}'"
+              echo "::error::Unknown spf_mode '$EFFECTIVE_SPF_MODE'"
               exit 1
               ;;
           esac
-          echo "SPF value: $SPF"
+          export SPF_VALUE
 
-          # Compose the apex TXT ResourceRecords array: SPF + every
-          # preserved value (e.g. "MS=ms68533928"). Each must be a
-          # quoted string in Route 53 JSON, so we wrap items that
-          # don't already start with a quote.
-          PRESERVED='${{ steps.txt.outputs.preserved }}'
-          TXT_RECORDS=$(python3 -c "
-          import json, sys
-          spf = '''$SPF'''
-          preserved = json.loads('''$PRESERVED''')
-          records = [{'Value': spf}]
-          for v in preserved:
-              # Route 53 wants the value wrapped in escaped quotes if
-              # it isn't already.
-              if not (v.startswith('\"') and v.endswith('\"')):
-                  v = '\"' + v + '\"'
-              records.append({'Value': v})
-          print(json.dumps(records))
-          ")
+          # Pull existing apex TXT values into a JSON file, then build
+          # the change batch from there. No GHA-output round-trip.
+          aws route53 list-resource-record-sets \
+            --hosted-zone-id "$ZONE_ID" \
+            --query "ResourceRecordSets[?Name=='${DOMAIN}.' && Type=='TXT'].ResourceRecords" \
+            --output json > /tmp/existing-txt.json
+          echo "=== existing apex TXT (raw) ==="
+          cat /tmp/existing-txt.json
 
-          cat > /tmp/change-batch.json <<EOF
-          {
-            "Comment": "M365 email cutover for humanovo.net (workflow run ${{ github.run_id }})",
-            "Changes": [
-              {
-                "Action": "UPSERT",
-                "ResourceRecordSet": {
-                  "Name": "${DOMAIN}.",
-                  "Type": "MX",
-                  "TTL": 3600,
-                  "ResourceRecords": [
-                    {"Value": "0 humanovo-net.mail.protection.outlook.com"}
-                  ]
-                }
-              },
-              {
-                "Action": "UPSERT",
-                "ResourceRecordSet": {
-                  "Name": "autodiscover.${DOMAIN}.",
-                  "Type": "CNAME",
-                  "TTL": 3600,
-                  "ResourceRecords": [
-                    {"Value": "autodiscover.outlook.com"}
-                  ]
-                }
-              },
-              {
-                "Action": "UPSERT",
-                "ResourceRecordSet": {
-                  "Name": "${DOMAIN}.",
-                  "Type": "TXT",
-                  "TTL": 3600,
-                  "ResourceRecords": $TXT_RECORDS
-                }
-              }
-            ]
+          python3 <<'PYEOF' > /tmp/change-batch.json
+          import json
+          import os
+
+          domain = os.environ["DOMAIN"]
+          run_id = os.environ["RUN_ID"]
+          spf_value = os.environ["SPF_VALUE"]
+
+          with open("/tmp/existing-txt.json") as f:
+              data = json.load(f) or []
+
+          # Flatten the nested ResourceRecords structure. Each existing
+          # record value comes back wrapped in literal quotes already
+          # (e.g. '"MS=ms68533928"'), which is the on-wire format
+          # Route 53 expects on UPSERT too. Drop any prior SPF.
+          flat = []
+          for arr in data:
+              for r in arr:
+                  v = r["Value"]
+                  if v.startswith('"v=spf1') or v.startswith("v=spf1"):
+                      continue
+                  flat.append(v)
+
+          # Build TXT record set: new SPF + preserved values.
+          # Wrap SPF in quotes (Route 53 TXT format).
+          txt_records = [{"Value": f'"{spf_value}"'}]
+          for v in flat:
+              # Existing values typically arrive already quoted; only
+              # add quotes if they're missing.
+              if not (v.startswith('"') and v.endswith('"')):
+                  v = f'"{v}"'
+              txt_records.append({"Value": v})
+
+          batch = {
+              "Comment": f"M365 email cutover for {domain} (workflow run {run_id})",
+              "Changes": [
+                  {
+                      "Action": "UPSERT",
+                      "ResourceRecordSet": {
+                          "Name": f"{domain}.",
+                          "Type": "MX",
+                          "TTL": 3600,
+                          "ResourceRecords": [
+                              {"Value": "0 humanovo-net.mail.protection.outlook.com"}
+                          ],
+                      },
+                  },
+                  {
+                      "Action": "UPSERT",
+                      "ResourceRecordSet": {
+                          "Name": f"autodiscover.{domain}.",
+                          "Type": "CNAME",
+                          "TTL": 3600,
+                          "ResourceRecords": [
+                              {"Value": "autodiscover.outlook.com"}
+                          ],
+                      },
+                  },
+                  {
+                      "Action": "UPSERT",
+                      "ResourceRecordSet": {
+                          "Name": f"{domain}.",
+                          "Type": "TXT",
+                          "TTL": 3600,
+                          "ResourceRecords": txt_records,
+                      },
+                  },
+              ],
           }
-          EOF
+          print(json.dumps(batch, indent=2))
+          PYEOF
           echo "=== Change batch ==="
           cat /tmp/change-batch.json
           echo "==================="
