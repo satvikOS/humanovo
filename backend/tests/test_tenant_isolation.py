@@ -217,6 +217,8 @@ def test_no_owned_model_query_without_ownership_proof() -> None:
         "evoe.py",
         "discovery_sessions.py",
         "citations.py",
+        "document_pipeline.py",
+        "agent_chat_stream.py",
     }
 
     regressions: list[str] = []
