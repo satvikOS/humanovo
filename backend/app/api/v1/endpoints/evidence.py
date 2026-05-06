@@ -15,8 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import (
+    assert_owns_project,
+    fetch_owned_or_global_or_404,
+    filter_by_owned_or_global_project,
+)
 from app.models.evidence import Evidence, EvidenceSource as EvidenceSourceModel
+from app.models.user import User
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -142,8 +148,13 @@ def evidence_to_response(e: Evidence) -> EvidenceResponse:
 async def create_evidence(
     evidence: EvidenceCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceResponse:
-    """Create a new evidence item manually."""
+    """Create a new evidence item, optionally attached to one of the
+    caller's projects. Evidence with no project_id is global-corpus
+    (will tighten once `created_by` lands on the model)."""
+    if evidence.project_id is not None:
+        await assert_owns_project(db, evidence.project_id, current_user)
     logger.info("Creating new evidence", title=evidence.title[:50])
 
     db_evidence = Evidence(
@@ -264,35 +275,33 @@ async def list_evidence(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceListResponse:
-    """List evidence items with filtering and pagination."""
-    # Build base query
-    query = select(Evidence)
+    """List evidence items: rows attached to one of the caller's
+    projects, plus global-corpus rows (project_id IS NULL)."""
+    query = filter_by_owned_or_global_project(
+        select(Evidence), Evidence, current_user
+    )
+    count_query = filter_by_owned_or_global_project(
+        select(func.count(Evidence.id)), Evidence, current_user
+    )
 
-    # Apply filters
     if project_id:
         query = query.where(Evidence.project_id == project_id)
-    if source_type:
-        query = query.where(Evidence.source_type == EvidenceSourceModel(source_type.value))
-
-    # Get total count
-    count_query = select(func.count()).select_from(Evidence)
-    if project_id:
         count_query = count_query.where(Evidence.project_id == project_id)
     if source_type:
-        count_query = count_query.where(Evidence.source_type == EvidenceSourceModel(source_type.value))
+        query = query.where(Evidence.source_type == EvidenceSourceModel(source_type.value))
+        count_query = count_query.where(
+            Evidence.source_type == EvidenceSourceModel(source_type.value)
+        )
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Sort by date
     query = query.order_by(desc(Evidence.updated_at))
-
-    # Paginate
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
 
-    # Execute
     result = await db.execute(query)
     evidence_items = result.scalars().all()
 
@@ -308,15 +317,11 @@ async def list_evidence(
 async def get_evidence(
     evidence_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceResponse:
-    """Get a specific evidence item by ID."""
-    query = select(Evidence).where(Evidence.id == evidence_id)
-    result = await db.execute(query)
-    evidence = result.scalar_one_or_none()
-
-    if not evidence:
-        raise HTTPException(status_code=404, detail="Evidence not found")
-
+    """Get an evidence item if it belongs to one of the caller's
+    projects or is in the global corpus."""
+    evidence = await fetch_owned_or_global_or_404(db, Evidence, evidence_id, current_user)
     return evidence_to_response(evidence)
 
 
@@ -337,13 +342,13 @@ async def update_evidence(
     evidence_id: UUID,
     update: EvidenceUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceResponse:
-    """Update an evidence item."""
-    query = select(Evidence).where(Evidence.id == evidence_id)
-    result = await db.execute(query)
-    evidence = result.scalar_one_or_none()
-
-    if not evidence:
+    """Update an evidence item the caller owns. Cannot mutate global
+    evidence (rows with project_id NULL) — returns 404."""
+    evidence = await fetch_owned_or_global_or_404(db, Evidence, evidence_id, current_user)
+    if evidence.project_id is None:
+        # Global rows are read-only until `created_by` ships.
         raise HTTPException(status_code=404, detail="Evidence not found")
 
     update_data = update.model_dump(exclude_unset=True)
@@ -365,15 +370,13 @@ async def update_evidence(
 async def delete_evidence(
     evidence_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> None:
-    """Delete an evidence item."""
-    query = select(Evidence).where(Evidence.id == evidence_id)
-    result = await db.execute(query)
-    evidence = result.scalar_one_or_none()
-
-    if not evidence:
+    """Delete an evidence item the caller owns. Global rows
+    (project_id NULL) are immutable to non-admins — returns 404."""
+    evidence = await fetch_owned_or_global_or_404(db, Evidence, evidence_id, current_user)
+    if evidence.project_id is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
-
     await db.delete(evidence)
     await db.commit()
     logger.info("Evidence deleted", evidence_id=str(evidence_id))

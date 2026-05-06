@@ -84,6 +84,30 @@ async def assert_owns_project(
     return project
 
 
+def filter_by_owned_or_global_project(
+    query: Select[T],
+    model_with_nullable_project_id,
+    user: User,
+) -> Select[T]:
+    """Augment `query` so it returns rows whose `project_id` is either
+    NULL (a globally-visible item) or references a Project owned by
+    `user`.
+
+    Used by Evidence and Citation, which carry an optional `project_id`
+    and intentionally allow null-project rows in the corpus.
+
+    Once we add `created_by` to those models, the global branch will
+    tighten to `created_by IS NULL OR created_by == user.id` so that
+    user-uploaded items aren't visible to other users by default.
+    """
+    return query.outerjoin(
+        Project, Project.id == model_with_nullable_project_id.project_id
+    ).where(
+        (model_with_nullable_project_id.project_id.is_(None))
+        | (Project.owner_id == user.id)
+    )
+
+
 async def fetch_owned_or_404(
     db: AsyncSession,
     model_with_project_id,
@@ -109,5 +133,36 @@ async def fetch_owned_or_404(
     if row is None:
         raise HTTPException(
             status_code=404, detail=f"{model_with_project_id.__name__} not found"
+        )
+    return row
+
+
+async def fetch_owned_or_global_or_404(
+    db: AsyncSession,
+    model_with_nullable_project_id,
+    row_id: UUID,
+    user: User,
+):
+    """Like `fetch_owned_or_404` but tolerates a NULL project_id (the
+    row is then treated as globally accessible). For Evidence and
+    Citation pre-`created_by`-column.
+    """
+    query = (
+        select(model_with_nullable_project_id)
+        .outerjoin(
+            Project, Project.id == model_with_nullable_project_id.project_id
+        )
+        .where(
+            model_with_nullable_project_id.id == row_id,
+            (model_with_nullable_project_id.project_id.is_(None))
+            | (Project.owner_id == user.id),
+        )
+    )
+    result = await db.execute(query)
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{model_with_nullable_project_id.__name__} not found",
         )
     return row

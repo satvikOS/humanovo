@@ -16,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import assert_owns_project
+from app.models.user import User
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -145,8 +147,28 @@ class SimulationRunResponse(BaseModel):
     message: str
 
 
-# In-memory storage
+# In-memory storage. Each value is a 2-tuple: (owner_id, SimulationResponse).
+# Tenant isolation lives in the per-route helpers below — every read /
+# mutate verifies the caller's user.id matches the stored owner_id and
+# raises 404 otherwise (so callers can't probe for foreign IDs).
+#
+# TODO: persist these to the SQLAlchemy `Simulation` model (already
+# defined in app.models.simulation) so they survive restart. The
+# router-level ownership guard below carries forward unchanged once
+# that lands.
 _simulations: dict = {}
+
+
+def _owned_or_404(simulation_id: UUID, current_user: User):
+    """Look up a simulation and confirm `current_user` owns it. Returns
+    the SimulationResponse on success; raises 404 otherwise."""
+    entry = _simulations.get(simulation_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    owner_id, sim = entry
+    if owner_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return sim
 
 
 @router.post("", response_model=SimulationRunResponse, status_code=202)
@@ -154,8 +176,12 @@ async def create_simulation(
     simulation: SimulationCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> SimulationRunResponse:
-    """Create and start a new Monte Carlo simulation."""
+    """Create and start a new Monte Carlo simulation under one of the
+    caller's projects."""
+    if simulation.project_id is not None:
+        await assert_owns_project(db, simulation.project_id, current_user)
     logger.info(
         "Creating simulation",
         name=simulation.name,
@@ -185,7 +211,7 @@ async def create_simulation(
         completed_at=None,
     )
 
-    _simulations[simulation_id] = simulation_data
+    _simulations[simulation_id] = (current_user.id, simulation_data)
 
     # Queue simulation task
     background_tasks.add_task(
@@ -209,7 +235,7 @@ async def _run_simulation(simulation_id: UUID, config: SimulationCreate) -> None
 
     logger.info("Starting simulation", simulation_id=str(simulation_id))
 
-    sim = _simulations[simulation_id]
+    _, sim = _simulations[simulation_id]
     sim.status = SimulationStatus.RUNNING
     start_time = time.time()
 
@@ -258,7 +284,8 @@ async def _run_simulation(simulation_id: UUID, config: SimulationCreate) -> None
 def _update_progress(simulation_id: UUID, completed: int) -> None:
     """Update simulation progress."""
     if simulation_id in _simulations:
-        _simulations[simulation_id].iterations_completed = completed
+        _, sim = _simulations[simulation_id]
+        sim.iterations_completed = completed
 
 
 def _generate_summary(outcomes: list[OutcomeMetric]) -> str:
@@ -283,11 +310,14 @@ async def list_simulations(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> SimulationListResponse:
-    """List simulations with filtering and pagination."""
-    items = list(_simulations.values())
+    """List the caller's simulations with filtering and pagination."""
+    items = [
+        sim for owner_id, sim in _simulations.values()
+        if owner_id == current_user.id
+    ]
 
-    # Apply filters
     if project_id:
         items = [s for s in items if s.project_id == project_id]
     if hypothesis_id:
@@ -295,10 +325,8 @@ async def list_simulations(
     if status:
         items = [s for s in items if s.status == status]
 
-    # Sort by created_at descending
     items.sort(key=lambda x: x.created_at, reverse=True)
 
-    # Paginate
     total = len(items)
     start = (page - 1) * page_size
     end = start + page_size
@@ -315,25 +343,22 @@ async def list_simulations(
 async def get_simulation(
     simulation_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> SimulationResponse:
-    """Get a specific simulation by ID."""
-    if simulation_id not in _simulations:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-
-    return _simulations[simulation_id]
+    """Get one of the caller's simulations by ID."""
+    return _owned_or_404(simulation_id, current_user)
 
 
 @router.get("/{simulation_id}/results")
 async def get_simulation_results(
     simulation_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict[str, Any]:
-    """Get results payload for a completed simulation. Frontend expects
-    a `{results: ...}` object even when the run is still in progress
-    (returns an empty results dict with the current status)."""
-    if simulation_id not in _simulations:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-    sim = _simulations[simulation_id]
+    """Get results payload for one of the caller's simulations. Frontend
+    expects a `{results: ...}` object even when the run is still in
+    progress (returns an empty results dict with the current status)."""
+    sim = _owned_or_404(simulation_id, current_user)
     return {
         "simulation_id": str(simulation_id),
         "status": sim.status,
@@ -346,12 +371,10 @@ async def get_simulation_results(
 async def cancel_simulation(
     simulation_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> SimulationResponse:
-    """Cancel a running simulation."""
-    if simulation_id not in _simulations:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-
-    sim = _simulations[simulation_id]
+    """Cancel one of the caller's running simulations."""
+    sim = _owned_or_404(simulation_id, current_user)
 
     if sim.status not in [SimulationStatus.QUEUED, SimulationStatus.RUNNING]:
         raise HTTPException(
@@ -369,11 +392,10 @@ async def cancel_simulation(
 async def delete_simulation(
     simulation_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> None:
-    """Delete a simulation."""
-    if simulation_id not in _simulations:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-
+    """Delete one of the caller's simulations."""
+    _owned_or_404(simulation_id, current_user)
     del _simulations[simulation_id]
     logger.info("Simulation deleted", simulation_id=str(simulation_id))
 
