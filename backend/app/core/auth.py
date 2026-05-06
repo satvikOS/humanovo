@@ -201,6 +201,51 @@ AUTH_REQUIRED = [Depends(get_current_active_user)]
 ADMIN_REQUIRED = [Depends(get_current_admin_user)]
 
 
+# ─── WebSocket authentication ─────────────────────────────────────
+#
+# WebSocket handshakes can't carry custom Authorization headers from a
+# browser, so the convention is `?token=<jwt>` in the connect URL. The
+# helper below validates the token and resolves the User row before any
+# `await websocket.accept()` lands. On failure it closes the socket
+# with RFC 6455 code 1008 (Policy Violation) and returns None — the
+# handler can early-return without further work.
+#
+# Frontend pairing:  see `frontend/src/services/auth.ts::wsUrl(path)`
+
+from fastapi import WebSocket  # noqa: E402  (kept here for cohesion)
+
+
+async def authenticate_websocket(
+    websocket: WebSocket,
+    db: AsyncSession,
+) -> Optional[User]:
+    """Validate a WS connection's `?token=` query param. Closes the
+    socket and returns None on any failure (missing/invalid token,
+    inactive/missing user). Caller pattern:
+
+        user = await authenticate_websocket(websocket, db)
+        if user is None:
+            return  # socket already closed
+    """
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008, reason="missing token")
+        return None
+
+    token_data = decode_token(token)
+    if token_data is None:
+        await websocket.close(code=1008, reason="invalid token")
+        return None
+
+    result = await db.execute(select(User).where(User.id == token_data.user_id))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        await websocket.close(code=1008, reason="user inactive")
+        return None
+
+    return user
+
+
 async def authenticate_user(
     email: str,
     password: str,

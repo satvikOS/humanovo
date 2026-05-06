@@ -16,10 +16,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import ADMIN_REQUIRED
 from app.core.database import get_db
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Mixed surface:
+#   /health       — public (load-balancer + uptime probes), aggregate only.
+#   /health/{c}   — admin (per-component leaks internal architecture).
+#   /metrics*     — admin (system internals).
+# `dependencies=ADMIN_REQUIRED` is applied per-route below, not at router level.
 router = APIRouter()
 
 
@@ -543,7 +550,7 @@ async def get_system_health(
     )
 
 
-@router.get("/health/{component}")
+@router.get("/health/{component}", dependencies=ADMIN_REQUIRED)
 async def get_component_health(
     component: ComponentType,
     db: AsyncSession = Depends(get_db),
@@ -552,7 +559,7 @@ async def get_component_health(
     return await health_checker.check_component(component)
 
 
-@router.get("/metrics", response_model=MetricsResponse)
+@router.get("/metrics", response_model=MetricsResponse, dependencies=ADMIN_REQUIRED)
 async def get_metrics(
     db: AsyncSession = Depends(get_db),
 ) -> MetricsResponse:
@@ -563,7 +570,7 @@ async def get_metrics(
     )
 
 
-@router.get("/metrics/ingestion", response_model=IngestionMetricsResponse)
+@router.get("/metrics/ingestion", response_model=IngestionMetricsResponse, dependencies=ADMIN_REQUIRED)
 async def get_ingestion_metrics(
     db: AsyncSession = Depends(get_db),
 ) -> IngestionMetricsResponse:
@@ -662,7 +669,7 @@ async def get_ingestion_metrics(
     )
 
 
-@router.get("/metrics/performance", response_model=PerformanceMetrics)
+@router.get("/metrics/performance", response_model=PerformanceMetrics, dependencies=ADMIN_REQUIRED)
 async def get_performance_metrics(
     db: AsyncSession = Depends(get_db),
 ) -> PerformanceMetrics:
@@ -678,7 +685,7 @@ async def get_performance_metrics(
     )
 
 
-@router.get("/metrics/rag")
+@router.get("/metrics/rag", dependencies=ADMIN_REQUIRED)
 async def get_rag_metrics(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -705,7 +712,7 @@ async def get_rag_metrics(
         return {"error": str(e)}
 
 
-@router.post("/metrics/record")
+@router.post("/metrics/record", dependencies=ADMIN_REQUIRED)
 async def record_metric(
     metric_name: str,
     value: float,

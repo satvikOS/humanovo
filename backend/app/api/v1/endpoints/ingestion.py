@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.ingestion.base import SourceType
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.models.ingestion_job import (
     IngestionJob,
     IngestionJobStatus as IngestionJobStatusModel,
@@ -24,8 +25,7 @@ from app.models.ingestion_job import (
 )
 
 logger = get_logger(__name__)
-router = APIRouter()
-
+router = APIRouter(dependencies=AUTH_REQUIRED)
 # In-memory tracking for agent status and source configs
 _agent_tracker: dict[str, dict[str, Any]] = {}
 _source_configs: dict[str, dict[str, Any]] = {}

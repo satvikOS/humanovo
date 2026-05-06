@@ -20,12 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.auth import ADMIN_REQUIRED
 from app.models.platform_entities import KnowledgeGraphNode, KnowledgeGraphEdge
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
-
-
+router = APIRouter(dependencies=ADMIN_REQUIRED)
 @router.get("/health")
 async def admin_health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Detailed service-liveness for the Settings → Admin panel.

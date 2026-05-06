@@ -22,9 +22,7 @@ from app.services.cost_predictor import predict_discovery_cost
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/paper", tags=["paper-qa"], dependencies=AUTH_REQUIRED)
-cost_router = APIRouter(prefix="/cost", tags=["cost"])
-
-
+cost_router = APIRouter(prefix="/cost", tags=["cost"], dependencies=AUTH_REQUIRED)
 # ---------------------------------------------------------------------------
 # Cost predictor
 # ---------------------------------------------------------------------------

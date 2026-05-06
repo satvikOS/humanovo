@@ -26,11 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, async_session_factory
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 
 logger = get_logger(__name__)
 
-router = APIRouter()
-
+router = APIRouter(dependencies=AUTH_REQUIRED)
 # ---------------------------------------------------------------------------
 # In-memory run tracking (will be persisted to DB via learning_memory_service)
 # ---------------------------------------------------------------------------

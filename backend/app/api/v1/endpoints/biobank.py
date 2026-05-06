@@ -15,13 +15,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.auth import AUTH_REQUIRED
 from app.models.platform_entities import BiobankSample, StorageLocation
 from app.api.v1.endpoints._bulk import attach_bulk_delete, attach_bulk_archive
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
-
-
+router = APIRouter(dependencies=AUTH_REQUIRED)
 # ── Schemas ─────────────────────────────────────────────────────
 
 

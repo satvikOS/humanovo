@@ -10,8 +10,11 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import authenticate_websocket
+from app.core.database import get_db
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -331,6 +334,7 @@ manager = IngestionWSManager()
 async def job_websocket(
     websocket: WebSocket,
     job_id: UUID,
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """
     WebSocket for tracking a specific ingestion job.
@@ -342,6 +346,9 @@ async def job_websocket(
     - Errors and warnings
     - Completion status
     """
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     await manager.connect_job(websocket, job_id)
 
     try:
@@ -380,6 +387,7 @@ async def job_websocket(
 @router.websocket("/global")
 async def global_ingestion_websocket(
     websocket: WebSocket,
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """
     WebSocket for global ingestion updates.
@@ -390,6 +398,9 @@ async def global_ingestion_websocket(
     - Agent status changes
     - Queue statistics
     """
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     await manager.connect_global(websocket)
 
     try:
@@ -425,6 +436,7 @@ async def global_ingestion_websocket(
 async def agent_websocket(
     websocket: WebSocket,
     agent_type: str,
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """
     WebSocket for tracking a specific agent type.
@@ -435,6 +447,9 @@ async def agent_websocket(
     - Rate limit status
     - Error counts
     """
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     await manager.connect_agent(websocket, agent_type)
 
     try:
