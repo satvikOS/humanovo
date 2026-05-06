@@ -74,13 +74,16 @@ OWNERSHIP_HELPERS: set[str] = {
 
 # Per-function exemption: (filename, function_name). Entries here
 # document handlers that legitimately query an OWNED_MODELS row
-# without a tenant filter (typically by direct id-from-URL fetch
-# that's already gated by the parent project's ownership check).
-# Keep this list short.
+# without a tenant filter — typically internal background helpers
+# that the matching API endpoint already gated, or pure aggregates.
+# Keep this list short and add a one-line comment per entry.
 EXEMPT_FUNCTIONS: set[tuple[str, str]] = {
-    # paper_qa.py uses the cost_router which has AUTH_REQUIRED but
-    # rolls up costs across every user — admin-style aggregate.
-    # ("paper_qa.py", "get_cost_summary"),
+    # Background task spawned by POST /agents/tasks (which checked
+    # ownership). Runs in trusted server context with the task_id
+    # the endpoint just inserted; no external caller can invoke it.
+    ("agents.py", "_execute_agent_task"),
+    # Internal progress writer called from inside _execute_agent_task.
+    ("agents.py", "_update_task_progress_db"),
 }
 
 
@@ -199,6 +202,8 @@ def test_no_owned_model_query_without_ownership_proof() -> None:
         "hypotheses.py",
         "evidence.py",
         "simulation.py",
+        "agents.py",
+        "evoe.py",
     }
 
     regressions: list[str] = []

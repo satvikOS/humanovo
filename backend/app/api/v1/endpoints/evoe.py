@@ -21,8 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import fetch_owned_or_404
 from app.models.hypothesis import Hypothesis
+from app.models.user import User
 from app.scoring.evoe import rank, score_hypothesis
 
 logger = get_logger(__name__)
@@ -77,18 +79,20 @@ async def rank_hypotheses(payload: RankRequest) -> RankResponse:
 async def evoe_for_hypothesis(
     hypothesis_id: str = Path(..., min_length=1),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvoeBreakdownResponse:
-    """Return the EVOE breakdown for a stored hypothesis."""
+    """Return the EVOE breakdown for one of the caller's hypotheses."""
+    from uuid import UUID
     try:
-        row = await db.execute(
-            select(Hypothesis).where(Hypothesis.id == hypothesis_id)
-        )
-        h = row.scalar_one_or_none()
+        hyp_uuid = UUID(hypothesis_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid hypothesis id")
+    try:
+        h = await fetch_owned_or_404(db, Hypothesis, hyp_uuid, current_user)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB lookup failed: {e}")
-
-    if h is None:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
 
     hyp_dict = {
         "id": str(h.id),
