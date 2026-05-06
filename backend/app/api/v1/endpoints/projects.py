@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.models.user import User
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -102,9 +103,13 @@ def project_to_response(project) -> ProjectResponse:
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
-async def create_project(project: ProjectCreate, db: AsyncSession = Depends(get_db)) -> ProjectResponse:
-    """Create a new research project."""
-    logger.info("Creating new project", name=project.name)
+async def create_project(
+    project: ProjectCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ProjectResponse:
+    """Create a new research project owned by the caller."""
+    logger.info("Creating new project", name=project.name, owner_id=str(current_user.id))
     Project, ProjectStatus = _get_project_model()
 
     db_project = Project(
@@ -114,6 +119,7 @@ async def create_project(project: ProjectCreate, db: AsyncSession = Depends(get_
         research_question=project.research_question,
         tags=project.tags,
         status=ProjectStatus.ACTIVE,
+        owner_id=current_user.id,
     )
     db.add(db_project)
     await db.flush()
@@ -129,11 +135,12 @@ async def list_projects(
     search: str | None = None,
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> ProjectListResponse:
-    """List all projects with pagination."""
+    """List the caller's projects with pagination."""
     Project, ProjectStatus = _get_project_model()
 
-    query = select(Project)
+    query = select(Project).where(Project.owner_id == current_user.id)
     if search:
         search_filter = f"%{search}%"
         query = query.where(
@@ -168,16 +175,30 @@ async def list_projects(
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -> ProjectResponse:
-    """Get a specific project by ID, including its hypotheses."""
+async def get_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ProjectResponse:
+    """Get one of the caller's projects by ID, including its hypotheses.
+
+    Returns 404 (not 403) on a non-owned project so callers can't probe
+    for the existence of someone else's IDs.
+    """
     Project, ProjectStatus = _get_project_model()
 
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Fetch hypotheses linked to this project
+    # Fetch hypotheses linked to this project. The project ownership check
+    # above already proves the caller is allowed to see them.
     hypotheses_list = None
     try:
         from app.models.hypothesis import Hypothesis
@@ -211,11 +232,21 @@ async def get_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -> P
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)
-async def update_project(project_id: UUID, project_update: ProjectUpdate, db: AsyncSession = Depends(get_db)) -> ProjectResponse:
-    """Update a project."""
+async def update_project(
+    project_id: UUID,
+    project_update: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ProjectResponse:
+    """Update one of the caller's projects."""
     Project, ProjectStatus = _get_project_model()
 
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -236,11 +267,20 @@ async def update_project(project_id: UUID, project_update: ProjectUpdate, db: As
 
 
 @router.delete("/{project_id}", status_code=204)
-async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    """Delete a project."""
+async def delete_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    """Delete one of the caller's projects."""
     Project, _ = _get_project_model()
 
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
