@@ -298,6 +298,24 @@ async def stream_chat(
     if session is None:
         raise HTTPException(status_code=404, detail="Discovery session not found")
 
+    # Per-tier monthly budget pre-flight. Chat turns charge against
+    # the same monthly cap as discovery + synthesis. If the caller is
+    # over their tier's cap, raise 402 (Payment Required) before any
+    # upstream LLM call lands.
+    from app.services.budget_enforcer_service import (
+        UserBudgetBlocked,
+        get_user_budget_service,
+    )
+    try:
+        ub_status = await get_user_budget_service().check(str(current_user.id))
+        if ub_status.status == "blocked":
+            raise HTTPException(
+                status_code=402,
+                detail=ub_status.message or "Monthly budget exhausted",
+            )
+    except UserBudgetBlocked as ub:
+        raise HTTPException(status_code=402, detail=str(ub))
+
     # Merge agent config with per-turn overrides.
     cfg = dict(session.agent_config or {})
     if req.overrides:
