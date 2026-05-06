@@ -1,0 +1,194 @@
+name: Deploy Frontend to NEW account
+
+# Builds the Vite frontend and syncs the dist/ to the S3 bucket
+# provisioned by `bootstrap-frontend-cloudfront.yml`, then triggers a
+# CloudFront invalidation so the new build is live immediately.
+#
+# Run this AFTER bootstrap-frontend-cloudfront.yml has succeeded once
+# (it creates the bucket + distribution). Then run THIS workflow on
+# every UI change you want live.
+#
+# Manual-only — does not auto-fire on push, so you control which
+# commit hits the new-account CDN.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment label (must match what bootstrap used: prod, staging, dev)'
+        required: false
+        default: 'prod'
+      aws_region:
+        description: 'AWS region (must match bootstrap)'
+        required: false
+        default: 'us-east-1'
+      api_base_url:
+        description: 'VITE_API_BASE_URL baked into the build (e.g. https://api.humanovo.com — leave empty for "")'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-frontend-new-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  TF_STATE_BUCKET_PREFIX: humanovo-tf-state
+  TF_LOCK_TABLE: humanovo-tf-locks
+  TF_WORKING_DIR: infrastructure/terraform/bootstrap-frontend
+  TERRAFORM_VERSION: '1.6.6'
+
+jobs:
+  deploy:
+    name: Build + sync + invalidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure AWS credentials (new account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Confirm we're in the new account
+        run: |
+          aws sts get-caller-identity --output table
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
+
+      - name: Set up Terraform (to read outputs)
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init (read-only — outputs)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          REGION="${{ github.event.inputs.aws_region }}"
+          BUCKET="${TF_STATE_BUCKET_PREFIX}-${REGION}"
+          terraform init \
+            -backend-config="bucket=${BUCKET}" \
+            -backend-config="key=frontend/${{ github.event.inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${REGION}" \
+            -backend-config="dynamodb_table=${TF_LOCK_TABLE}" \
+            -backend-config="encrypt=true"
+
+      - name: Read stack outputs
+        id: tf
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          DOMAIN=$(terraform output -raw cloudfront_domain)
+          DIST_ID=$(terraform output -raw cloudfront_distribution_id)
+          BUCKET=$(terraform output -raw frontend_bucket)
+          echo "domain=$DOMAIN"   >> "$GITHUB_OUTPUT"
+          echo "dist_id=$DIST_ID" >> "$GITHUB_OUTPUT"
+          echo "bucket=$BUCKET"   >> "$GITHUB_OUTPUT"
+          echo "Bootstrap stack found:"
+          echo "  bucket  = $BUCKET"
+          echo "  dist id = $DIST_ID"
+          echo "  domain  = $DOMAIN"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          # Bake the API base URL into the build. Empty string is a valid
+          # value (means "use relative paths", suitable for same-origin
+          # api hosting once the api gateway is colocated under the same
+          # CloudFront distribution).
+          VITE_API_BASE_URL: ${{ github.event.inputs.api_base_url }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Sync to S3
+        run: |
+          BUCKET="${{ steps.tf.outputs.bucket }}"
+          # Two-pass sync gets the cache headers right:
+          #
+          # 1. Hashed assets (CSS/JS bundles in /assets/) — long cache,
+          #    they're versioned by content hash so safe to keep forever.
+          # 2. Top-level files (index.html, manifest, etc.) — no-cache,
+          #    so a fresh deploy is picked up on the next request.
+          aws s3 sync frontend/dist/ "s3://${BUCKET}/" \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html" \
+            --exclude "*.json" \
+            --exclude "*.txt"
+
+          aws s3 sync frontend/dist/ "s3://${BUCKET}/" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --exclude "*" \
+            --include "index.html" \
+            --include "*.json" \
+            --include "*.txt"
+
+      - name: CloudFront invalidation
+        id: invalidate
+        run: |
+          DIST_ID="${{ steps.tf.outputs.dist_id }}"
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$DIST_ID" \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+          echo "invalidation_id=$INVALIDATION_ID" >> "$GITHUB_OUTPUT"
+          echo "CloudFront invalidation queued: $INVALIDATION_ID"
+
+      - name: Wait for invalidation to complete
+        run: |
+          DIST_ID="${{ steps.tf.outputs.dist_id }}"
+          INVALIDATION_ID="${{ steps.invalidate.outputs.invalidation_id }}"
+          echo "Waiting for invalidation $INVALIDATION_ID..."
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$DIST_ID" \
+            --id "$INVALIDATION_ID"
+          echo "Invalidation complete — new build is live."
+
+      - name: Print results to job summary
+        run: |
+          DOMAIN="${{ steps.tf.outputs.domain }}"
+          DIST_ID="${{ steps.tf.outputs.dist_id }}"
+          BUCKET="${{ steps.tf.outputs.bucket }}"
+          INVALIDATION_ID="${{ steps.invalidate.outputs.invalidation_id }}"
+
+          {
+            echo "## humanovo Frontend deployed"
+            echo ""
+            echo "### Live URL"
+            echo ""
+            echo "**https://${DOMAIN}**"
+            echo ""
+            echo "### Deployment details"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| AWS account | \`${ACCOUNT_ID}\` |"
+            echo "| Region | \`${{ github.event.inputs.aws_region }}\` |"
+            echo "| Environment | \`${{ github.event.inputs.environment }}\` |"
+            echo "| Build SHA | \`${GITHUB_SHA::8}\` |"
+            echo "| Bucket | \`${BUCKET}\` |"
+            echo "| Distribution | \`${DIST_ID}\` |"
+            echo "| Invalidation | \`${INVALIDATION_ID}\` (completed) |"
+            echo "| API base URL | \`${{ github.event.inputs.api_base_url }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo ""
+          echo "============================================================"
+          echo "  LIVE:  https://${DOMAIN}"
+          echo "============================================================"
+          echo ""
