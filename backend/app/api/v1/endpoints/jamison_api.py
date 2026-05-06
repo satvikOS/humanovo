@@ -26,7 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, async_session_factory
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import assert_owns_project
+from app.models.user import User
 
 logger = get_logger(__name__)
 
@@ -131,6 +133,7 @@ class PgvectorPurgeSourceRequest(BaseModel):
 async def _run_discovery_pipeline(
     run_id: str,
     project_id: str,
+    user_id: str,
     disease: str,
     discovery_type: str,
     external_factors: list[str] | None,
@@ -142,22 +145,50 @@ async def _run_discovery_pipeline(
         DiscoveryOrchestrator,
         DiscoveryHypothesis,
     )
+    from app.services.budget_enforcer_service import (
+        BudgetExceeded,
+        RunKind,
+        UserBudgetBlocked,
+        finalize_run,
+        start_run,
+    )
 
     run_record = _active_discovery_runs.get(run_id, {})
     run_record["status"] = "running"
     run_record["started_at"] = datetime.utcnow().isoformat()
 
+    enforcer = None
     try:
+        # Pre-flight monthly cap check + per-run hard ceiling. Raises
+        # UserBudgetBlocked synchronously if the user is already over
+        # their tier's monthly cap; the run never starts.
+        try:
+            enforcer = await start_run(
+                run_id=run_id, user_id=user_id, kind=RunKind.DISCOVERY,
+            )
+        except UserBudgetBlocked as ub:
+            run_record["status"] = "blocked"
+            run_record["error"] = str(ub)
+            logger.warning(
+                f"Discovery run {run_id} blocked: monthly budget exhausted "
+                f"for user={user_id}"
+            )
+            return
+
         # Convert external factors from strings to dicts
         ext_factors = []
         if external_factors:
             for f in external_factors:
                 ext_factors.append({"name": f, "category": "compound", "interaction": ""})
 
-        # Initialize orchestrator
+        # Initialize orchestrator with the per-run enforcer + user_id so
+        # every stage's `assert_allowed` fires and the per-month spend
+        # gets attributed to the right user.
         orchestrator = DiscoveryOrchestrator(
             max_agents=100,
             target_confidence=0.95,
+            user_id=user_id,
+            budget_enforcer=enforcer,
         )
         await orchestrator.initialize()
 
@@ -266,6 +297,27 @@ async def _run_discovery_pipeline(
 
         logger.info(f"Discovery run {run_id} completed: {len(hypotheses)} hypotheses")
 
+    except BudgetExceeded as be:
+        # Per-run hard cap reached. Mark the run as budget_truncated and
+        # commit whatever spend was incurred against the user's monthly
+        # cap so the next run respects it.
+        run_record["status"] = "budget_truncated"
+        run_record["error"] = str(be)
+        run_record["spent_cents"] = getattr(be, "spent_cents", None)
+        logger.warning(f"Discovery run {run_id} budget-truncated: {be}")
+        try:
+            from app.api.v1.endpoints.ws_streaming import get_stream_manager
+            mgr = get_stream_manager()
+            await mgr.broadcast(run_id, {
+                "event": "run_error",
+                "run_id": run_id,
+                "error": str(be),
+                "recoverable": False,
+                "reason": "budget_exhausted",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"Discovery run {run_id} failed: {e}")
         run_record["status"] = "failed"
@@ -283,6 +335,14 @@ async def _run_discovery_pipeline(
             })
         except Exception:
             pass
+    finally:
+        # Always push the run's accumulated spend into the user's
+        # monthly budget — partial runs still consumed model calls.
+        if enforcer is not None:
+            try:
+                await finalize_run(enforcer)
+            except Exception as fe:  # noqa: BLE001
+                logger.warning(f"Discovery run {run_id} finalize failed: {fe}")
 
 
 async def _run_synthesis_pipeline(
@@ -473,15 +533,29 @@ async def start_discovery(
     project_id: str,
     body: DiscoverRequest,
     background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict:
-    """Start a real 12-stage discovery pipeline run."""
+    """Start a real 12-stage discovery pipeline run on one of the
+    caller's projects. The pipeline runs under the caller's tier-based
+    budget cap; the per-stage enforcer raises BudgetExceeded once the
+    per-run hard ceiling is hit and the run finalizes as
+    `budget_truncated`."""
+    # 404-on-non-owned matches the project_id ownership invariant.
+    from uuid import UUID
+    try:
+        project_uuid = UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid project id")
+    await assert_owns_project(db, project_uuid, current_user)
+
     run_id = str(uuid4())
     ws_url = f"/ws/discovery/{run_id}"
 
-    # Register the run
     _active_discovery_runs[run_id] = {
         "run_id": run_id,
         "project_id": project_id,
+        "user_id": str(current_user.id),
         "disease": body.disease,
         "discovery_type": body.discovery_type,
         "status": "queued",
@@ -492,11 +566,11 @@ async def start_discovery(
         "verbosity": body.verbosity,
     }
 
-    # Launch the real pipeline in the background
     background_tasks.add_task(
         _run_discovery_pipeline,
         run_id=run_id,
         project_id=project_id,
+        user_id=str(current_user.id),
         disease=body.disease,
         discovery_type=body.discovery_type,
         external_factors=body.external_factors,
@@ -504,7 +578,10 @@ async def start_discovery(
         hypotheses_per_round=body.hypotheses_per_round,
     )
 
-    logger.info(f"Discovery run {run_id} queued for project {project_id}: {body.disease}")
+    logger.info(
+        f"Discovery run {run_id} queued for project {project_id} "
+        f"(user={current_user.id}): {body.disease}"
+    )
 
     return {
         "run_id": run_id,
