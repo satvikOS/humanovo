@@ -114,51 +114,42 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Identify IAM caller
+      - name: Identify IAM caller + preflight Route53 access
         id: caller
         run: |
           set -e
           USER_ARN=$(aws sts get-caller-identity --query Arn --output text)
-          # Extract just the IAM user name (last path segment after the
-          # final slash). Works for arn:aws:iam::<acct>:user/<name>.
           USER_NAME=$(echo "$USER_ARN" | awk -F/ '{print $NF}')
           echo "Caller ARN: $USER_ARN"
           echo "Caller user: $USER_NAME"
-          echo "user_name=$USER_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure Route 53 inline policy on caller (idempotent)
-        # Attaches a tightly-scoped Route53 inline policy to the IAM
-        # user the workflow runs as. PutUserPolicy is idempotent — the
-        # policy doc fully replaces any prior version of the same name.
-        # Required because the existing humanovo-admin user was created
-        # without Route53 perms.
-        run: |
-          set -e
-          cat > /tmp/r53-policy.json <<'EOF'
-          {
-            "Version": "2012-10-17",
-            "Statement": [
-              {
-                "Sid": "Route53ChangesForCutoverWorkflow",
-                "Effect": "Allow",
-                "Action": [
-                  "route53:ListHostedZonesByName",
-                  "route53:ListResourceRecordSets",
-                  "route53:ChangeResourceRecordSets",
-                  "route53:GetChange"
-                ],
-                "Resource": "*"
-              }
-            ]
-          }
-          EOF
-          echo "Attaching humanovo-route53-cutover policy to user '${{ steps.caller.outputs.user_name }}'..."
-          aws iam put-user-policy \
-            --user-name "${{ steps.caller.outputs.user_name }}" \
-            --policy-name humanovo-route53-cutover \
-            --policy-document file:///tmp/r53-policy.json
-          echo "Policy attached. Waiting 5s for IAM eventual-consistency propagation..."
-          sleep 5
+          # Preflight: probe Route53 with a no-op list call. If this
+          # fails with AccessDenied, the rest of the workflow can't
+          # succeed either, so fail early with actionable instructions.
+          if ! aws route53 list-hosted-zones --max-items 1 >/dev/null 2>&1; then
+            {
+              echo "## ❌ Route 53 permissions missing on \`$USER_NAME\`"
+              echo ""
+              echo "The IAM user this workflow runs as does not have"
+              echo "Route 53 access yet. Self-bootstrapping is not"
+              echo "possible because the user also lacks \`iam:PutUserPolicy\`"
+              echo "on itself."
+              echo ""
+              echo "### Fix (30 seconds, one-time)"
+              echo ""
+              echo "1. Open: https://console.aws.amazon.com/iam/home#/users/details/$USER_NAME"
+              echo "2. **Permissions** tab → **Add permissions** → **Attach policies directly**"
+              echo "3. Search \`Route53\` and check **AmazonRoute53FullAccess**"
+              echo "4. **Next** → **Add permissions**"
+              echo ""
+              echo "Then re-trigger this workflow (push any commit to humanovo"
+              echo "modifying \`.github/workflows/route53-m365-cutover.yml\`,"
+              echo "or use **Run workflow** in the Actions UI)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Route 53 access missing on $USER_NAME — see step summary for the 30-second fix."
+            exit 1
+          fi
+          echo "Route 53 access OK for $USER_NAME."
 
       - name: Find hosted zone ID
         id: hz
