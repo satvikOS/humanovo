@@ -26,7 +26,7 @@ Design notes:
 * `highlights` live in their own table so bulk-loading the library
   list doesn't drag full annotation payloads across the wire.
 """
-from sqlalchemy import Boolean, Column, Integer, String, Text
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
 
 from app.models.base import BaseModel
@@ -34,6 +34,16 @@ from app.models.base import BaseModel
 
 class Citation(BaseModel):
     __tablename__ = "citations"
+
+    # Owner — every row belongs to exactly one user. See migration
+    # 015_owner_id_on_sessions_and_citations: nullable for backfill,
+    # tightened to NOT NULL once orphan rows are reassigned.
+    owner_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     # Optional project association — NULL means "unfiled / my library".
     project_id = Column(PGUUID(as_uuid=True), nullable=True, index=True)
@@ -85,6 +95,14 @@ class Citation(BaseModel):
 class CitationFolder(BaseModel):
     __tablename__ = "citation_folders"
 
+    # Owner — folders are per-user collections. See migration
+    # 015_owner_id_on_sessions_and_citations.
+    owner_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     name = Column(String(256), nullable=False)
     parent_id = Column(PGUUID(as_uuid=True), nullable=True, index=True)
     color = Column(String(32), nullable=True)   # hex, optional for sidebar accent

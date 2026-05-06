@@ -39,7 +39,7 @@ much simpler CRUD — the typical session has < 200 turns and we
 never query by individual turn. If that assumption breaks, the
 migration to a child table is straightforward.
 """
-from sqlalchemy import Boolean, Column, String, Text
+from sqlalchemy import Boolean, Column, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 
 from app.models.base import BaseModel
@@ -47,6 +47,17 @@ from app.models.base import BaseModel
 
 class DiscoverySession(BaseModel):
     __tablename__ = "discovery_sessions"
+
+    # Owner — every row belongs to exactly one user. Migration
+    # 015_owner_id_on_sessions_and_citations adds the column nullable
+    # for backfill purposes; the column is treated as required by the
+    # router layer and a follow-up migration will tighten to NOT NULL.
+    owner_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     # Optional FK to Project. NULL means the session is a "scratch"
     # conversation the author started without a project scope — they

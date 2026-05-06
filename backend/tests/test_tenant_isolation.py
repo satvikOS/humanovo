@@ -60,6 +60,8 @@ OWNED_MODELS: set[str] = {
     "Simulation",
     "AgentTask",
     "Citation",
+    "CitationFolder",
+    "CitationHighlight",
     "DiscoverySession",
 }
 
@@ -84,6 +86,15 @@ EXEMPT_FUNCTIONS: set[tuple[str, str]] = {
     ("agents.py", "_execute_agent_task"),
     # Internal progress writer called from inside _execute_agent_task.
     ("agents.py", "_update_task_progress_db"),
+    # citations.py file-local helper that joins CitationHighlight to
+    # Citation.owner_id. The join + where clause IS the proof of
+    # ownership; guard's heuristic only spots Project.owner_id joins
+    # (since the owned-via-Project pattern is canonical).
+    ("citations.py", "_owned_highlight_or_404"),
+    # list_highlights calls _owned_citation_or_404 (verifies parent
+    # ownership) before the CitationHighlight query — same pattern
+    # as the discovery sessions / agent task helpers, just two steps.
+    ("citations.py", "list_highlights"),
 }
 
 
@@ -204,6 +215,8 @@ def test_no_owned_model_query_without_ownership_proof() -> None:
         "simulation.py",
         "agents.py",
         "evoe.py",
+        "discovery_sessions.py",
+        "citations.py",
     }
 
     regressions: list[str] = []
