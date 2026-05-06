@@ -47,8 +47,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.models.discovery_session import DiscoverySession
+from app.models.user import User
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/agents/chat", tags=["agent-chat-stream"], dependencies=AUTH_REQUIRED)
@@ -278,14 +279,21 @@ def _extract_cards(assistant_text: str) -> list[dict[str, Any]]:
 
 
 @router.post("/stream")
-async def stream_chat(req: ChatStreamRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
-    """
-    Stream an assistant turn in response to a user message. Persists
-    both the user message (immediately) and the assistant message
-    (on completion) to the session's messages list.
-    """
-    # 1) Load session.
-    result = await db.execute(select(DiscoverySession).where(DiscoverySession.id == uuid.UUID(req.session_id)))
+async def stream_chat(
+    req: ChatStreamRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> StreamingResponse:
+    """Stream an assistant turn in response to a user message in one
+    of the caller's sessions. Persists both the user message
+    (immediately) and the assistant message (on completion)."""
+    # 1) Load + authz the session in a single ownership-scoped query.
+    result = await db.execute(
+        select(DiscoverySession).where(
+            DiscoverySession.id == uuid.UUID(req.session_id),
+            DiscoverySession.owner_id == current_user.id,
+        )
+    )
     session = result.scalar_one_or_none()
     if session is None:
         raise HTTPException(status_code=404, detail="Discovery session not found")
