@@ -24,10 +24,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/compute", tags=["compute"])
-
+router = APIRouter(prefix="/compute", tags=["compute"], dependencies=AUTH_REQUIRED)
 TIMEOUT_SECONDS = 30
 MAX_OUTPUT_LENGTH = 50_000
 

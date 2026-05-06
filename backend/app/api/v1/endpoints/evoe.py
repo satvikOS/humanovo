@@ -21,12 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.models.hypothesis import Hypothesis
 from app.scoring.evoe import rank, score_hypothesis
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/evoe", tags=["evoe"])
+router = APIRouter(prefix="/evoe", tags=["evoe"], dependencies=AUTH_REQUIRED)
 
 
 class RankRequest(BaseModel):

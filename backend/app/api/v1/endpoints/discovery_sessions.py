@@ -29,12 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.models.discovery_session import DiscoverySession
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/discovery-sessions", tags=["discovery-sessions"])
-
-
+router = APIRouter(prefix="/discovery-sessions", tags=["discovery-sessions"], dependencies=AUTH_REQUIRED)
 # ─── Default agent config ────────────────────────────────────────
 # Conservative defaults for a newly-created session. The user can
 # override any field via the right-side config drawer on the

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.models.citation import Citation, CitationFolder, CitationHighlight
 from app.citations_io import (
     parse_bibtex,
@@ -40,9 +41,7 @@ from app.citations_io import (
 )
 
 logger = get_logger(__name__)
-router = APIRouter(tags=["citations"])
-
-
+router = APIRouter(tags=["citations"], dependencies=AUTH_REQUIRED)
 # ─── Schemas ─────────────────────────────────────────────────────
 
 

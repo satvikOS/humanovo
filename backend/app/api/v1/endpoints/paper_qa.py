@@ -16,11 +16,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.services.cost_predictor import predict_discovery_cost
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/paper", tags=["paper-qa"])
+router = APIRouter(prefix="/paper", tags=["paper-qa"], dependencies=AUTH_REQUIRED)
 cost_router = APIRouter(prefix="/cost", tags=["cost"])
 
 

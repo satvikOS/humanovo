@@ -47,10 +47,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.models.discovery_session import DiscoverySession
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/agents/chat", tags=["agent-chat-stream"])
+router = APIRouter(prefix="/agents/chat", tags=["agent-chat-stream"], dependencies=AUTH_REQUIRED)
 
 
 class ChatStreamRequest(BaseModel):

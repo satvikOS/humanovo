@@ -19,11 +19,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/documents", tags=["documents"])
-
+router = APIRouter(prefix="/documents", tags=["documents"], dependencies=AUTH_REQUIRED)
 # Async generation state
 _doc_status: str = "idle"  # idle | generating | done | failed
 _doc_result: Optional[bytes] = None

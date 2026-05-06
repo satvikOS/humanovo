@@ -16,6 +16,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.models.hypothesis import (
     EvidenceReference as EvidenceReferenceModel,
     EvidenceType as EvidenceTypeModel,
@@ -24,7 +25,7 @@ from app.models.hypothesis import (
 )
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
 class HypothesisStatus(str, Enum):

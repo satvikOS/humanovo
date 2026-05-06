@@ -13,12 +13,11 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, async_session_factory
+from app.core.auth import AUTH_REQUIRED
 from app.models.activity import Activity
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
-
-
+router = APIRouter(dependencies=AUTH_REQUIRED)
 # ── Schemas ──────────────────────────────────────────────────────
 
 class ActivityUpdate(BaseModel):

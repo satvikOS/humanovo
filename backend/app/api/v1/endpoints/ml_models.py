@@ -14,10 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.auth import AUTH_REQUIRED
 from app.models.platform_entities import MLModel
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
 class ModelCreate(BaseModel):

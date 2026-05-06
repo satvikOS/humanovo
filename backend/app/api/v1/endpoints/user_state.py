@@ -12,10 +12,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 
 logger = get_logger(__name__)
-router = APIRouter()
-
+router = APIRouter(dependencies=AUTH_REQUIRED)
 # Valid state keys that can be synced
 VALID_KEYS = {
     "experiments",

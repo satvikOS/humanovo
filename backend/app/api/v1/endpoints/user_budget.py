@@ -23,14 +23,13 @@ from sqlalchemy import text
 
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.services.budget_enforcer_service import get_user_budget_service
 from app.services.cost_tracking_service import get_cost_tracker
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/user", tags=["user-budget"])
-
-
+router = APIRouter(prefix="/user", tags=["user-budget"], dependencies=AUTH_REQUIRED)
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------

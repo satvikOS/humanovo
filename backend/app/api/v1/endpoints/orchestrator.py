@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.agents.discovery_orchestrator import (
     DiscoveryOrchestrator,
     DiscoveryOrchestratorStats,
@@ -26,8 +27,7 @@ from app.agents.discovery_orchestrator import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/orchestrator", tags=["orchestrator"])
-
+router = APIRouter(prefix="/orchestrator", tags=["orchestrator"], dependencies=AUTH_REQUIRED)
 # Async paper generation state
 _paper_status: str = "idle"  # idle | generating | done | failed
 _paper_result: Optional[str] = None

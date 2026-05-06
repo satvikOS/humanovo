@@ -14,11 +14,10 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from app.core.auth import AUTH_REQUIRED
 
 
-router = APIRouter()
-
-
+router = APIRouter(dependencies=AUTH_REQUIRED)
 # ── Schemas ──────────────────────────────────────────────────────
 
 EXPERIMENT_STATUSES = {"planned", "in_progress", "completed", "failed", "paused"}

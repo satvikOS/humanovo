@@ -15,12 +15,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/pipeline-intelligence", tags=["pipeline-intelligence"])
-
-
+router = APIRouter(prefix="/pipeline-intelligence", tags=["pipeline-intelligence"], dependencies=AUTH_REQUIRED)
 # ============== Request/Response Models ==============
 
 

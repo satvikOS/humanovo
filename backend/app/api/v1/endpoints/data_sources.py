@@ -11,10 +11,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/data-sources", tags=["data-sources"])
+router = APIRouter(prefix="/data-sources", tags=["data-sources"], dependencies=AUTH_REQUIRED)
 
 
 class DataSourceQueryRequest(BaseModel):
