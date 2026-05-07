@@ -3,32 +3,22 @@ import Link from "next/link";
 import Colophon from "@/components/Colophon";
 
 /*
-  /pricing — four tiers, editorial register.
+  /pricing - four tiers, professional register.
 
-  No "MOST POPULAR" badges, no green checkmarks, no comparison-table
-  theatre. Researchers buy software the way they buy reagents: they
-  read the spec sheet, weigh it against the budget, and decide.
-  Pricing is a spec sheet.
-
-  Structure mirrors a Renaissance imprint's dedication leaf — single
-  column, four tiers laid out as numbered "subscriptions" with
-  italic Fraunces tier names, mono price, and a paragraph of
-  editorial copy. The cost-cap discipline (we cap inference compute
-  per tier so power users can't blow up the unit economics, and so
-  budget-conscious researchers never get a surprise bill) is stated
-  plainly at the top because it is the most distinctive thing about
-  the model.
+  Plain spec-sheet layout: one tier per row, retail price, who it
+  is for, what it includes, and a single CTA. No internal economics,
+  no "MOST POPULAR" badges, no comparison-table theatre.
 */
 
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "Four tiers — Trial, Researcher, Lab, Institution. Capped compute, no surprise bills, transparent unit economics. Pricing as a spec sheet, not a funnel.",
+    "Four tiers - Trial, Researcher, Lab, Institution. Choose the tier that matches your work.",
   alternates: { canonical: "https://www.humanovo.net/pricing" },
   openGraph: {
-    title: "humanovo — Pricing",
+    title: "humanovo - Pricing",
     description:
-      "Four tiers — Trial, Researcher, Lab, Institution. Capped compute, no surprise bills.",
+      "Four tiers - Trial, Researcher, Lab, Institution.",
     url: "https://www.humanovo.net/pricing",
     type: "article",
   },
@@ -39,7 +29,6 @@ type Tier = {
   name: string;
   price: string;
   cadence: string;
-  cap: string;
   audience: string;
   body: string;
   includes: string[];
@@ -52,13 +41,12 @@ const TIERS: Tier[] = [
     name: "Trial",
     price: "$0",
     cadence: "no card required",
-    cap: "$0.50 of compute / month",
-    audience: "for trying the pipeline before you decide",
-    body: "Run two adversarial pipelines a week against the full corpus. Read every citation, audit every claim, export the full hypothesis trace. The cap is enforced; you will not be charged. When you outgrow it, the upgrade is one click.",
+    audience: "for evaluating the platform",
+    body: "Run a limited number of adversarial pipelines per week against the public corpus. Read every citation, audit every claim, export the full hypothesis trace. Upgrade in one click when you are ready.",
     includes: [
       "Full 12-stage adversarial pipeline",
       "Citation roundtrip on every claim",
-      "Read-only access to the public atlas of plates",
+      "Access to the public atlas of plates",
       "Export hypotheses to Markdown / BibTeX",
     ],
     cta: { label: "Start trial", href: "/#section-cta" },
@@ -67,16 +55,15 @@ const TIERS: Tier[] = [
     numeral: "II",
     name: "Researcher",
     price: "$20",
-    cadence: "per researcher · per month",
-    cap: "$4 of compute / month included",
+    cadence: "per researcher / month",
     audience: "for the individual scientist",
-    body: "The default tier for working scientists. Run pipelines as often as the question warrants; the included compute covers the median power-user month. Overage is opt-in, billed at cost, and a one-line entry on your invoice — no surprise bills, ever.",
+    body: "The default tier for working scientists. Generous monthly limits sized for active research, and a clear notification before any additional usage is authorised - never a surprise charge.",
     includes: [
       "Everything in Trial",
-      "Private corpus — your notebooks, PDFs, datasets",
+      "Private corpus - your notebooks, PDFs, datasets",
       "Per-hypothesis audit log with Merkle commit",
       "CrossRef + NCBI snapshots pinned per hypothesis",
-      "Email-based support, replied to in 24h by a person",
+      "Email support with 24h response",
     ],
     cta: { label: "Request access", href: "/#section-cta" },
   },
@@ -84,10 +71,9 @@ const TIERS: Tier[] = [
     numeral: "III",
     name: "Lab",
     price: "$200",
-    cadence: "per lab · per month · up to 5 seats",
-    cap: "$40 of compute / month included",
+    cadence: "per lab / month, up to 5 seats",
     audience: "for a PI and their group",
-    body: "The PI plus four trainees, one shared corpus, one shared library of saved hypotheses. The right unit is the lab, not the seat — a graduate student joining mid-rotation should be able to read every prior hypothesis the lab has run, with full citation provenance. That is what this tier buys you.",
+    body: "The PI plus four trainees, one shared corpus, one shared library of saved hypotheses. A graduate student joining mid-rotation should be able to read every prior hypothesis the lab has run, with full citation provenance.",
     includes: [
       "Everything in Researcher, for the whole group",
       "Shared lab corpus + private member workspaces",
@@ -95,26 +81,25 @@ const TIERS: Tier[] = [
       "Role-based access: PI, member, read-only collaborator",
       "Priority support (4h business-hours response)",
     ],
-    cta: { label: "Talk to us", href: "mailto:hello@humanovo.net?subject=humanovo%20%2F%20Lab%20tier" },
+    cta: { label: "Talk to sales", href: "mailto:hello@humanovo.net?subject=humanovo%20%2F%20Lab%20tier" },
   },
   {
     numeral: "IV",
     name: "Institution",
     price: "Custom",
-    cadence: "annual contract · floor $200 / seat",
-    cap: "negotiated against expected usage",
+    cadence: "annual contract",
     audience: "for departments, hospitals, biotechs",
-    body: "Tenant-isolated deployment, dedicated encryption keys, audit-log export to your SIEM, SSO via SAML or OIDC, HIPAA BAA on request, and a named technical contact. We will sign your security questionnaire. We will sit on your IRB call. We will fly out for the kickoff.",
+    body: "Tenant-isolated deployment, dedicated encryption keys, audit-log export to your SIEM, SSO via SAML or OIDC, HIPAA BAA on request, and a named technical contact.",
     includes: [
       "Everything in Lab, with tenant isolation",
       "BYOK encryption (per-tenant KMS keys)",
       "SSO (SAML 2.0 / OIDC) + SCIM provisioning",
       "Audit log export (S3 / Splunk / Datadog)",
-      "HIPAA BAA, SOC 2 Type II report (in progress, ETA Q4 2026)",
-      "Named CSM + 2h response SLA, business hours",
+      "HIPAA BAA available; SOC 2 Type II in progress",
+      "Named technical contact with 2h business-hours response",
       "Optional on-premises / VPC deployment",
     ],
-    cta: { label: "Schedule a call", href: "mailto:hello@humanovo.net?subject=humanovo%20%2F%20Institution%20tier" },
+    cta: { label: "Contact sales", href: "mailto:hello@humanovo.net?subject=humanovo%20%2F%20Institution%20tier" },
   },
 ];
 
@@ -193,9 +178,9 @@ export default function PricingPage() {
               margin: "22px 0 0",
             }}
           >
-            Pricing as a spec sheet,
+            Choose the tier
             <br />
-            <span style={{ color: "var(--rust)" }}>not a funnel.</span>
+            <span style={{ color: "var(--rust)" }}>that matches your work.</span>
           </h1>
           <p
             style={{
@@ -206,7 +191,7 @@ export default function PricingPage() {
               color: "var(--ink-3)",
             }}
           >
-            Four tiers, capped compute, no surprise bills.
+            From a free trial to enterprise deployment.
           </p>
         </header>
 
@@ -219,36 +204,6 @@ export default function PricingPage() {
             background: "var(--paper-edge)",
           }}
         />
-
-        {/* Editorial preamble — the cost-cap discipline. The thing
-            that makes this pricing distinctive sits up here, in
-            italic, like a publisher's note. */}
-        <section
-          style={{
-            marginBottom: 56,
-            fontSize: "1.12rem",
-            lineHeight: 1.7,
-            color: "var(--ink-1)",
-          }}
-        >
-          <p style={{ marginTop: 0 }}>
-            Every tier ships with a <em>compute cap</em>. The cap is the
-            ceiling on what humanovo will spend on inference for you in a
-            month before pausing and asking. We do this because the cost
-            of running adversarial pipelines on the world&rsquo;s
-            literature is real, and we would rather you see the number
-            than discover it on an invoice.
-          </p>
-          <p>
-            The Researcher and Lab tiers include enough compute to cover
-            the <em>p90</em> month of usage we&rsquo;ve seen in beta.
-            If you exceed the cap, the pipeline pauses; you can opt in
-            to overage (billed at our cost, never marked up) or wait
-            until the next billing cycle. There are no surprise bills,
-            because there are no bills you didn&rsquo;t click to
-            authorise.
-          </p>
-        </section>
 
         {TIERS.map((tier) => (
           <TierCard key={tier.numeral} tier={tier} />
@@ -292,27 +247,27 @@ export default function PricingPage() {
           >
             <Note
               term="Academic discount"
-              body="Researcher tier is free for full-time graduate students. Email us from your university address; we verify and flip the bit. No paperwork."
+              body="Researcher tier is available at no charge for full-time graduate students. Verify your university email to enable."
             />
             <Note
               term="Annual billing"
-              body="2 months free (effectively 16% off) if you pay annually. Lab and Institution tiers are annual by default; Researcher is monthly by default."
+              body="Two months free when paid annually. Lab and Institution tiers are annual by default; Researcher is monthly by default."
             />
             <Note
               term="Cancellation"
-              body="Cancel any time, prorated to the next billing cycle. Your hypotheses, audit logs, and exported data remain accessible read-only for 90 days. After 90 days the workspace is deleted; export tooling is one click."
+              body="Cancel at any time, prorated to the next billing cycle. Your hypotheses, audit logs, and exported data remain accessible read-only for 90 days, then are deleted."
             />
             <Note
               term="Refunds"
-              body="Within 14 days, no questions asked, refunded to source. After 14 days, prorated against unused time. We do not haggle and we do not retain dark-pattern friction."
+              body="Refundable to source within 14 days of first payment. After 14 days, prorated against unused time."
             />
             <Note
               term="Currency"
-              body="Prices are USD. We can invoice in EUR / GBP / CAD / AUD on annual contracts; ask."
+              body="Prices are USD. Invoicing in EUR, GBP, CAD, or AUD is available on annual contracts."
             />
             <Note
               term="Taxes"
-              body="Prices exclude VAT / GST / sales tax, which is added at checkout based on your jurisdiction."
+              body="Prices exclude VAT, GST, and sales tax, which are added at checkout based on your jurisdiction."
             />
           </dl>
         </section>
@@ -446,19 +401,7 @@ function TierCard({ tier }: { tier: Tier }) {
       </p>
       <p
         style={{
-          margin: "0 0 18px",
-          fontFamily: "var(--font-mono), monospace",
-          fontSize: "0.7rem",
-          letterSpacing: "0.16em",
-          textTransform: "uppercase",
-          color: "var(--ink-2)",
-        }}
-      >
-        Cap &middot; {tier.cap}
-      </p>
-      <p
-        style={{
-          margin: "0 0 18px",
+          margin: "18px 0 18px",
           fontSize: "1rem",
           lineHeight: 1.65,
           color: "var(--ink-1)",

@@ -369,10 +369,8 @@ export default function TermsPage() {
           </p>
           <p>
             Before filing anything, email{" "}
-            <em>legal@humanovo.net</em> with the dispute. We&rsquo;ll
-            try to resolve it informally within 30 days. We mean this
-            &mdash; we have not yet had a dispute we couldn&rsquo;t
-            resolve in a phone call.
+            <em>legal@humanovo.net</em> with the dispute. We will
+            attempt to resolve it informally within 30 days.
           </p>
           <p>
             Nothing in these terms prevents either side from seeking

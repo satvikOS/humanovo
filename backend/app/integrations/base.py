@@ -175,8 +175,16 @@ class _IntegrationCache:
                              WHERE service = :s AND endpoint = :e
                                AND params_hash = :h
                         """), {"s": service, "e": endpoint, "h": params_hash})
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        "integrations.cache_hit_count_update_failed",
+                        extra={
+                            "event": "cache_hit_count_update_failed",
+                            "service": service,
+                            "endpoint": endpoint,
+                            "error": str(e),
+                        },
+                    )
                 return _CacheEntry(
                     status_code=row["status_code"],
                     response_json=row["response_json"],

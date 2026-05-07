@@ -263,8 +263,15 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
                     return datetime.strptime(date_str, fmt)
                 except ValueError:
                     continue
-        except Exception:
-            pass
+        except (TypeError, AttributeError) as e:
+            logger.debug(
+                "clinical_trials.date_parse_failed",
+                extra={
+                    "event": "date_parse_failed",
+                    "raw": date_str,
+                    "error": str(e),
+                },
+            )
 
         return None
 

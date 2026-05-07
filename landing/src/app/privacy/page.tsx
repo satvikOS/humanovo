@@ -366,8 +366,7 @@ export default function PrivacyPage() {
             before crossing it.
           </p>
           <p>
-            Data Protection Officer: <em>satvik@humanovo.net</em>{" "}
-            (acting; will be a named, qualified DPO before SOC 2 close).
+            Data Protection Officer: <em>dpo@humanovo.net</em>.
           </p>
         </Section>
 

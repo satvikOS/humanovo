@@ -196,8 +196,15 @@ class PubMedSource(DataSource):
                                 break
                             except ValueError:
                                 continue
-                except Exception:
-                    pass
+                except (ValueError, TypeError, AttributeError) as e:
+                    logger.debug(
+                        "ingestion.sources.pub_date_parse_failed",
+                        extra={
+                            "event": "pub_date_parse_failed",
+                            "raw": pub_date_str,
+                            "error": str(e),
+                        },
+                    )
 
                 records.append(
                     DataRecord(

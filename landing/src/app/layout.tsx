@@ -117,7 +117,6 @@ const ORG_JSONLD = {
   logo: `${SITE_URL}/favicon.svg`,
   description: DESCRIPTION,
   foundingDate: "2026",
-  sameAs: ["https://github.com/satvikOS/humanovo"],
 };
 
 export default function RootLayout({

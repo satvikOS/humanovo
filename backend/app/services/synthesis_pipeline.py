@@ -560,6 +560,9 @@ class SynthesisPipeline:
             if match:
                 try:
                     return json.loads(match.group())
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as e:
+                    logger.debug(
+                        "synthesis_pipeline.json_parse_fallback_failed",
+                        extra={"event": "json_parse_fallback_failed", "error": str(e)},
+                    )
             return {}

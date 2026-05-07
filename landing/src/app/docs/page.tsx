@@ -186,7 +186,7 @@ const CHAPTERS: { group: string; chapters: Chapter[] }[] = [
       {
         numeral: "XVII",
         title: "Support",
-        body: "Email hello@humanovo.net for anything. Replied to in 24h on Researcher tier, 4h on Lab, 2h on Institution. Founder DMs welcome and replied to personally.",
+        body: "Email hello@humanovo.net. Response within 24h on Researcher tier, 4h on Lab, 2h on Institution.",
         href: "mailto:hello@humanovo.net",
         status: "shipped",
         external: true,

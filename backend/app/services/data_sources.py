@@ -2919,6 +2919,13 @@ PHASE_2_SOURCES = [k for k, v in ALL_SOURCE_CLASSES.items() if v.phase == 2]
 PHASE_3_SOURCES = [k for k, v in ALL_SOURCE_CLASSES.items() if v.phase == 3]
 PHASE_4_SOURCES = [k for k, v in ALL_SOURCE_CLASSES.items() if v.phase == 4]
 
+# Active by default in the orchestrator. Phase 1 + Phase 2 = 36
+# sources that are public-domain / open-license / commercial-use-OK
+# with stable APIs and reasonable rate limits. Phase 3 and 4 require
+# explicit opt-in either via a per-tenant feature flag or an explicit
+# source_names list passed to the orchestrator constructor.
+ACTIVE_SOURCES: list[str] = PHASE_1_SOURCES + PHASE_2_SOURCES
+
 
 # ===================================================================
 # ORCHESTRATOR
@@ -2928,9 +2935,13 @@ class DataSourceOrchestrator:
     """Coordinates queries across multiple biomedical data sources."""
 
     def __init__(self, source_names: list[str] | None = None) -> None:
-        """Initialize with optional list of source names. Defaults to Phase 1."""
+        """Initialize with optional list of source names.
+
+        Defaults to ACTIVE_SOURCES (Phase 1 + Phase 2 = 36 sources).
+        Phase 3 / Phase 4 sources are opt-in via explicit source_names.
+        """
         if source_names is None:
-            source_names = PHASE_1_SOURCES
+            source_names = ACTIVE_SOURCES
         self._sources: dict[str, DataSourceBase] = {}
         for name in source_names:
             cls = ALL_SOURCE_CLASSES.get(name)

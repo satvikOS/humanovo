@@ -192,25 +192,23 @@ export default function Navigation() {
           <span
             aria-hidden
             style={{
-              width: 26,
-              height: 26,
+              width: 44,
+              height: 22,
               display: "grid",
               placeItems: "center",
               color: "var(--ink-0)",
             }}
           >
-            {/* Inline the glyph as an <img> rather than an external
-                <svg use>; the glyph file lives at /public/glyph.svg
-                and inherits `currentColor` via the parent `color`
-                token, so dark-mode inversion is a one-line change.
-                Decorative — the wordmark beside it carries the
+            {/* Platform mark — two overlapping discs (peanut / dumbbell
+                silhouette). 2:1 viewBox so width is twice height.
+                Decorative; the wordmark beside it carries the
                 accessible name. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/glyph.svg"
               alt=""
-              width={26}
-              height={26}
+              width={44}
+              height={22}
               draggable={false}
               style={{ display: "block", pointerEvents: "none" }}
             />
@@ -426,7 +424,7 @@ export function ContactOverlay() {
             Get in touch.
           </h2>
           <p className="t-lead" style={{ marginTop: 10, fontSize: "0.98rem" }}>
-            Tell us what you&rsquo;re researching. We read every reply.
+            Tell us about your research. We will respond within two business days.
           </p>
         </div>
 

@@ -206,8 +206,15 @@ class BulkLoader:
             for bucket in s3_resource.buckets.all():
                 if bucket.name.startswith("genup-dev"):
                     return bucket.name
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "bulk_loader.bucket_autodiscover_failed",
+                extra={
+                    "event": "bucket_autodiscover_failed",
+                    "region": self.region,
+                    "error": str(e),
+                },
+            )
         return ""
 
     # ================================================================
@@ -589,8 +596,17 @@ class BulkLoader:
                                 Key=s3_key,
                                 UploadId=upload_id,
                             )
-                        except Exception:
-                            pass
+                        except Exception as abort_err:
+                            logger.warning(
+                                "bulk_loader.multipart_abort_failed",
+                                extra={
+                                    "event": "multipart_abort_failed",
+                                    "bucket": self.bucket_name,
+                                    "key": s3_key,
+                                    "upload_id": upload_id,
+                                    "error": str(abort_err),
+                                },
+                            )
                     raise
 
     def _read_from_s3(self, s3_key: str) -> bytes | None:

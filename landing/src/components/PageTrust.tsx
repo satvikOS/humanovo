@@ -7,25 +7,17 @@ import { useOverlay } from "@/components/Navigation";
 /*
   PageTrust — the trust surface.
 
-  Researchers are professional skeptics. Three questions decide
-  whether an email gets typed: who built this, what happens to my
-  data, and how do I know the citations aren't hallucinated. This
-  section answers all three in three editorially-distinct registers
-  so the page reads like the colophon page of a journal issue,
-  not a SaaS feature grid.
+  Two blocks: privacy commitment and citation methodology.
+  Researchers need to know what happens to their data and how
+  citations are verified before depending on a tool. The page
+  answers both directly.
 
-  Block 1 — Founders
-    Italic Fraunces quote. The voice of the principal investigator,
-    not a marketing department.
-
-  Block 2 — Privacy commitment
+  Block 1 — Privacy commitment
     All-caps mono on a paper-2 panel. Reads like a contractual
-    clause. Deliberately the most rigid block on the page so the
-    promise lands.
+    clause.
 
-  Block 3 — Methodology
-    Bordered scientific spec. Numbers, units, mechanism. The
-    "trust by precision" argument.
+  Block 2 — Methodology
+    Bordered scientific spec. Numbers, units, mechanism.
 */
 
 export default function PageTrust() {
@@ -118,9 +110,9 @@ export default function PageTrust() {
               color: "var(--ink-2)",
             }}
           >
-            We were sceptics first. The product reflects what
-            scepticism wants from a tool: provenance, privacy, and a
-            pipeline you could audit if you bothered to.
+            Provenance, privacy, and a pipeline you can audit. The
+            three things a researcher needs to be confident in a tool
+            before depending on it.
           </p>
         </div>
 
@@ -132,91 +124,7 @@ export default function PageTrust() {
             gap: 28,
           }}
         >
-          {/* ── Block 1 — Founders / advisors ── */}
-          <div
-            className="trust-block plate plate-tinted"
-            style={
-              {
-                padding: "36px 32px 32px",
-                "--tint": "rgba(199, 145, 46, 0.10)",
-                display: "flex",
-                flexDirection: "column",
-                gap: 18,
-              } as React.CSSProperties
-            }
-          >
-            <header
-              style={{
-                display: "flex",
-                alignItems: "baseline",
-                justifyContent: "space-between",
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: "var(--font-display), Georgia, serif",
-                  fontStyle: "italic",
-                  fontWeight: 300,
-                  fontVariationSettings: '"opsz" 72, "SOFT" 80',
-                  fontSize: "1rem",
-                  color: "var(--ink-3)",
-                  letterSpacing: "0.02em",
-                }}
-              >
-                Pl. I.
-              </span>
-              <span
-                className="t-eyebrow"
-                style={{ fontSize: "0.56rem", letterSpacing: "0.3em" }}
-              >
-                Principals
-              </span>
-            </header>
-
-            <h3
-              className="t-display-upright"
-              style={{ fontSize: "1.6rem" }}
-            >
-              Researchers, not marketers.
-            </h3>
-
-            <blockquote
-              style={{
-                fontFamily: "var(--font-display), Georgia, serif",
-                fontStyle: "italic",
-                fontWeight: 400,
-                fontVariationSettings: '"opsz" 72, "SOFT" 80',
-                fontSize: "1.05rem",
-                lineHeight: 1.5,
-                color: "var(--ink-1)",
-                margin: 0,
-              }}
-            >
-              &ldquo;The tool I wished existed every time a literature
-              search pulled up a hundred papers I didn&rsquo;t have a
-              week to read.&rdquo;
-            </blockquote>
-
-            <div
-              style={{
-                marginTop: "auto",
-                paddingTop: 18,
-                borderTop: "1px solid var(--paper-edge)",
-                fontFamily: "var(--font-mono), monospace",
-                fontSize: "0.66rem",
-                letterSpacing: "0.16em",
-                textTransform: "uppercase",
-                color: "var(--ink-3)",
-                lineHeight: 1.6,
-              }}
-            >
-              Advised by neuroimaging, oncology,
-              <br />
-              and translational-medicine PhDs.
-            </div>
-          </div>
-
-          {/* ── Block 2 — Privacy commitment ── */}
+          {/* ── Block 1 — Privacy commitment ── */}
           <div
             className="trust-block plate plate-tinted"
             style={
@@ -247,7 +155,7 @@ export default function PageTrust() {
                   letterSpacing: "0.02em",
                 }}
               >
-                Pl. II.
+                Pl. I.
               </span>
               <span
                 className="t-eyebrow"
@@ -332,7 +240,7 @@ export default function PageTrust() {
             </div>
           </div>
 
-          {/* ── Block 3 — Methodology ── */}
+          {/* ── Block 2 — Methodology ── */}
           <div
             className="trust-block plate plate-tinted"
             style={
@@ -363,7 +271,7 @@ export default function PageTrust() {
                   letterSpacing: "0.02em",
                 }}
               >
-                Pl. III.
+                Pl. II.
               </span>
               <span
                 className="t-eyebrow"
@@ -410,7 +318,7 @@ export default function PageTrust() {
             >
               {[
                 ["Pipeline", "12 adversarial stages"],
-                ["Sources", "26 biomedical APIs"],
+                ["Sources", "36 biomedical APIs"],
                 ["Round-trip", "100% on launch"],
                 ["Audit log", "tamper-evident"],
               ].map(([k, v]) => (

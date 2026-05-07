@@ -72,9 +72,17 @@ async def query_data_sources(request: DataSourceQueryRequest):
                 all_results.extend(category_results)
             results = all_results
         else:
+            # If a disease context is supplied, prepend it to the query
+            # so the orchestrator's per-source search uses the broader
+            # phrase. Sources with native disease filters can be added
+            # in a future revision; for now this is a uniform widening.
+            full_query = (
+                f"{request.disease} {request.query}".strip()
+                if request.disease
+                else request.query
+            )
             results = await orchestrator.query_all(
-                query=request.query,
-                disease=request.disease,
+                query=full_query,
                 max_results=request.max_results_per_source,
             )
 

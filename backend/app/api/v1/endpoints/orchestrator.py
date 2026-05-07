@@ -54,8 +54,11 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except Exception:
-                pass  # Connection might be closed
+            except (WebSocketDisconnect, ConnectionError, RuntimeError) as e:
+                logger.debug(
+                    "orchestrator.broadcast_send_failed",
+                    extra={"event": "broadcast_send_failed", "error": str(e)},
+                )
 
 
 manager = ConnectionManager()
@@ -816,8 +819,11 @@ async def orchestrator_health():
                     models_status["o3_mini"] = True
                 if settings.AZURE_GPT41_ENDPOINT:
                     models_status["gpt_41"] = True
-            except Exception:
-                pass  # Settings not available, all models remain False
+            except (ImportError, AttributeError) as e:
+                logger.debug(
+                    "orchestrator.settings_unavailable",
+                    extra={"event": "settings_unavailable", "error": str(e)},
+                )
     except Exception as e:
         logger.error(f"Error checking orchestrator health: {e}")
 

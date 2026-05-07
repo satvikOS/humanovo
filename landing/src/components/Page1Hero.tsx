@@ -295,10 +295,10 @@ export default function Page1Hero() {
             {/* Stats row — facts a researcher could verify against
                 the actual pipeline, not marketing superlatives.
                 Specifically: stage count (12 adversarial passes per
-                hypothesis), source count (26 biomedical APIs wired
-                today), and citation-roundtrip rate (every cited
-                paper is round-tripped through CrossRef + NCBI before
-                landing on screen). */}
+                hypothesis), source count (36 biomedical APIs wired
+                today after Phase 2 activation), and citation-roundtrip
+                rate (every cited paper is round-tripped through
+                CrossRef + NCBI before landing on screen). */}
             <div
               className="hero-stats"
               style={{
@@ -312,7 +312,7 @@ export default function Page1Hero() {
               }}
             >
               <Stat value="12" unit="stages" caption="Adversarial pipeline" />
-              <Stat value="26" unit="sources" caption="Biomedical APIs wired" />
+              <Stat value="36" unit="sources" caption="Biomedical APIs wired" />
               <Stat value="100%" unit="roundtrip" caption="Citation verification" />
             </div>
           </div>
