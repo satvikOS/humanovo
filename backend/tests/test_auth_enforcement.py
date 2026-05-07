@@ -41,6 +41,12 @@ PUBLIC_ALLOWLIST: set[tuple[str, str]] = {
     ("GET", "/api/v1/monitoring/health"),
     ("GET", "/api/v1/monitoring/ready"),
     ("GET", "/api/v1/monitoring/live"),
+
+    # Stripe webhook — Stripe POSTs from the public internet. Auth is
+    # the Stripe-Signature header, verified inside the handler against
+    # STRIPE_WEBHOOK_SECRET. A bearer-token requirement here would
+    # break the integration since Stripe doesn't carry our JWTs.
+    ("POST", "/api/v1/billing/webhook"),
 }
 
 # Names of the dependency callables that prove an endpoint is gated.

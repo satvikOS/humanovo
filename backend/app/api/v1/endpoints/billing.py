@@ -1,0 +1,250 @@
+"""
+Billing endpoints — Stripe Checkout + Customer Portal + webhook receiver.
+
+Surface:
+  POST /billing/checkout    create a Checkout Session, return its URL
+  POST /billing/portal      create a Customer Portal session
+  GET  /billing/status      caller's current tier + cap + month-to-date
+  POST /billing/webhook     Stripe → our app (signature-verified)
+
+The first three are AUTH_REQUIRED. The webhook is intentionally
+unauthenticated — Stripe POSTs to it from the public internet, and
+authentication happens via the Stripe-Signature header instead.
+That's why the router below wires AUTH_REQUIRED at handler level
+(via Depends) on the three user-facing routes, and leaves the
+webhook handler dependency-free.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import get_current_active_user
+from app.core.database import get_db
+from app.models.user import User, UserTier
+from app.services.budget_enforcer_service import (
+    TIER_MONTHLY_CAP_CENTS,
+    get_user_budget_service,
+)
+from app.services.stripe_service import (
+    StripeNotConfiguredError,
+    StripeWebhookSignatureError,
+    apply_checkout_completed,
+    apply_subscription_event,
+    create_checkout_session,
+    create_portal_session,
+    verify_webhook,
+)
+
+logger = logging.getLogger(__name__)
+
+# NOT registered with router-level AUTH_REQUIRED because the webhook
+# endpoint MUST be reachable without a bearer token. Per-handler
+# dependencies enforce auth on the user-facing routes.
+router = APIRouter(prefix="/billing", tags=["billing"])
+
+
+# ─── Schemas ────────────────────────────────────────────────────────
+
+
+class CheckoutRequest(BaseModel):
+    target_tier: UserTier
+
+
+class CheckoutResponse(BaseModel):
+    checkout_url: str
+
+
+class PortalResponse(BaseModel):
+    portal_url: str
+
+
+class StatusResponse(BaseModel):
+    tier: UserTier
+    monthly_budget_cents: int
+    current_month_spend_cents: int
+    remaining_cents: int
+    threshold_pct: int
+    has_paid_subscription: bool
+    subscription_status: str | None
+
+
+# ─── User-facing endpoints (AUTH_REQUIRED via Depends) ──────────────
+
+
+@router.post("/checkout", response_model=CheckoutResponse)
+async def start_checkout(
+    body: CheckoutRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CheckoutResponse:
+    """Create a Stripe Checkout Session for the requested tier and
+    return the URL to redirect the user to.
+
+    Trial-tier users entering their first paid checkout, and existing
+    paid users upgrading/downgrading, both use this endpoint —
+    Stripe's Checkout flow handles the existing-subscription case
+    correctly via the customer record we created on first checkout.
+    """
+    try:
+        url = create_checkout_session(current_user, body.target_tier)
+    except StripeNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return CheckoutResponse(checkout_url=url)
+
+
+@router.post("/portal", response_model=PortalResponse)
+async def open_portal(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> PortalResponse:
+    """Create a Stripe Customer Portal session and return its URL.
+
+    The Portal is the Stripe-hosted UI for cancellation, payment-method
+    updates, invoice history, and tier swaps. We open it in the OS
+    browser via the desktop app's deep-link handler.
+    """
+    try:
+        url = create_portal_session(current_user)
+    except StripeNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return PortalResponse(portal_url=url)
+
+
+@router.get("/status", response_model=StatusResponse)
+async def get_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> StatusResponse:
+    """Return the caller's tier, monthly cap, and month-to-date spend.
+
+    Drives the desktop app's billing tab — no Stripe round-trip on this
+    endpoint, all data is in our DB. Stripe-state freshness depends on
+    the webhook keeping User.stripe_subscription_status in sync; the
+    `has_paid_subscription` flag is the cheapest test.
+    """
+    cfg = await get_user_budget_service().get_or_create(str(current_user.id))
+    spend = int(cfg["current_month_spend_cents"])
+    cap = int(cfg["monthly_budget_cents"])
+    return StatusResponse(
+        tier=current_user.tier,
+        monthly_budget_cents=cap,
+        current_month_spend_cents=spend,
+        remaining_cents=max(0, cap - spend),
+        threshold_pct=int(cfg["alert_threshold_pct"]),
+        has_paid_subscription=current_user.stripe_subscription_id is not None,
+        subscription_status=current_user.stripe_subscription_status,
+    )
+
+
+# ─── Webhook (UNAUTHENTICATED, signature-verified) ──────────────────
+
+
+@router.post("/webhook")
+async def stripe_webhook(
+    request: Request,
+    stripe_signature: Annotated[str | None, Header(alias="Stripe-Signature")] = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Stripe POSTs subscription events here. Verify the signature,
+    then translate the event into a UserTier change.
+
+    Always returns 2xx for events we successfully verify (even if we
+    can't find a matching user — that's a permanent state Stripe's
+    retry machinery can't fix). 400 only on signature failure.
+    """
+    if not stripe_signature:
+        raise HTTPException(status_code=400, detail="missing Stripe-Signature header")
+
+    payload = await request.body()
+    try:
+        event = verify_webhook(payload, stripe_signature)
+    except StripeWebhookSignatureError as exc:
+        # Don't echo the upstream error string in the response — it can
+        # leak the configured webhook secret in error messages.
+        logger.warning("stripe webhook signature failed: %s", exc)
+        raise HTTPException(status_code=400, detail="signature verification failed")
+    except StripeNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    event_type = event["type"]
+    data = event["data"]["object"]
+
+    if event_type == "checkout.session.completed":
+        # Persist the stripe_customer_id on the user so subsequent
+        # subscription events resolve. The actual tier flip happens in
+        # customer.subscription.created which fires moments later.
+        result = await apply_checkout_completed(data, db)
+        await db.commit()
+        return {"received": True, "event": event_type, **result}
+
+    if event_type in (
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    ):
+        result = await apply_subscription_event(event_type, data, db)
+        await db.commit()
+        return {"received": True, "event": event_type, **result}
+
+    if event_type == "invoice.payment_failed":
+        # Stripe will retry the invoice for ~3 weeks; we don't downgrade
+        # the user yet (subscription.updated → past_due covers that).
+        # Just log so we have a breadcrumb if the user calls support.
+        sub_id = data.get("subscription")
+        logger.warning(
+            "stripe invoice.payment_failed",
+            extra={"subscription_id": sub_id, "customer_id": data.get("customer")},
+        )
+        return {"received": True, "event": event_type, "status": "logged"}
+
+    # All other events (price.created, charge.succeeded, etc.) — log
+    # at info, return 2xx so Stripe doesn't retry.
+    logger.info("stripe webhook: unhandled event type", extra={"event_type": event_type})
+    return {"received": True, "event": event_type, "status": "ignored"}
+
+
+# ─── Tier-cap snapshot (helper for the desktop app's pricing UI) ────
+
+
+@router.get("/tiers")
+async def get_tier_catalog(
+    current_user: User = Depends(get_current_active_user),
+) -> dict[str, Any]:
+    """Return the public pricing catalog — what each tier costs per
+    month and what monthly cap it includes. Surfaces in the desktop
+    app's "Upgrade" page so users see prices before they hit Stripe."""
+    return {
+        "current_tier": current_user.tier.value,
+        "tiers": {
+            "trial": {
+                "monthly_cap_cents": TIER_MONTHLY_CAP_CENTS["trial"],
+                "monthly_price_cents": 0,
+                "description": "Free trial — try a few hypothesis runs.",
+            },
+            "researcher": {
+                "monthly_cap_cents": TIER_MONTHLY_CAP_CENTS["researcher"],
+                "monthly_price_cents": 2000,
+                "description": "Limited monthly hypotheses, full feature set, 1 user.",
+            },
+            "lab": {
+                "monthly_cap_cents": TIER_MONTHLY_CAP_CENTS["lab"],
+                "monthly_price_cents": 20000,
+                "description": "Generous hypothesis volume, multi-user lab workspace.",
+            },
+            "institution": {
+                "monthly_cap_cents": TIER_MONTHLY_CAP_CENTS["institution"],
+                "monthly_price_cents": None,  # custom-quoted
+                "description": "Volume pricing, BAA, dedicated support. Contact sales.",
+            },
+        },
+    }

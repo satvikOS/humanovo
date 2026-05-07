@@ -80,6 +80,17 @@ class User(BaseModel):
     api_key_hash = Column(String(255), nullable=True, unique=True)
     api_key_created_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Stripe billing — see migration 017_stripe_customer_subscription.
+    # `tier` (above) is humanovo's authoritative tier; these three
+    # columns are Stripe's view of the same subscription, kept in sync
+    # by the webhook handler in app.services.stripe_service. A user
+    # with `tier=trial` and NULL stripe_subscription_id is the normal
+    # free state; admin-comp'd accounts are `tier=lab/institution`
+    # with NULL stripe_subscription_id (no Stripe record).
+    stripe_customer_id = Column(String(64), nullable=True, unique=True)
+    stripe_subscription_id = Column(String(64), nullable=True, index=True)
+    stripe_subscription_status = Column(String(32), nullable=True)
+
     # Relationships
     projects = relationship("Project", back_populates="owner", lazy="dynamic")
 

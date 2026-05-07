@@ -107,6 +107,14 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 email-validator>=2.2.0
 
+# ─── Billing (Stripe) ────────────────────────────────────────────
+# Used by app.services.stripe_service for Checkout + Customer Portal
+# session creation, webhook signature verification, and subscription
+# state translation to UserTier. Pinned major version 11+ which has
+# the modern object types we use (CheckoutSession, BillingPortalSession,
+# Webhook.construct_event signature).
+stripe>=11.0.0,<13.0.0
+
 # ─── Testing ────────────────────────────────────────────────────
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
