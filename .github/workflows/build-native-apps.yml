@@ -228,6 +228,39 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      - name: Attach stable-name aliases to release
+        # Tauri's bundler emits files like humanovo_0.2.0+abcd1234_universal.dmg
+        # — version embedded. The landing page (humanovo.net/download/...) needs
+        # stable URLs that don't change per release, so we upload a second copy
+        # of each artifact under a flat name. Both names point at the same bytes.
+        # GitHub's `releases/latest/download/<name>` shortcut then resolves
+        # /download/macos -> humanovo_universal.dmg without the landing-page
+        # config needing to know the version. Auto-mode only: tag releases and
+        # dispatch builds skip this (those have explicit versioned URLs).
+        if: steps.version.outputs.mode == 'auto'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          BUNDLE_DIR=frontend/src-tauri/target/release/bundle
+          declare -A aliases=(
+            ["*.dmg"]="humanovo_universal.dmg"
+            ["*.msi"]="humanovo_x64_en-US.msi"
+            ["*-setup.exe"]="humanovo_x64-setup.exe"
+            ["*.deb"]="humanovo_amd64.deb"
+            ["*.AppImage"]="humanovo_amd64.AppImage"
+          )
+          for glob in "${!aliases[@]}"; do
+            for src in $(find "$BUNDLE_DIR" -type f -name "$glob" 2>/dev/null); do
+              alias_name="${aliases[$glob]}"
+              cp "$src" "/tmp/$alias_name"
+              echo "Uploading alias: $alias_name (from $src)"
+              gh release upload "$TAG" "/tmp/$alias_name" \
+                --repo "$GITHUB_REPOSITORY" --clobber
+            done
+          done
+
       - name: Upload artifacts (dispatch-only fallback)
         if: steps.version.outputs.mode == 'dispatch-only'
         uses: actions/upload-artifact@v5
