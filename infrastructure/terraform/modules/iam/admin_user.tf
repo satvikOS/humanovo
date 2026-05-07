@@ -1,5 +1,5 @@
-# GenUp IAM Admin User for Deployment and Testing
-# This creates an IAM user with permissions to deploy and manage GenUp infrastructure
+# humanovo IAM Admin User for Deployment and Testing
+# This creates an IAM user with permissions to deploy and manage humanovo infrastructure
 
 variable "create_admin_user" {
   description = "Whether to create the admin IAM user"
@@ -10,7 +10,7 @@ variable "create_admin_user" {
 variable "admin_user_name" {
   description = "Name for the admin IAM user"
   type        = string
-  default     = "genup-admin"
+  default     = "humanovo-admin"
 }
 
 # ==================== IAM User ====================
@@ -19,11 +19,11 @@ resource "aws_iam_user" "admin" {
   count = var.create_admin_user ? 1 : 0
 
   name = var.admin_user_name
-  path = "/genup/"
+  path = "/humanovo/"
 
   tags = {
     Name        = var.admin_user_name
-    Purpose     = "GenUp deployment and testing"
+    Purpose     = "humanovo deployment and testing"
     Environment = var.environment
   }
 }
@@ -60,8 +60,8 @@ resource "aws_iam_user_policy" "admin_policy" {
           "s3:GetBucketLocation"
         ]
         Resource = [
-          "arn:aws:s3:::genup-*",
-          "arn:aws:s3:::genup-*/*"
+          "arn:aws:s3:::humanovo-*",
+          "arn:aws:s3:::humanovo-*/*"
         ]
       },
       {
@@ -74,7 +74,7 @@ resource "aws_iam_user_policy" "admin_policy" {
           "dynamodb:DescribeTable",
           "dynamodb:CreateTable"
         ]
-        Resource = "arn:aws:dynamodb:*:*:table/genup-terraform-*"
+        Resource = "arn:aws:dynamodb:*:*:table/humanovo-terraform-*"
       },
 
       # IAM Management
@@ -106,8 +106,8 @@ resource "aws_iam_user_policy" "admin_policy" {
           "iam:DeletePolicyVersion"
         ]
         Resource = [
-          "arn:aws:iam::*:role/genup-*",
-          "arn:aws:iam::*:policy/genup-*"
+          "arn:aws:iam::*:role/humanovo-*",
+          "arn:aws:iam::*:policy/humanovo-*"
         ]
       },
 
@@ -119,9 +119,9 @@ resource "aws_iam_user_policy" "admin_policy" {
           "lambda:*"
         ]
         Resource = [
-          "arn:aws:lambda:*:*:function:genup-*",
-          "arn:aws:lambda:*:*:layer:genup-*",
-          "arn:aws:lambda:*:*:layer:genup-*:*"
+          "arn:aws:lambda:*:*:function:humanovo-*",
+          "arn:aws:lambda:*:*:layer:humanovo-*",
+          "arn:aws:lambda:*:*:layer:humanovo-*:*"
         ]
       },
       {
@@ -183,8 +183,8 @@ resource "aws_iam_user_policy" "admin_policy" {
           "s3:DeleteObject"
         ]
         Resource = [
-          "arn:aws:s3:::genup-*",
-          "arn:aws:s3:::genup-*/*"
+          "arn:aws:s3:::humanovo-*",
+          "arn:aws:s3:::humanovo-*/*"
         ]
       },
 
@@ -196,7 +196,7 @@ resource "aws_iam_user_policy" "admin_policy" {
           "dynamodb:*"
         ]
         Resource = [
-          "arn:aws:dynamodb:*:*:table/genup-*"
+          "arn:aws:dynamodb:*:*:table/humanovo-*"
         ]
       },
 
@@ -229,12 +229,12 @@ resource "aws_iam_user_policy" "admin_policy" {
           "logs:PutLogEvents"
         ]
         Resource = [
-          "arn:aws:logs:*:*:log-group:/aws/lambda/genup-*",
-          "arn:aws:logs:*:*:log-group:/aws/lambda/genup-*:*",
-          "arn:aws:logs:*:*:log-group:/aws/apigateway/genup-*",
-          "arn:aws:logs:*:*:log-group:/aws/apigateway/genup-*:*",
-          "arn:aws:logs:*:*:log-group:/aws/genup/*",
-          "arn:aws:logs:*:*:log-group:/aws/genup/*:*"
+          "arn:aws:logs:*:*:log-group:/aws/lambda/humanovo-*",
+          "arn:aws:logs:*:*:log-group:/aws/lambda/humanovo-*:*",
+          "arn:aws:logs:*:*:log-group:/aws/apigateway/humanovo-*",
+          "arn:aws:logs:*:*:log-group:/aws/apigateway/humanovo-*:*",
+          "arn:aws:logs:*:*:log-group:/aws/humanovo/*",
+          "arn:aws:logs:*:*:log-group:/aws/humanovo/*:*"
         ]
       },
 
@@ -264,7 +264,7 @@ resource "aws_iam_user_policy" "admin_policy" {
         Resource = "*"
         Condition = {
           StringLike = {
-            "kms:RequestAlias" = "alias/genup-*"
+            "kms:RequestAlias" = "alias/humanovo-*"
           }
         }
       },
@@ -294,7 +294,7 @@ resource "aws_iam_user_policy" "admin_policy" {
           "secretsmanager:UntagResource",
           "secretsmanager:UpdateSecret"
         ]
-        Resource = "arn:aws:secretsmanager:*:*:secret:genup-*"
+        Resource = "arn:aws:secretsmanager:*:*:secret:humanovo-*"
       },
 
       # SQS
@@ -304,7 +304,7 @@ resource "aws_iam_user_policy" "admin_policy" {
         Action = [
           "sqs:*"
         ]
-        Resource = "arn:aws:sqs:*:*:genup-*"
+        Resource = "arn:aws:sqs:*:*:humanovo-*"
       },
 
       # Bedrock
@@ -328,8 +328,8 @@ resource "aws_iam_user_policy" "admin_policy" {
           "wafv2:*"
         ]
         Resource = [
-          "arn:aws:wafv2:*:*:global/webacl/genup-*",
-          "arn:aws:wafv2:*:*:regional/webacl/genup-*"
+          "arn:aws:wafv2:*:*:global/webacl/humanovo-*",
+          "arn:aws:wafv2:*:*:regional/webacl/humanovo-*"
         ]
       },
       {

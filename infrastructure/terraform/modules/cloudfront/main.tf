@@ -1,4 +1,4 @@
-# GenUp CloudFront Module - Simplified Configuration
+# humanovo CloudFront Module - Simplified Configuration
 # Direct S3 origin, no path complexity, proper OAC setup
 
 terraform {
@@ -72,7 +72,7 @@ locals {
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
   name                              = "${var.name_prefix}-oac-${var.suffix}"
-  description                       = "OAC for GenUp frontend"
+  description                       = "OAC for humanovo frontend"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
@@ -113,7 +113,7 @@ resource "aws_s3_bucket_policy" "frontend" {
 resource "aws_cloudfront_distribution" "main" {
   enabled             = true
   is_ipv6_enabled     = true
-  comment             = "GenUp ${var.environment}"
+  comment             = "humanovo ${var.environment}"
   default_root_object = "index.html"
   price_class         = var.price_class
   web_acl_id          = var.waf_enabled ? aws_wafv2_web_acl.main[0].arn : null
@@ -246,7 +246,7 @@ resource "aws_wafv2_web_acl" "main" {
   count = var.waf_enabled ? 1 : 0
 
   name        = "${var.name_prefix}-waf-${var.suffix}"
-  description = "WAF for GenUp"
+  description = "WAF for humanovo"
   scope       = "CLOUDFRONT"
 
   default_action {

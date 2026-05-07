@@ -1,4 +1,4 @@
-# GenUp AWS Infrastructure - Main Configuration
+# humanovo AWS Infrastructure - Main Configuration
 # Serverless architecture with Lambda, API Gateway, CloudFront, Bedrock
 
 terraform {
@@ -21,6 +21,15 @@ terraform {
 
   # S3 backend for remote state management
   # This enables consistent state across CI/CD runs
+  #
+  # Persistent state — DO NOT RENAME. The bucket and lock-table names
+  # below correspond to live AWS resources that hold the Terraform
+  # state file. Renaming them here would orphan that state and force a
+  # `terraform init -migrate-state` against new buckets. The migration
+  # path (legacy genup-* -> humanovo-* state buckets) is tracked in
+  # docs/planning/REBRAND_RUNBOOK.md and runs via the
+  # bootstrap-backend-new-account.yml workflow once the security
+  # account is provisioned.
   backend "s3" {
     bucket         = "genup-terraform-state"
     key            = "infrastructure/terraform.tfstate"
@@ -35,7 +44,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "GenUp"
+      Project     = "humanovo"
       Environment = var.environment
       ManagedBy   = "Terraform"
       Owner       = var.owner
@@ -50,7 +59,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "GenUp"
+      Project     = "humanovo"
       Environment = var.environment
       ManagedBy   = "Terraform"
       Owner       = var.owner
@@ -64,12 +73,12 @@ resource "random_id" "bucket_suffix" {
 }
 
 locals {
-  name_prefix = "genup-${var.environment}"
+  name_prefix = "humanovo-${var.environment}"
   # Random suffix ensures globally unique bucket names
   suffix      = random_id.bucket_suffix.hex
 
   common_tags = {
-    Project     = "GenUp"
+    Project     = "humanovo"
     Environment = var.environment
   }
 }
@@ -80,7 +89,7 @@ data "aws_region" "current" {}
 
 # KMS Key for encryption
 resource "aws_kms_key" "main" {
-  description             = "GenUp ${var.environment} encryption key"
+  description             = "humanovo ${var.environment} encryption key"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 
@@ -166,7 +175,7 @@ resource "aws_kms_alias" "main" {
 # Secrets Manager for API keys
 resource "aws_secretsmanager_secret" "api_keys" {
   name                    = "${local.name_prefix}-api-keys-${local.suffix}"
-  description             = "GenUp API keys and secrets"
+  description             = "humanovo API keys and secrets"
   kms_key_id              = aws_kms_key.main.arn
   recovery_window_in_days = var.environment == "prod" ? 30 : 0
 
@@ -182,13 +191,13 @@ resource "aws_secretsmanager_secret_version" "api_keys" {
     GOOGLE_API_KEY     = var.google_api_key
     BRAVE_API_KEY      = var.brave_api_key
     PUBMED_API_KEY     = var.pubmed_api_key
-    JWT_SECRET         = var.jwt_secret != "" ? var.jwt_secret : "genup-jwt-${var.environment}-secret"
+    JWT_SECRET         = var.jwt_secret != "" ? var.jwt_secret : "humanovo-jwt-${var.environment}-secret"
   })
 }
 
 # CloudWatch Log Group for centralized logging
 resource "aws_cloudwatch_log_group" "main" {
-  name              = "/aws/genup/${var.environment}"
+  name              = "/aws/humanovo/${var.environment}"
   retention_in_days = var.log_retention_days
   # Using default encryption to avoid KMS permission complexity
   # kms_key_id        = aws_kms_key.main.arn
@@ -359,7 +368,7 @@ output "api_gateway_stage_url" {
 }
 
 output "bucket_name" {
-  description = "Unified S3 bucket for all GenUp storage"
+  description = "Unified S3 bucket for all humanovo storage"
   value       = module.s3.bucket_name
 }
 

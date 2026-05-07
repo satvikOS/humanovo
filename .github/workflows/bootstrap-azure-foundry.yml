@@ -57,10 +57,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5
 
       - name: Azure login (service principal)
-        uses: azure/login@v2
+        uses: azure/login@a65d910e8af852a8061c627c456678983e180302  # v2
         with:
           creds: |
             {

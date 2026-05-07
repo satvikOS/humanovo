@@ -1,4 +1,4 @@
-# GenUp AWS Infrastructure - Variables
+# humanovo AWS Infrastructure - Variables
 
 # ==================== General ====================
 
@@ -22,7 +22,7 @@ variable "aws_region" {
 variable "owner" {
   description = "Owner tag for resources"
   type        = string
-  default     = "genup-team"
+  default     = "humanovo-team"
 }
 
 # ==================== Domain & SSL ====================
@@ -347,5 +347,5 @@ variable "enable_opensearch" {
 variable "opensearch_collection_name" {
   description = "OpenSearch Serverless collection name"
   type        = string
-  default     = "genup-vectors"
+  default     = "humanovo-vectors"
 }

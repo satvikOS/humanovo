@@ -1,4 +1,4 @@
-# GenUp Bootstrap - IAM User and Initial Setup
+# humanovo Bootstrap - IAM User and Initial Setup
 # Run this first to create an IAM user for deploying the full infrastructure
 #
 # Usage:
@@ -7,7 +7,7 @@
 #   terraform apply
 #
 # After apply, configure AWS CLI with the output credentials:
-#   aws configure --profile genup-admin
+#   aws configure --profile humanovo-admin
 
 terraform {
   required_version = ">= 1.5.0"
@@ -29,7 +29,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = "GenUp"
+      Project   = "humanovo"
       ManagedBy = "Terraform-Bootstrap"
     }
   }
@@ -44,7 +44,7 @@ variable "aws_region" {
 variable "user_name" {
   description = "IAM user name"
   type        = string
-  default     = "genup-admin"
+  default     = "humanovo-admin"
 }
 
 variable "environment" {
@@ -60,57 +60,57 @@ resource "random_id" "suffix" {
 
 # ==================== IAM User ====================
 
-resource "aws_iam_user" "genup_admin" {
+resource "aws_iam_user" "humanovo_admin" {
   name = var.user_name
-  path = "/genup/"
+  path = "/humanovo/"
 
   tags = {
     Name        = var.user_name
-    Purpose     = "GenUp deployment and administration"
+    Purpose     = "humanovo deployment and administration"
     Environment = var.environment
   }
 }
 
 # Programmatic access key
-resource "aws_iam_access_key" "genup_admin" {
-  user = aws_iam_user.genup_admin.name
+resource "aws_iam_access_key" "humanovo_admin" {
+  user = aws_iam_user.humanovo_admin.name
 }
 
 # Console login profile
-resource "aws_iam_user_login_profile" "genup_admin" {
-  user                    = aws_iam_user.genup_admin.name
+resource "aws_iam_user_login_profile" "humanovo_admin" {
+  user                    = aws_iam_user.humanovo_admin.name
   password_reset_required = true
 }
 
 # ==================== IAM Policy ====================
 
-resource "aws_iam_user_policy" "genup_admin_full" {
+resource "aws_iam_user_policy" "humanovo_admin_full" {
   name = "${var.user_name}-full-access"
-  user = aws_iam_user.genup_admin.name
+  user = aws_iam_user.humanovo_admin.name
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # Full access to GenUp resources (scoped by naming convention)
+      # Full access to humanovo resources (scoped by naming convention)
       {
-        Sid    = "GenUpLambdaFunctions"
+        Sid    = "humanovoLambdaFunctions"
         Effect = "Allow"
         Action = ["lambda:*"]
         Resource = [
-          "arn:aws:lambda:*:*:function:genup-*"
+          "arn:aws:lambda:*:*:function:humanovo-*"
         ]
       },
       {
-        Sid    = "GenUpLambdaLayers"
+        Sid    = "humanovoLambdaLayers"
         Effect = "Allow"
         Action = ["lambda:*"]
         Resource = [
-          "arn:aws:lambda:*:*:layer:genup-*",
-          "arn:aws:lambda:*:*:layer:genup-*:*"
+          "arn:aws:lambda:*:*:layer:humanovo-*",
+          "arn:aws:lambda:*:*:layer:humanovo-*:*"
         ]
       },
       {
-        Sid    = "GenUpLambdaGlobal"
+        Sid    = "humanovoLambdaGlobal"
         Effect = "Allow"
         Action = [
           "lambda:CreateEventSourceMapping",
@@ -126,65 +126,65 @@ resource "aws_iam_user_policy" "genup_admin_full" {
         Resource = "*"
       },
       {
-        Sid    = "GenUpAPIGateway"
+        Sid    = "humanovoAPIGateway"
         Effect = "Allow"
         Action = ["apigateway:*"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpS3"
+        Sid    = "humanovoS3"
         Effect = "Allow"
         Action = ["s3:*"]
         Resource = [
-          "arn:aws:s3:::genup-*",
-          "arn:aws:s3:::genup-*/*"
+          "arn:aws:s3:::humanovo-*",
+          "arn:aws:s3:::humanovo-*/*"
         ]
       },
       {
-        Sid    = "GenUpS3List"
+        Sid    = "humanovoS3List"
         Effect = "Allow"
         Action = ["s3:ListAllMyBuckets", "s3:GetBucketLocation"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpDynamoDB"
+        Sid    = "humanovoDynamoDB"
         Effect = "Allow"
         Action = ["dynamodb:*"]
-        Resource = "arn:aws:dynamodb:*:*:table/genup-*"
+        Resource = "arn:aws:dynamodb:*:*:table/humanovo-*"
       },
       {
-        Sid    = "GenUpDynamoDBList"
+        Sid    = "humanovoDynamoDBList"
         Effect = "Allow"
         Action = ["dynamodb:ListTables", "dynamodb:DescribeLimits"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpCloudFront"
+        Sid    = "humanovoCloudFront"
         Effect = "Allow"
         Action = ["cloudfront:*"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpCloudWatch"
+        Sid    = "humanovoCloudWatch"
         Effect = "Allow"
         Action = ["logs:*"]
         Resource = [
-          "arn:aws:logs:*:*:log-group:/aws/lambda/genup-*",
-          "arn:aws:logs:*:*:log-group:/aws/lambda/genup-*:*",
-          "arn:aws:logs:*:*:log-group:/aws/apigateway/genup-*",
-          "arn:aws:logs:*:*:log-group:/aws/apigateway/genup-*:*",
-          "arn:aws:logs:*:*:log-group:/aws/genup/*",
-          "arn:aws:logs:*:*:log-group:/aws/genup/*:*"
+          "arn:aws:logs:*:*:log-group:/aws/lambda/humanovo-*",
+          "arn:aws:logs:*:*:log-group:/aws/lambda/humanovo-*:*",
+          "arn:aws:logs:*:*:log-group:/aws/apigateway/humanovo-*",
+          "arn:aws:logs:*:*:log-group:/aws/apigateway/humanovo-*:*",
+          "arn:aws:logs:*:*:log-group:/aws/humanovo/*",
+          "arn:aws:logs:*:*:log-group:/aws/humanovo/*:*"
         ]
       },
       {
-        Sid    = "GenUpCloudWatchList"
+        Sid    = "humanovoCloudWatchList"
         Effect = "Allow"
         Action = ["logs:DescribeLogGroups"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpIAM"
+        Sid    = "humanovoIAM"
         Effect = "Allow"
         Action = [
           "iam:CreateRole",
@@ -212,12 +212,12 @@ resource "aws_iam_user_policy" "genup_admin_full" {
           "iam:ListInstanceProfilesForRole"
         ]
         Resource = [
-          "arn:aws:iam::*:role/genup-*",
-          "arn:aws:iam::*:policy/genup-*"
+          "arn:aws:iam::*:role/humanovo-*",
+          "arn:aws:iam::*:policy/humanovo-*"
         ]
       },
       {
-        Sid    = "GenUpIAMList"
+        Sid    = "humanovoIAMList"
         Effect = "Allow"
         Action = [
           "iam:ListRoles",
@@ -227,7 +227,7 @@ resource "aws_iam_user_policy" "genup_admin_full" {
         Resource = "*"
       },
       {
-        Sid    = "GenUpKMS"
+        Sid    = "humanovoKMS"
         Effect = "Allow"
         Action = [
           "kms:CreateKey",
@@ -250,37 +250,37 @@ resource "aws_iam_user_policy" "genup_admin_full" {
         Resource = "*"
       },
       {
-        Sid    = "GenUpKMSList"
+        Sid    = "humanovoKMSList"
         Effect = "Allow"
         Action = ["kms:ListKeys", "kms:ListAliases"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpSecretsManager"
+        Sid    = "humanovoSecretsManager"
         Effect = "Allow"
         Action = ["secretsmanager:*"]
-        Resource = "arn:aws:secretsmanager:*:*:secret:genup-*"
+        Resource = "arn:aws:secretsmanager:*:*:secret:humanovo-*"
       },
       {
-        Sid    = "GenUpSecretsManagerList"
+        Sid    = "humanovoSecretsManagerList"
         Effect = "Allow"
         Action = ["secretsmanager:ListSecrets"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpSQS"
+        Sid    = "humanovoSQS"
         Effect = "Allow"
         Action = ["sqs:*"]
-        Resource = "arn:aws:sqs:*:*:genup-*"
+        Resource = "arn:aws:sqs:*:*:humanovo-*"
       },
       {
-        Sid    = "GenUpSQSList"
+        Sid    = "humanovoSQSList"
         Effect = "Allow"
         Action = ["sqs:ListQueues"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpBedrock"
+        Sid    = "humanovoBedrock"
         Effect = "Allow"
         Action = [
           "bedrock:InvokeModel",
@@ -293,13 +293,13 @@ resource "aws_iam_user_policy" "genup_admin_full" {
         Resource = "*"
       },
       {
-        Sid    = "GenUpWAF"
+        Sid    = "humanovoWAF"
         Effect = "Allow"
         Action = ["wafv2:*"]
         Resource = "*"
       },
       {
-        Sid    = "GenUpSTS"
+        Sid    = "humanovoSTS"
         Effect = "Allow"
         Action = [
           "sts:GetCallerIdentity",
@@ -308,7 +308,7 @@ resource "aws_iam_user_policy" "genup_admin_full" {
         Resource = "*"
       },
       {
-        Sid    = "GenUpTagging"
+        Sid    = "humanovoTagging"
         Effect = "Allow"
         Action = [
           "tag:GetResources",
@@ -318,7 +318,7 @@ resource "aws_iam_user_policy" "genup_admin_full" {
         Resource = "*"
       },
       {
-        Sid    = "GenUpXRay"
+        Sid    = "humanovoXRay"
         Effect = "Allow"
         Action = [
           "xray:PutTraceSegments",
@@ -334,11 +334,17 @@ resource "aws_iam_user_policy" "genup_admin_full" {
 
 # ==================== Terraform State Bucket (Optional) ====================
 
+# Persistent state bucket — DO NOT RENAME; renaming orphans Terraform
+# state. The legacy `genup-terraform-state-*` bucket is the backend for
+# infrastructure/terraform/main.tf. The new-account migration path
+# (humanovo-terraform-state in the security account) is tracked in
+# docs/planning/REBRAND_RUNBOOK.md and applied via the
+# bootstrap-backend-new-account.yml workflow.
 resource "aws_s3_bucket" "terraform_state" {
   bucket = "genup-terraform-state-${random_id.suffix.hex}"
 
   tags = {
-    Name    = "GenUp Terraform State"
+    Name    = "humanovo Terraform State"
     Purpose = "Terraform remote state storage"
   }
 }
@@ -370,6 +376,11 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
 }
 
 # DynamoDB table for state locking
+#
+# Persistent state — DO NOT RENAME. The `genup-terraform-locks` table
+# pairs with the legacy state bucket above. Renaming would break state
+# locking against the existing state file. Migration tracked in
+# docs/planning/REBRAND_RUNBOOK.md.
 resource "aws_dynamodb_table" "terraform_locks" {
   name         = "genup-terraform-locks"
   billing_mode = "PAY_PER_REQUEST"
@@ -381,7 +392,7 @@ resource "aws_dynamodb_table" "terraform_locks" {
   }
 
   tags = {
-    Name    = "GenUp Terraform Locks"
+    Name    = "humanovo Terraform Locks"
     Purpose = "Terraform state locking"
   }
 }
@@ -395,28 +406,28 @@ output "aws_account_id" {
 
 output "user_name" {
   description = "IAM user name"
-  value       = aws_iam_user.genup_admin.name
+  value       = aws_iam_user.humanovo_admin.name
 }
 
 output "user_arn" {
   description = "IAM user ARN"
-  value       = aws_iam_user.genup_admin.arn
+  value       = aws_iam_user.humanovo_admin.arn
 }
 
 output "access_key_id" {
   description = "AWS Access Key ID"
-  value       = aws_iam_access_key.genup_admin.id
+  value       = aws_iam_access_key.humanovo_admin.id
 }
 
 output "secret_access_key" {
   description = "AWS Secret Access Key (sensitive)"
-  value       = aws_iam_access_key.genup_admin.secret
+  value       = aws_iam_access_key.humanovo_admin.secret
   sensitive   = true
 }
 
 output "console_password" {
   description = "AWS Console Password (sensitive)"
-  value       = aws_iam_user_login_profile.genup_admin.password
+  value       = aws_iam_user_login_profile.humanovo_admin.password
   sensitive   = true
 }
 
@@ -445,24 +456,24 @@ output "aws_configure_commands" {
 
     Run these commands to configure AWS CLI:
 
-    aws configure --profile genup-admin
-    # Enter Access Key ID: ${aws_iam_access_key.genup_admin.id}
+    aws configure --profile humanovo-admin
+    # Enter Access Key ID: ${aws_iam_access_key.humanovo_admin.id}
     # Enter Secret Access Key: (run 'terraform output -raw secret_access_key')
     # Default region: ${var.aws_region}
     # Default output format: json
 
     Then use the profile:
-    export AWS_PROFILE=genup-admin
+    export AWS_PROFILE=humanovo-admin
 
     Or add to commands:
-    aws s3 ls --profile genup-admin
+    aws s3 ls --profile humanovo-admin
 
     ================================================
     CONSOLE ACCESS
     ================================================
 
     Login URL: https://${data.aws_caller_identity.current.account_id}.signin.aws.amazon.com/console
-    Username: ${aws_iam_user.genup_admin.name}
+    Username: ${aws_iam_user.humanovo_admin.name}
     Password: (run 'terraform output -raw console_password')
 
     ================================================

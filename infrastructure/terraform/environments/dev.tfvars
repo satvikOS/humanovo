@@ -1,8 +1,8 @@
-# GenUp Development Environment Configuration
+# humanovo Development Environment Configuration
 
 environment = "dev"
 aws_region  = "us-east-1"
-owner       = "genup-team"
+owner       = "humanovo-team"
 
 # Domain (leave empty for CloudFront default domain)
 domain_name         = ""

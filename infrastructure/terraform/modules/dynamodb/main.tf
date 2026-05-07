@@ -1,4 +1,4 @@
-# GenUp DynamoDB Module - Table Configuration
+# humanovo DynamoDB Module - Table Configuration
 
 variable "name_prefix" {
   type = string

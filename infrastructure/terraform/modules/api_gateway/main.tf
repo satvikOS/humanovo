@@ -1,4 +1,4 @@
-# GenUp API Gateway Module - HTTP API Configuration
+# humanovo API Gateway Module - HTTP API Configuration
 
 variable "name_prefix" {
   type = string
@@ -65,7 +65,7 @@ locals {
 resource "aws_apigatewayv2_api" "main" {
   name          = "${var.name_prefix}-api"
   protocol_type = "HTTP"
-  description   = "GenUp Biomedical Discovery Platform API"
+  description   = "humanovo Biomedical Discovery Platform API"
 
   cors_configuration {
     # allow_credentials cannot be true when allow_origins contains "*"

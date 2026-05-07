@@ -1,4 +1,4 @@
-# GenUp IAM Module - Full IAM Configuration
+# humanovo IAM Module - Full IAM Configuration
 
 variable "name_prefix" {
   type = string
@@ -75,7 +75,7 @@ resource "aws_iam_role_policy" "lambda_logs" {
         ]
         Resource = [
           "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:/aws/lambda/${var.name_prefix}-*",
-          "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:/aws/genup/*"
+          "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:/aws/humanovo/*"
         ]
       }
     ]

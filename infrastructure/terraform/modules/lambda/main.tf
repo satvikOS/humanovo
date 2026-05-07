@@ -1,4 +1,4 @@
-# GenUp Lambda Module - Function Configuration
+# humanovo Lambda Module - Function Configuration
 
 variable "name_prefix" {
   type = string
@@ -208,7 +208,13 @@ locals {
     NOTEBOOK_TABLE             = var.notebook_table_name
     AGENT_TASKS_TABLE          = var.agent_tasks_table_name != "" ? var.agent_tasks_table_name : "${var.name_prefix}-agent-tasks"
     USER_STATE_TABLE           = var.user_state_table_name != "" ? var.user_state_table_name : "${var.name_prefix}-user-state"
-    # Unified bucket with prefix-based organization
+    # Unified bucket with prefix-based organization.
+    # NOTE: GENUP_BUCKET env var name is intentionally preserved — it
+    # is a runtime contract with backend/app/etl/bulk_loader.py which
+    # reads `os.environ["GENUP_BUCKET"]`. Per the rebrand runbook
+    # (docs/planning/REBRAND_RUNBOOK.md) this rename happens in a
+    # later round once the backend reader is updated in lockstep.
+    # TODO: rename to HUMANOVO_BUCKET when safe to migrate state.
     GENUP_BUCKET               = var.data_bucket_name
     DATA_PREFIX                = "data"
     ARTIFACTS_PREFIX           = "artifacts"
@@ -235,8 +241,8 @@ locals {
     AZURE_EMBEDDING_ENDPOINT   = var.azure_embedding_endpoint
     AZURE_EMBEDDING_KEY        = var.azure_embedding_key
     LOG_LEVEL                  = var.environment == "prod" ? "INFO" : "DEBUG"
-    POWERTOOLS_SERVICE_NAME    = "genup"
-    POWERTOOLS_METRICS_NAMESPACE = "GenUp"
+    POWERTOOLS_SERVICE_NAME    = "humanovo"
+    POWERTOOLS_METRICS_NAMESPACE = "humanovo"
   }
 
   lambda_functions = {
@@ -413,7 +419,7 @@ locals {
 
 resource "aws_lambda_layer_version" "dependencies" {
   layer_name          = "${var.name_prefix}-dependencies"
-  description         = "GenUp Python dependencies"
+  description         = "humanovo Python dependencies"
   compatible_runtimes = ["python3.11"]
   s3_bucket           = var.artifacts_bucket_name
   s3_key              = "artifacts/lambda-layers/dependencies.zip"

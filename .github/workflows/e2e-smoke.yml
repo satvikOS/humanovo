@@ -57,10 +57,10 @@ jobs:
       HUMANOVO_API_URL: ${{ github.event.inputs.api_url || 'https://api.humanovo.net' }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5
         with:
           python-version: '3.11'
 

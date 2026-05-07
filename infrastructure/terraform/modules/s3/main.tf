@@ -1,4 +1,4 @@
-# GenUp S3 Module - Simplified Single Bucket
+# humanovo S3 Module - Simplified Single Bucket
 # No prefixes, no complexity - just works
 
 variable "name_prefix" {
@@ -33,12 +33,12 @@ variable "cors_allowed_origins" {
 # ==================== Single Frontend Bucket ====================
 
 resource "aws_s3_bucket" "main" {
-  bucket        = "genup-${var.environment}-${var.suffix}"
+  bucket        = "humanovo-${var.environment}-${var.suffix}"
   force_destroy = var.environment != "prod"
 
   tags = {
-    Name        = "genup-${var.environment}-${var.suffix}"
-    Purpose     = "GenUp frontend and assets"
+    Name        = "humanovo-${var.environment}-${var.suffix}"
+    Purpose     = "humanovo frontend and assets"
     Environment = var.environment
   }
 }
