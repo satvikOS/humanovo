@@ -39,7 +39,52 @@ ContactOverlay       · "Request access" form (POSTs to /api/contact via Resend)
 5. PageDownload      · Win / Mac / Linux native installers
 ```
 
-## Local development
+## Deploy
+
+This `landing/` directory is the **source of truth** but it is *not* the
+repo Vercel pulls from. A GitHub Action
+([`.github/workflows/mirror-landing-to-deploy.yml`](../.github/workflows/mirror-landing-to-deploy.yml))
+mirrors this directory to a separate landing-only repo on every push to
+`humanovo` that touches `landing/**`. Vercel is connected to that
+sister repo and never sees the platform monorepo.
+
+Why this matters:
+
+- Vercel's git integration clones the **entire** repo into its build
+  environment even when "Root Directory" is set to a subdirectory. For
+  a monorepo carrying backend, infrastructure, and Terraform state
+  references, that's a privacy + attack-surface concern.
+- The mirror flow keeps Vercel scoped to a public-facing repo that
+  contains only the landing source.
+- The mirror is one-way (this repo → deploy repo). Edits in the deploy
+  repo will be overwritten on the next sync; always edit here.
+
+### One-time setup
+
+1. **Create a fine-grained PAT**: GitHub Settings →
+   [Personal access tokens (fine-grained)](https://github.com/settings/personal-access-tokens/new).
+   - Repository access: **only** the destination landing-deploy repo.
+   - Permissions: `Contents: Read and write`, `Metadata: Read`.
+2. **Add the secret** in this repo (Settings → Secrets and variables → Actions):
+   - Name: `LANDING_DEPLOY_PAT`
+   - Value: the PAT from step 1.
+3. **Set the destination repo**: edit `DEST_REPO` at the top of
+   `.github/workflows/mirror-landing-to-deploy.yml` if your destination
+   repo isn't `satvikOS/humanovo-landing`.
+4. **Verify Vercel** is connected to the destination repo's `main`
+   branch (not this repo).
+
+### Manual triggers
+
+- **Force mirror without code change**: GitHub Actions tab → Mirror
+  landing/ to deploy repo → "Run workflow" → set `force = true`.
+- **Local dry-run** of what would mirror:
+  ```bash
+  cd landing && find . -type f \
+    -not -path "./node_modules/*" -not -path "./.next/*"
+  ```
+
+### Local development
 
 ```bash
 cd landing
@@ -50,13 +95,8 @@ npm run dev
 
 Set `RESEND_API_KEY` in `.env.local` for the contact form to actually send.
 
-## Deploy
-
-Pushed automatically when `landing/` changes hit `humanovo` branch (Vercel git
-integration with Root Directory = `landing`). The `vercel.json` in this
-directory maps the public download endpoints (`/download/macos`,
-`/download/windows`, etc.) to the GitHub Releases artifacts published by the
-`build-native-apps.yml` workflow.
+The `.env.local` file is gitignored AND stripped during the mirror sync,
+so local secrets never reach Vercel by accident.
 
 ## Brand fundamentals
 

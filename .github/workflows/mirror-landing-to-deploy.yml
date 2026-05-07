@@ -1,0 +1,199 @@
+name: Mirror landing/ to deploy repo
+
+# Mirrors `landing/` from this monorepo to a separate landing-only
+# repo that Vercel is connected to. This way:
+#   - the platform monorepo is never exposed to Vercel
+#   - the deploy repo is a faithful one-way copy of `landing/`
+#   - the source of truth stays here; Vercel sees only output
+#
+# How it works:
+#   1. On push to humanovo touching landing/**, this workflow runs.
+#   2. It clones the destination repo (private OK, PAT-authed).
+#   3. It deletes everything in the destination repo's working tree
+#      EXCEPT the .git directory (so the destination history stays).
+#   4. It copies landing/* into the destination repo root.
+#   5. If the diff is non-empty, it commits with a message linking
+#      back to the source commit, and pushes.
+#
+# Setup (one-time):
+#   • Create a fine-grained PAT with these permissions:
+#       — Repository access: Only the destination repo below.
+#       — Repository permissions:  Contents: Read and write,
+#                                  Metadata: Read.
+#     https://github.com/settings/personal-access-tokens/new
+#   • In THIS repo's settings → Secrets and variables → Actions,
+#     add a new repository secret named LANDING_DEPLOY_PAT with the
+#     PAT value as the contents.
+#   • Edit DEST_REPO below if your destination repo isn't the one
+#     this workflow defaults to.
+
+on:
+  push:
+    branches:
+      - humanovo
+    paths:
+      - 'landing/**'
+      - '.github/workflows/mirror-landing-to-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force-push even if no diff (rarely needed)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-landing
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror landing/ → deploy repo
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    env:
+      # ─── EDIT THIS ONE LINE if the destination repo isn't this one ───
+      DEST_REPO: satvikOS/humanovo-landing
+      DEST_BRANCH: main
+      # Author identity used for the mirror commit. Doesn't have to
+      # be a real account — what matters is the commit body links
+      # back to the source SHA for traceability.
+      MIRROR_AUTHOR_NAME: humanovo-mirror-bot
+      MIRROR_AUTHOR_EMAIL: mirror-bot@humanovo.net
+
+    steps:
+      - name: Checkout this monorepo
+        uses: actions/checkout@v5
+        with:
+          # Shallow is fine — we only read the current state of
+          # landing/ to compose the mirror commit.
+          fetch-depth: 1
+          path: source
+
+      - name: Verify landing/ exists in source
+        run: |
+          set -euo pipefail
+          if [ ! -d source/landing ]; then
+            echo "::error::source/landing directory missing — workflow misconfigured?"
+            exit 1
+          fi
+          echo "Source landing/ tree:"
+          (cd source/landing && find . -type f -not -path "./node_modules/*" -not -path "./.next/*" -not -path "./.git/*" | head -40)
+
+      - name: Verify the deploy PAT is set
+        env:
+          PAT: ${{ secrets.LANDING_DEPLOY_PAT }}
+        run: |
+          if [ -z "${PAT:-}" ]; then
+            echo "::error::LANDING_DEPLOY_PAT secret is not set in this repository."
+            echo "Create a fine-grained PAT scoped to ${DEST_REPO} with Contents: Read+Write, then add it as a secret."
+            exit 1
+          fi
+          echo "Deploy PAT is present (${#PAT} chars)."
+
+      - name: Clone destination repo
+        env:
+          PAT: ${{ secrets.LANDING_DEPLOY_PAT }}
+        run: |
+          set -euo pipefail
+          # `x-access-token` is the canonical username for fine-
+          # grained PATs in HTTPS git URLs. The PAT itself is the
+          # password.
+          git clone \
+            --branch "${DEST_BRANCH}" \
+            --depth 1 \
+            "https://x-access-token:${PAT}@github.com/${DEST_REPO}.git" \
+            dest
+
+      - name: Sync landing/ → destination working tree
+        run: |
+          set -euo pipefail
+          cd dest
+
+          # Wipe everything except .git so renames + deletions in
+          # source actually propagate. `git rm -rf .` would also
+          # work but is noisier in `git status` output.
+          find . -mindepth 1 -maxdepth 1 -not -name '.git' -exec rm -rf {} +
+
+          # Copy landing/ contents (NOT the directory itself) into
+          # the destination repo root. The trailing /. on the source
+          # means "copy contents, not the parent."
+          cp -aT ../source/landing .
+
+          # Strip dev-only paths that should never reach the
+          # destination repo (Vercel will install fresh anyway).
+          rm -rf node_modules .next out coverage .vercel || true
+
+          # Defensive: never leak secret-like files even if a
+          # contributor accidentally committed one to source.
+          rm -f .env .env.local .env.*.local || true
+
+          echo "Destination working tree after sync:"
+          ls -la
+          echo "---"
+          echo "Sub-tree:"
+          find . -type f -not -path "./.git/*" | head -50
+
+      - name: Commit + push if diff is non-empty
+        env:
+          FORCE: ${{ github.event.inputs.force || 'false' }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          cd dest
+          git config user.name  "${MIRROR_AUTHOR_NAME}"
+          git config user.email "${MIRROR_AUTHOR_EMAIL}"
+
+          git add -A
+
+          if git diff --cached --quiet && [ "${FORCE}" != "true" ]; then
+            echo "No changes to mirror. Source SHA ${SOURCE_SHA:0:7} is already reflected in ${DEST_REPO}@${DEST_BRANCH}."
+            exit 0
+          fi
+
+          # Compose the commit message. Using printf lets each line
+          # inherit the surrounding bash script's indentation (the
+          # YAML `run: |` block scalar would gag on a left-aligned
+          # heredoc body).
+          MSG_FILE="$(mktemp)"
+          {
+            printf 'mirror: sync landing/ from monorepo\n\n'
+            printf 'Source: satvikOS/humanovo @ %s\n' "${SOURCE_SHA:0:12}"
+            printf 'Ref:    %s\n' "${SOURCE_REF}"
+            printf 'By:     %s\n\n' "${ACTOR}"
+            printf 'Auto-generated by .github/workflows/mirror-landing-to-deploy.yml.\n'
+            printf 'Do not commit directly to this repo \xe2\x80\x94 edits will be overwritten\n'
+            printf 'by the next mirror run. Make changes in satvikOS/humanovo @\n'
+            printf 'landing/ and push to the humanovo branch.\n'
+          } > "${MSG_FILE}"
+          git commit -F "${MSG_FILE}"
+          rm -f "${MSG_FILE}"
+
+          # Use --tags off implicit; mirror only branches.
+          git push origin "${DEST_BRANCH}"
+          echo "Pushed to ${DEST_REPO}@${DEST_BRANCH}."
+
+      - name: Summary
+        if: always()
+        env:
+          DEST_REPO: ${{ env.DEST_REPO }}
+          DEST_BRANCH: ${{ env.DEST_BRANCH }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          {
+            echo "## Landing mirror"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Source SHA | \`${SOURCE_SHA:0:12}\` |"
+            echo "| Destination | [\`${DEST_REPO}\`](https://github.com/${DEST_REPO}) |"
+            echo "| Branch | \`${DEST_BRANCH}\` |"
+            echo "| Trigger | \`${{ github.event_name }}\` |"
+            echo ""
+            echo "Vercel deploy will follow shortly if it's connected to ${DEST_REPO}@${DEST_BRANCH}."
+          } >> "$GITHUB_STEP_SUMMARY"
