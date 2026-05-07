@@ -29,6 +29,10 @@ on:
         description: 'AWS region'
         required: false
         default: 'us-east-1'
+      admin_header_secret:
+        description: 'X-Admin-Secret value the CloudFront URL will require (leave blank to keep current)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -128,10 +132,20 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          TF_VAR_admin_header_secret: ${{ github.event.inputs.admin_header_secret }}
         run: |
-          terraform plan -no-color -out=tfplan \
-            -var "aws_region=${{ github.event.inputs.aws_region }}" \
-            -var "environment=${{ github.event.inputs.environment }}"
+          # Build the -var args. If the user provided an admin secret,
+          # use it; otherwise rely on the variable default in
+          # admin-lockdown.tf (so first-apply still works without the
+          # operator having to think about it).
+          ARGS=(-no-color -out=tfplan)
+          ARGS+=(-var "aws_region=${{ github.event.inputs.aws_region }}")
+          ARGS+=(-var "environment=${{ github.event.inputs.environment }}")
+          if [ -n "${{ github.event.inputs.admin_header_secret }}" ]; then
+            ARGS+=(-var "admin_header_secret=${{ github.event.inputs.admin_header_secret }}")
+          fi
+          terraform plan "${ARGS[@]}"
 
       - name: Terraform Apply
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -180,13 +194,24 @@ jobs:
             echo "## humanovo Frontend — NEW AWS Account"
             echo ""
             if [ -n "$DOMAIN" ]; then
-              echo "### Public CloudFront URL"
+              echo "### CloudFront URL (admin-only)"
               echo ""
               echo "**https://${DOMAIN}**"
               echo ""
-              echo "Paste that into a browser — first deploy will 403/404 until you upload"
-              echo "the Vite \`dist/\` to s3://${BUCKET}. CloudFront cold-distribution propagation"
-              echo "typically takes 5-10 minutes after this workflow completes."
+              echo "**This URL is admin-only.** End users access humanovo via the"
+              echo "native desktop app (Win/Mac/Linux). Browser access requires"
+              echo "the \`X-Admin-Secret\` request header — install a header-injection"
+              echo "extension (ModHeader, Requestly, etc.) and set:"
+              echo ""
+              echo "\`\`\`"
+              echo "X-Admin-Secret: <admin_header_secret>"
+              echo "\`\`\`"
+              echo ""
+              echo "Without the header CloudFront returns 403 \"humanovo - admin only\"."
+              echo ""
+              echo "First deploy will 403/404 until the dist/ is uploaded — CloudFront"
+              echo "cold-distribution propagation typically takes 5-10 minutes after"
+              echo "this workflow completes."
             else
               echo "### Could not capture CloudFront domain"
               echo ""

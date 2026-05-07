@@ -130,6 +130,14 @@ resource "aws_cloudfront_distribution" "frontend" {
     # roll our own ttls / cookie / header forwarding rules. ID is
     # stable across regions (managed by AWS).
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+
+    # Admin gate — rejects viewer requests without X-Admin-Secret.
+    # See admin-lockdown.tf. End users use the native desktop app;
+    # this CloudFront URL is the founder's testing surface.
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.admin_gate.arn
+    }
   }
 
   # SPA fallback — React Router deep links 404 against S3 because
