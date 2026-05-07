@@ -78,7 +78,7 @@
     "updater": {
       "active": true,
       "endpoints": [
-        "https://releases.humanovo.com/{{target}}/{{arch}}/{{current_version}}"
+        "https://github.com/satvikOS/humanovo/releases/latest/download/latest.json"
       ],
       "dialog": true,
       "pubkey": "TODO_REPLACE_WITH_TAURI_UPDATER_PUBKEY"

@@ -12,6 +12,18 @@ name: Deploy Frontend to NEW account
 # commit hits the new-account CDN.
 
 on:
+  # Auto-deploy on every push to humanovo that touches frontend code.
+  # Skips pushes that only change docs / backend / workflows so we
+  # don't waste a CloudFront invalidation when the dist hasn't moved.
+  push:
+    branches:
+      - humanovo
+    paths:
+      - 'frontend/**'
+      - '!frontend/src-tauri/**'
+      - '!frontend/e2e/**'
+  # Manual override — useful for redeploying without a code change
+  # (e.g., to flip VITE_API_BASE_URL or push a known-good build).
   workflow_dispatch:
     inputs:
       environment:
@@ -31,7 +43,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-frontend-new-${{ github.event.inputs.environment }}
+  group: deploy-frontend-new-${{ github.event.inputs.environment || 'prod' }}
   cancel-in-progress: false
 
 env:
@@ -39,6 +51,13 @@ env:
   TF_LOCK_TABLE: humanovo-tf-locks
   TF_WORKING_DIR: infrastructure/terraform/bootstrap-frontend
   TERRAFORM_VERSION: '1.6.6'
+  # Resolved inputs — workflow_dispatch fills these explicitly; auto-
+  # trigger (push) falls back to the same defaults shown in the
+  # dispatch UI so a merge to humanovo deploys to prod / us-east-1
+  # without anyone touching a button.
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+  API_BASE_URL: ${{ github.event.inputs.api_base_url || '' }}
 
 jobs:
   deploy:
@@ -55,7 +74,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
-          aws-region: ${{ github.event.inputs.aws_region }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Confirm we're in the new account
         run: |
@@ -71,11 +90,11 @@ jobs:
       - name: Terraform Init (read-only — outputs)
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          REGION="${{ github.event.inputs.aws_region }}"
+          REGION="${{ env.AWS_REGION }}"
           BUCKET="${TF_STATE_BUCKET_PREFIX}-${REGION}"
           terraform init \
             -backend-config="bucket=${BUCKET}" \
-            -backend-config="key=frontend/${{ github.event.inputs.environment }}/terraform.tfstate" \
+            -backend-config="key=frontend/${{ env.ENVIRONMENT }}/terraform.tfstate" \
             -backend-config="region=${REGION}" \
             -backend-config="dynamodb_table=${TF_LOCK_TABLE}" \
             -backend-config="encrypt=true"
@@ -109,7 +128,7 @@ jobs:
           # value (means "use relative paths", suitable for same-origin
           # api hosting once the api gateway is colocated under the same
           # CloudFront distribution).
-          VITE_API_BASE_URL: ${{ github.event.inputs.api_base_url }}
+          VITE_API_BASE_URL: ${{ env.API_BASE_URL }}
         run: |
           npm ci
           npm run build
@@ -178,13 +197,13 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| AWS account | \`${ACCOUNT_ID}\` |"
-            echo "| Region | \`${{ github.event.inputs.aws_region }}\` |"
-            echo "| Environment | \`${{ github.event.inputs.environment }}\` |"
+            echo "| Region | \`${{ env.AWS_REGION }}\` |"
+            echo "| Environment | \`${{ env.ENVIRONMENT }}\` |"
             echo "| Build SHA | \`${GITHUB_SHA::8}\` |"
             echo "| Bucket | \`${BUCKET}\` |"
             echo "| Distribution | \`${DIST_ID}\` |"
             echo "| Invalidation | \`${INVALIDATION_ID}\` (completed) |"
-            echo "| API base URL | \`${{ github.event.inputs.api_base_url }}\` |"
+            echo "| API base URL | \`${{ env.API_BASE_URL }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo ""

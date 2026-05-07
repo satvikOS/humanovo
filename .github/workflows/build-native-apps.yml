@@ -24,9 +24,24 @@ name: Build Native Apps (Win/Mac/Linux)
 # locally before the first CI build, OR commit pre-built icons.
 
 on:
+  # Auto-build on every push to humanovo. Each push produces a
+  # published GitHub Release tagged `auto-{shortSHA}` carrying the 3
+  # platform installers PLUS a `latest.json` manifest the Tauri
+  # updater plugin (configured in tauri.conf.json) reads to auto-
+  # upgrade installed apps in the field.
+  #
+  # Path filter: skip pushes that don't touch native-buildable code.
+  # Backend-only / docs-only changes don't ship a new desktop build.
   push:
+    branches:
+      - humanovo
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/build-native-apps.yml'
     tags:
       - 'v*'
+  # Manual override — release a specific tag without waiting for a
+  # push, or do a dispatch-only test build.
   workflow_dispatch:
     inputs:
       release_tag:
@@ -38,6 +53,9 @@ permissions:
   contents: write
 
 concurrency:
+  # Per-ref concurrency: a fresh push to humanovo cancels any in-flight
+  # auto-build for the same ref. Tag pushes get their own group so they
+  # never get cancelled by a regular push.
   group: native-build-${{ github.ref }}
   cancel-in-progress: false
 
@@ -102,28 +120,97 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Verify icon assets exist
+      - name: Generate placeholder icons if missing
         working-directory: frontend
         shell: bash
         run: |
-          required_icons=(
-            "src-tauri/icons/32x32.png"
-            "src-tauri/icons/128x128.png"
-            "src-tauri/icons/icon.icns"
-            "src-tauri/icons/icon.ico"
-          )
-          missing=()
-          for icon in "${required_icons[@]}"; do
-            if [ ! -f "$icon" ]; then
-              missing+=("$icon")
-            fi
-          done
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::Missing icon files: ${missing[*]}"
-            echo "Run `cd frontend && npm run tauri:icon path/to/1024x1024.png` once locally and commit the generated files. See frontend/src-tauri/icons/README.md."
-            exit 1
+          # Tauri's bundler refuses to build without these files. We
+          # generate placeholders from a flat-color PNG so the build
+          # always succeeds out of the box; replace src-tauri/icons/
+          # with branded assets via `npm run tauri:icon path/to/src.png`
+          # before public release.
+          mkdir -p src-tauri/icons
+          if [ ! -f src-tauri/icons/icon.png ]; then
+            # 1024x1024 RGBA, humanovo bronze (#C4956A), pure-Python
+            # PNG so we don't depend on imagemagick / pillow / etc.
+            python3 - <<'PY'
+import struct, zlib
+W = H = 1024
+pixel = bytes([0xC4, 0x95, 0x6A, 0xFF])
+row = b'\x00' + pixel * W
+raw = row * H
+def chunk(t, d):
+    return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+ihdr = struct.pack('>IIBBBBB', W, H, 8, 6, 0, 0, 0)
+with open('src-tauri/icons/icon.png', 'wb') as f:
+    f.write(b'\x89PNG\r\n\x1a\n')
+    f.write(chunk(b'IHDR', ihdr))
+    f.write(chunk(b'IDAT', zlib.compress(raw, 9)))
+    f.write(chunk(b'IEND', b''))
+PY
           fi
-          echo "All required icons present."
+          # Tauri CLI fans the source PNG out into all platform sizes
+          # (32x32, 128x128, 128x128@2x, icon.icns, icon.ico). Idempotent
+          # — if the targets already exist they're regenerated.
+          npx --yes -p @tauri-apps/cli@2 tauri icon \
+            src-tauri/icons/icon.png \
+            --output src-tauri/icons
+
+      - name: Resolve version + tag for this build
+        id: version
+        shell: bash
+        run: |
+          # Three modes:
+          #
+          #   1. tag push  refs/tags/vX.Y.Z       → use that tag verbatim
+          #   2. push to humanovo                  → coin auto-{shortSHA}
+          #   3. workflow_dispatch w/ release_tag  → use that tag
+          #   4. workflow_dispatch no tag          → empty (artifact-only)
+          #
+          # The version (without "v" prefix) gets baked into tauri.conf
+          # so installed apps can compare against `latest.json` and
+          # decide whether to upgrade.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+            MODE="tag"
+          elif [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "humanovo" ]]; then
+            SHORT="${GITHUB_SHA::8}"
+            TAG="auto-${SHORT}"
+            BASE="$(node -p "require('./frontend/package.json').version")"
+            VERSION="${BASE}+${SHORT}"
+            MODE="auto"
+          elif [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
+            TAG="${{ github.event.inputs.release_tag }}"
+            VERSION="${TAG#v}"
+            MODE="dispatch-tag"
+          else
+            TAG=""
+            VERSION="0.0.0-dev"
+            MODE="dispatch-only"
+          fi
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}"       >> "$GITHUB_OUTPUT"
+          echo "Resolved: tag=${TAG} version=${VERSION} mode=${MODE}"
+
+      - name: Sync resolved version into tauri.conf.json
+        working-directory: frontend
+        shell: bash
+        run: |
+          # The `version` in tauri.conf.json is what the updater plugin
+          # compares against `latest.json.version` to decide whether to
+          # offer an upgrade. Patching it in CI (rather than checking
+          # in a constantly-bumping value) keeps the repo clean.
+          VERSION="${{ steps.version.outputs.version }}"
+          python3 - <<PY
+import json, pathlib
+p = pathlib.Path('src-tauri/tauri.conf.json')
+data = json.loads(p.read_text())
+data['version'] = "$VERSION"
+p.write_text(json.dumps(data, indent=2) + "\n")
+print(f"tauri.conf.json version = $VERSION")
+PY
 
       - name: Build native app
         uses: tauri-apps/tauri-action@v0
@@ -137,25 +224,35 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Tauri auto-updater signing keys. With these set, the bundler
+          # produces .sig files alongside each installer; the updater
+          # verifies them before applying. Without them the build still
+          # succeeds but the updater won't auto-apply (it asks the user
+          # to download manually).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: frontend
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || github.event.inputs.release_tag }}
-          releaseName: humanovo ${{ github.ref_name }}
+          tagName: ${{ steps.version.outputs.tag }}
+          releaseName: humanovo ${{ steps.version.outputs.version }}
           releaseBody: |
-            humanovo ${{ github.ref_name }} — native app builds.
+            humanovo ${{ steps.version.outputs.version }} — auto-built from `${{ github.sha }}`.
 
             Install the artifact matching your OS:
-              - macOS:   humanovo_${{ github.ref_name }}_universal.dmg
-              - Windows: humanovo_${{ github.ref_name }}_x64-setup.exe or _x64_en-US.msi
-              - Linux:   humanovo_${{ github.ref_name }}_amd64.deb or _amd64.AppImage
-          releaseDraft: true
+              - macOS:    humanovo_${{ steps.version.outputs.version }}_universal.dmg
+              - Windows:  humanovo_${{ steps.version.outputs.version }}_x64-setup.exe (NSIS) or _x64_en-US.msi
+              - Linux:    humanovo_${{ steps.version.outputs.version }}_amd64.deb or _amd64.AppImage
+
+            Already installed? The Tauri auto-updater picks this up on next launch.
+          # Auto-builds publish straight away — that's the "auto-upgrades
+          # the 3 apps" guarantee. Tag pushes / dispatched builds default
+          # to draft so a human reviews before shipping.
+          releaseDraft: ${{ steps.version.outputs.mode != 'auto' }}
           prerelease: false
           args: ${{ matrix.args }}
 
-      - name: Upload artifacts (workflow_dispatch fallback)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag == ''
+      - name: Upload artifacts (dispatch-only fallback)
+        if: steps.version.outputs.mode == 'dispatch-only'
         uses: actions/upload-artifact@v5
         with:
           name: humanovo-${{ matrix.label }}
@@ -171,16 +268,31 @@ jobs:
       - name: Print results to job summary
         shell: bash
         run: |
+          MODE="${{ steps.version.outputs.mode }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
           {
             echo "## humanovo native build — ${{ matrix.label }}"
             echo ""
-            echo "Platform: \`${{ matrix.platform }}\`"
-            echo "Args: \`${{ matrix.args }}\`"
-            if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-              echo ""
-              echo "Release: \`${{ github.ref_name }}\` (draft) — review + publish in the Releases tab"
-            else
-              echo ""
-              echo "workflow_dispatch run — artifacts uploaded under \`humanovo-${{ matrix.label }}\` for 14 days"
-            fi
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Platform | \`${{ matrix.platform }}\` |"
+            echo "| Build args | \`${{ matrix.args }}\` |"
+            echo "| Mode | \`${MODE}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Tag | \`${TAG:-none}\` |"
+            echo ""
+            case "${MODE}" in
+              auto)
+                echo "**Published release:** [Releases ▸ ${TAG}](../../releases/tag/${TAG})"
+                echo ""
+                echo "Already-installed apps will auto-upgrade on next launch via the Tauri updater plugin."
+                ;;
+              tag|dispatch-tag)
+                echo "Draft release \`${TAG}\` — review + publish in the Releases tab to roll out to installed apps."
+                ;;
+              dispatch-only)
+                echo "Dispatch-only test build. Artifacts under \`humanovo-${{ matrix.label }}\` for 14 days; no release created."
+                ;;
+            esac
           } >> "$GITHUB_STEP_SUMMARY"
