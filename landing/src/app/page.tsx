@@ -11,6 +11,7 @@ import Page2Pipeline from "@/components/Page2Pipeline";
 import PageTrust from "@/components/PageTrust";
 import PageDownload from "@/components/PageDownload";
 import PlatformLock from "@/components/PlatformLock";
+import Colophon from "@/components/Colophon";
 
 /*
   Page composition — narrative rhythm:
@@ -20,10 +21,13 @@ import PlatformLock from "@/components/PlatformLock";
     Pipeline   (heavy art — four Renaissance plates)
     Trust      (editorial — three colophon-style blocks)
     Download   (functional — three platform plates)
+    Colophon   (publication mark — sits at the foot of every page)
 
-  Pattern: dense → sparse → dense → sparse → dense. Senior-designer
-  instinct: a page reads better when the eye gets a breath every
-  other section. Avoid stacking five "feature blocks" in a row.
+  Pattern: dense → sparse → dense → sparse → dense → settled. The
+  colophon is not "footer." It is the back-of-book mark that signs
+  the publication; same component sits below every page on the site
+  so the brand register holds whether the visitor is reading the
+  hero or the manifesto.
 */
 
 export default function Home() {
@@ -45,6 +49,7 @@ export default function Home() {
         <PageTrust />
         <PageDownload />
       </main>
+      <Colophon />
     </OverlayProvider>
   );
 }
