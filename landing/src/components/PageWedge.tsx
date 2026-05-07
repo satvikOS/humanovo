@@ -50,9 +50,15 @@ export default function PageWedge() {
         return;
       }
 
+      // Defensive: y-only slide. We deliberately do NOT include
+      // `autoAlpha: 0` in the from-state because gsap.from() sets
+      // its initial state immediately on creation — meaning a
+      // visitor who lands at this URL with a hash anchor mid-page,
+      // or whose JS hydration is slow, would see this section as
+      // empty until the scroll-trigger fired. The slide-up alone
+      // is enough cinematic; opacity stays at 1 throughout.
       gsap.from(".wedge-anim", {
         y: 22,
-        autoAlpha: 0,
         duration: 0.85,
         stagger: 0.08,
         ease: "power3.out",

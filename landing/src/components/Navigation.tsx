@@ -62,6 +62,60 @@ export default function Navigation() {
     { scope: navRef }
   );
 
+  /* Wordmark breathing — scroll-driven interpolation across the
+     Fraunces variable axes. As the visitor scrolls down the page,
+     the nav wordmark drifts from the calm "SOFT 50, WONK 0" state
+     of an opening folio into the more flourished "SOFT 100, WONK 1"
+     of a marginal annotation. The transition is barely perceptible
+     — that's the point. The reader who notices feels they're on a
+     site that takes itself seriously; the reader who doesn't gets
+     a wordmark that doesn't fight the page.
+
+     Implementation: a single rAF-throttled scroll listener writes
+     two CSS custom properties on document.documentElement. The
+     wordmark span reads them in its font-variation-settings. No
+     React state, no re-renders, no thrashing.
+
+     prefers-reduced-motion: when set, the listener bails on first
+     mount and the wordmark stays at the calm initial axes. */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const root = document.documentElement;
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    if (reduceMotion) {
+      root.style.setProperty("--wm-soft", "60");
+      root.style.setProperty("--wm-wonk", "0.5");
+      return;
+    }
+
+    let raf = 0;
+    const SCROLL_END = 1400; // px; somewhere into Pipeline section.
+    const update = () => {
+      const t = Math.max(0, Math.min(1, window.scrollY / SCROLL_END));
+      // Eased so the breath happens mostly in the upper half of
+      // scroll — the wordmark "settles" by mid-page.
+      const eased = 1 - Math.pow(1 - t, 2);
+      const soft = (50 + eased * 50).toFixed(1);
+      const wonk = eased.toFixed(3);
+      root.style.setProperty("--wm-soft", soft);
+      root.style.setProperty("--wm-wonk", wonk);
+      raf = 0;
+    };
+    const onScroll = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(update);
+    };
+
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, []);
+
   const moveSlider = (index: number) => {
     const btn = btnRefs.current[index];
     const container = itemsRef.current;
@@ -158,15 +212,21 @@ export default function Navigation() {
             />
           </span>
           <span
+            className="nav-wordmark"
             style={{
               fontFamily: "var(--font-display), Georgia, serif",
               fontStyle: "italic",
               fontWeight: 300,
-              fontVariationSettings: '"opsz" 72, "SOFT" 80, "WONK" 1',
+              // Reads breathing axes from CSS custom props that
+              // the scroll listener above keeps in sync. Defaults
+              // are baked in so SSR + first paint look right.
+              fontVariationSettings:
+                '"opsz" 72, "SOFT" var(--wm-soft, 60), "WONK" var(--wm-wonk, 0.5)',
               fontSize: "1.35rem",
               color: "var(--ink-0)",
               letterSpacing: "-0.045em",
               lineHeight: 1,
+              transition: "font-variation-settings 240ms ease-out",
             }}
           >
             humanovo

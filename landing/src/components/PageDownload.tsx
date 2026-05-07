@@ -68,9 +68,12 @@ export default function PageDownload() {
 
   useGSAP(
     () => {
+      // Defensive y-only — see Page2Pipeline for the same rationale.
+      // Cards animate in with a subtle scale; opacity stays at 1
+      // so an unfired trigger leaves a visible (just unstyled)
+      // download section rather than an empty page.
       gsap.from(".dl-header > *", {
         y: 24,
-        autoAlpha: 0,
         duration: 0.9,
         stagger: 0.08,
         ease: "power3.out",
@@ -83,7 +86,6 @@ export default function PageDownload() {
 
       gsap.from(".device-card", {
         y: 46,
-        autoAlpha: 0,
         scale: 0.97,
         duration: 1,
         ease: "power4.out",
@@ -97,7 +99,6 @@ export default function PageDownload() {
 
       gsap.from(".dl-foot > *", {
         y: 14,
-        autoAlpha: 0,
         duration: 0.8,
         stagger: 0.06,
         ease: "power2.out",

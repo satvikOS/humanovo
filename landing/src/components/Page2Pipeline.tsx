@@ -16,6 +16,12 @@ type Stage = {
   artLabel: string;
   artFilter?: string;
   signature: string;
+  /* Marginal gloss — a one-sentence italic note connecting the
+     historical plate to the modern pipeline stage. The point is
+     not "this art is pretty"; the point is "this art is *already
+     doing* the work the stage is named after." Reads as a
+     Renaissance scholar's annotation in the gutter of the page. */
+  marginalia: string;
 };
 
 const stages: Stage[] = [
@@ -34,6 +40,8 @@ const stages: Stage[] = [
     artFilter:
       "grayscale(0.9) contrast(1.35) brightness(1.15) sepia(0.5) hue-rotate(-6deg)",
     signature: "libraries · arXiv · PubMed · your drive",
+    marginalia:
+      "Already a multi-stage pipeline — scholars, specimens, manuscripts, instruments composed into one frame. Synthesis-as-illustration.",
   },
   {
     num: "02",
@@ -49,6 +57,8 @@ const stages: Stage[] = [
     artLabel: "Leonardo · Heart & Vessels",
     artFilter: "grayscale(0.45) contrast(1.22) brightness(1.18) sepia(0.3)",
     signature: "graphs · embeddings · causal traces",
+    marginalia:
+      "Cross-correlation, rendered: the same chamber from four angles on one folio, so the inconsistencies could reveal themselves.",
   },
   {
     num: "03",
@@ -64,6 +74,8 @@ const stages: Stage[] = [
     artLabel: "Vesalius · Prima Musculorum, 1543",
     artFilter: "grayscale(0.85) contrast(1.3) brightness(1.12) sepia(0.42)",
     signature: "evidence-weighted · fully cited",
+    marginalia:
+      "Illustration becomes hypothesis — a body posed in landscape, asking the viewer to see muscles in the world, not on a slab.",
   },
   {
     num: "04",
@@ -79,6 +91,8 @@ const stages: Stage[] = [
     artLabel: "Écorché with ancillary studies",
     artFilter: "grayscale(0.9) contrast(1.32) brightness(1.14) sepia(0.4)",
     signature: "threads · milestones · receipts",
+    marginalia:
+      "The institutional library, in plate form: a central figure with adjacent studies, organized so the next investigator picks up the thread.",
   },
 ];
 
@@ -122,9 +136,14 @@ export default function Page2Pipeline() {
   /* Header reveal + per-stage reveal on scroll */
   useGSAP(
     () => {
+      // Defensive y-only reveal — `autoAlpha: 0` removed because
+      // gsap.from() applies its start state immediately on creation,
+      // which would leave below-fold content invisible until scroll-
+      // triggered. With y-only, content is visible by default and
+      // the slide-up is purely additive. See Page1Hero comment for
+      // the same reasoning applied to the on-mount timeline.
       gsap.from(".pipeline-header > *", {
         y: 22,
-        autoAlpha: 0,
         duration: 0.9,
         stagger: 0.08,
         ease: "power3.out",
@@ -138,7 +157,6 @@ export default function Page2Pipeline() {
       gsap.utils.toArray<HTMLElement>(".stage-row").forEach((row) => {
         gsap.from(row.querySelectorAll(".stage-anim"), {
           y: 28,
-          autoAlpha: 0,
           duration: 0.9,
           stagger: 0.08,
           ease: "power3.out",
@@ -221,11 +239,20 @@ export default function Page2Pipeline() {
                 } as React.CSSProperties
               }
             >
-              {/* Art — alternates side for rhythm */}
+              {/* Art column — plate + journal-style figure caption +
+                  the scholarly marginalia gloss. The marginalia
+                  reads as a 17th-century annotation to the plate:
+                  italic Fraunces, faint rust on the key phrase,
+                  set off by a hairline rule above. It is the
+                  on-page argument that the historical illustration
+                  was already doing the work the section names. */}
               <div
                 className="stage-anim"
                 style={{
                   order: i % 2 === 0 ? 0 : 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 18,
                 }}
               >
                 <ArtFrame
@@ -242,6 +269,42 @@ export default function Page2Pipeline() {
                     } as React.CSSProperties
                   }
                 />
+
+                <figcaption
+                  style={{
+                    paddingTop: 14,
+                    borderTop: "1px solid var(--paper-edge)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <span
+                    className="t-eyebrow"
+                    style={{
+                      fontSize: "0.56rem",
+                      letterSpacing: "0.3em",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    Fig. {stage.romanNum} &middot; {stage.artLabel}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-display), Georgia, serif",
+                      fontStyle: "italic",
+                      fontWeight: 400,
+                      fontVariationSettings:
+                        '"opsz" 72, "SOFT" 70, "WONK" 0',
+                      fontSize: "0.9rem",
+                      lineHeight: 1.55,
+                      color: "var(--ink-2)",
+                      letterSpacing: "-0.005em",
+                    }}
+                  >
+                    {stage.marginalia}
+                  </span>
+                </figcaption>
               </div>
 
               {/* Copy */}

@@ -41,9 +41,12 @@ export default function PageTrust() {
         return;
       }
 
+      // Defensive y-only — see Page2Pipeline for full rationale.
+      // Below-fold sections must never sit at `autoAlpha: 0`
+      // waiting for a scroll-trigger that may not fire fast enough
+      // for users who land via hash-anchor or slow hydration.
       gsap.from(".trust-header > *", {
         y: 22,
-        autoAlpha: 0,
         duration: 0.85,
         stagger: 0.07,
         ease: "power3.out",
@@ -56,7 +59,6 @@ export default function PageTrust() {
 
       gsap.from(".trust-block", {
         y: 36,
-        autoAlpha: 0,
         duration: 1.0,
         stagger: 0.12,
         ease: "power3.out",
