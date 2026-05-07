@@ -19,8 +19,11 @@ import time
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import authenticate_websocket
+from app.core.database import get_db
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -141,8 +144,15 @@ def get_stream_manager() -> RunStreamManager:
 
 
 @router.websocket("/discovery/{run_id}")
-async def discovery_ws(websocket: WebSocket, run_id: str):
+async def discovery_ws(
+    websocket: WebSocket,
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
     """WebSocket endpoint for real-time discovery run updates."""
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     manager = get_stream_manager()
     await manager.connect(run_id, websocket)
 
@@ -170,8 +180,15 @@ async def discovery_ws(websocket: WebSocket, run_id: str):
 
 
 @router.websocket("/synthesis/{run_id}")
-async def synthesis_ws(websocket: WebSocket, run_id: str):
+async def synthesis_ws(
+    websocket: WebSocket,
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
     """WebSocket endpoint for real-time synthesis run updates."""
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     manager = get_stream_manager()
     await manager.connect(run_id, websocket)
 

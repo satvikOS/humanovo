@@ -45,7 +45,7 @@ export interface StructuredPaper {
     png_b64?: string
     kind?: string
   }>
-  tables: Array<{ section?: string; title?: string; rows?: any[] }>
+  tables: Array<{ section?: string; title?: string; rows?: Array<Record<string, unknown>> }>
   references: Array<{
     pmid?: string; doi?: string; title?: string; authors?: string;
     year?: string | number; journal?: string; verified?: boolean;
@@ -55,7 +55,7 @@ export interface StructuredPaper {
   validation: Array<{
     key: string; word_count: number; passes: boolean; failures: string[];
   }>
-  metadata: Record<string, any>
+  metadata: Record<string, unknown>
   is_valid: boolean
 }
 
@@ -421,7 +421,7 @@ export default function StrictPaperViewer({ paper, qaFindings, onExportPdf }: Pr
   )
 }
 
-function Pill({ children, ok, warn, bad }: any) {
+function Pill({ children, ok, warn, bad }: { children: React.ReactNode; ok?: boolean; warn?: boolean; bad?: boolean }) {
   return (
     <span className={clsx(
       'px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-medium',

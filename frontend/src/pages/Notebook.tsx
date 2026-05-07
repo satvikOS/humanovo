@@ -405,8 +405,8 @@ function EditorToolbar({ editor, onInsertLink }: { editor: Editor | null; onInse
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'image/*'
-    input.onchange = (e: any) => {
-      const file = e.target.files?.[0]
+    input.onchange = (e: Event) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
       if (!file) return
       const reader = new FileReader()
       reader.onload = () => {
@@ -559,12 +559,13 @@ export default function Notebook() {
     const loadPages = async () => {
       try {
         const res = await api.getNotebookPages({ page_size: 200 })
-        const pages: PageMeta[] = (res.items || []).map((p: any) => ({
+        type ApiNotebookPage = { id: string; title?: string; tags?: string[]; created_at: string; updated_at: string }
+        const pages: PageMeta[] = ((res.items || []) as ApiNotebookPage[]).map((p) => ({
           id: p.id,
           title: p.title || 'Untitled',
-          category: (p.tags?.find((t: string) => ['research', 'clinical', 'analysis', 'collaboration', 'publication'].includes(t)) || 'general') as TemplateCategory,
-          importance: (p.tags?.find((t: string) => ['low', 'medium', 'high', 'critical'].includes(t)) || 'medium') as ImportanceLevel,
-          tags: (p.tags || []).filter((t: string) => !['research', 'clinical', 'analysis', 'collaboration', 'publication', 'low', 'medium', 'high', 'critical'].includes(t)),
+          category: (p.tags?.find((t) => ['research', 'clinical', 'analysis', 'collaboration', 'publication'].includes(t)) || 'general') as TemplateCategory,
+          importance: (p.tags?.find((t) => ['low', 'medium', 'high', 'critical'].includes(t)) || 'medium') as ImportanceLevel,
+          tags: (p.tags || []).filter((t) => !['research', 'clinical', 'analysis', 'collaboration', 'publication', 'low', 'medium', 'high', 'critical'].includes(t)),
           createdAt: p.created_at,
           updatedAt: p.updated_at,
         }))

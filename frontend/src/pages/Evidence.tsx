@@ -406,7 +406,7 @@ export default function Evidence() {
 
   const selectedItem = evidence.find(e => e.id === selectedId) || null
 
-  const handleUpdateField = async (field: string, value: any) => {
+  const handleUpdateField = async (field: string, value: unknown) => {
     if (!selectedId) return
     setSaving(true)
     try {
@@ -537,7 +537,7 @@ export default function Evidence() {
 
   const saveEditDoc = () => {
     if (!editingDocId) return
-    const docs = persistGet<any[]>('project-documents', [])
+    const docs = persistGet<ProjectDoc[]>('project-documents', [])
     const updated = docs.map(d => d.id === editingDocId ? { ...d, title: editDocForm.title, doc_type: editDocForm.doc_type, authors: editDocForm.authors, description: editDocForm.description, tags: editDocForm.tags.split(',').map((t: string) => t.trim()).filter(Boolean) } : d)
     persistSet('project-documents', updated)
     setEditingDocId(null)
@@ -551,13 +551,13 @@ export default function Evidence() {
       const { blobDelete } = await import('../utils/persistence')
       await blobDelete(realId)
     } catch { /* blob not found */ }
-    const docs = persistGet<any[]>('project-documents', [])
+    const docs = persistGet<ProjectDoc[]>('project-documents', [])
     persistSet('project-documents', docs.filter(d => d.id !== realId))
     setDeleteDocConfirmId(null)
     fetchEvidence()
   }
 
-  const handleAddEvidence = async (form: any) => {
+  const handleAddEvidence = async (form: { title: string; type: string; sourceUrl: string; abstract: string; authors: string; tags: string; date: string }) => {
     try {
       const created = await api.createEvidence({
         title: form.title,
@@ -1024,7 +1024,7 @@ export default function Evidence() {
   )
 }
 
-function AddEvidenceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (form: any) => void }) {
+function AddEvidenceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (form: { title: string; type: string; sourceUrl: string; abstract: string; authors: string; tags: string; date: string }) => void }) {
   const [form, setForm] = useState({
     title: '', source: '', sourceUrl: '', type: 'pubmed',
     abstract: '', authors: '', tags: '', date: new Date().toISOString().split('T')[0],

@@ -100,7 +100,7 @@ export default function DiscoveryRunner() {
     if (!projectId || !disease.trim()) return
     // Include uploaded documents for AI context
     const allDocs = JSON.parse(localStorage.getItem('humanovo-project-documents') || '[]')
-    const projectDocIds = allDocs.filter((d: any) => d.project_id === projectId).map((d: any) => d.id)
+    const projectDocIds = (allDocs as Array<{ id: string; project_id: string }>).filter((d) => d.project_id === projectId).map((d) => d.id)
     const body = {
       disease,
       discovery_type: discoveryType,

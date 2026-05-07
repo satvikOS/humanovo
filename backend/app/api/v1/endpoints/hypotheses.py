@@ -16,15 +16,22 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import (
+    assert_owns_project,
+    fetch_owned_or_404,
+    filter_by_owned_project,
+)
 from app.models.hypothesis import (
     EvidenceReference as EvidenceReferenceModel,
     EvidenceType as EvidenceTypeModel,
     Hypothesis,
     HypothesisStatus as HypothesisStatusModel,
 )
+from app.models.user import User
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
 class HypothesisStatus(str, Enum):
@@ -239,8 +246,10 @@ def hypothesis_to_response(h: Hypothesis) -> HypothesisResponse:
 async def create_hypothesis(
     hypothesis: HypothesisCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> HypothesisResponse:
-    """Create a new hypothesis manually."""
+    """Create a new hypothesis under one of the caller's projects."""
+    await assert_owns_project(db, hypothesis.project_id, current_user)
     logger.info("Creating new hypothesis", project_id=str(hypothesis.project_id))
 
     db_hypothesis = Hypothesis(
@@ -271,12 +280,14 @@ async def generate_hypotheses(
     request: HypothesisGenerate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> GenerationTaskResponse:
     """Generate hypotheses using AI agents.
 
     This endpoint triggers an asynchronous hypothesis generation task
     using the multi-agent system. Progress can be tracked via WebSocket.
     """
+    await assert_owns_project(db, request.project_id, current_user)
     logger.info(
         "Starting hypothesis generation",
         project_id=str(request.project_id),
@@ -394,19 +405,26 @@ async def list_hypotheses(
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("updated_at", pattern="^(updated_at|confidence_score|novelty_score)$"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> HypothesisListResponse:
-    """List hypotheses with filtering and pagination."""
-    # Build base query
-    query = select(Hypothesis).options(selectinload(Hypothesis.evidence_refs))
+    """List the caller's hypotheses (across all their projects, or one
+    specific owned project) with filtering and pagination."""
+    # Base query — INNER-joined to Project so only the caller's rows return.
+    query = (
+        select(Hypothesis)
+        .options(selectinload(Hypothesis.evidence_refs))
+    )
+    query = filter_by_owned_project(query, Hypothesis, current_user)
 
-    # Apply filters
     if project_id:
         query = query.where(Hypothesis.project_id == project_id)
     if status:
         query = query.where(Hypothesis.status == HypothesisStatusModel(status.value))
 
-    # Get total count
-    count_query = select(func.count()).select_from(Hypothesis)
+    # Count subquery includes the same ownership join.
+    count_query = filter_by_owned_project(
+        select(func.count(Hypothesis.id)), Hypothesis, current_user
+    )
     if project_id:
         count_query = count_query.where(Hypothesis.project_id == project_id)
     if status:
@@ -415,15 +433,12 @@ async def list_hypotheses(
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Apply sorting
     sort_column = getattr(Hypothesis, sort_by)
     query = query.order_by(desc(sort_column))
 
-    # Apply pagination
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
 
-    # Execute query
     result = await db.execute(query)
     hypotheses = result.scalars().all()
 
@@ -439,19 +454,18 @@ async def list_hypotheses(
 async def get_hypothesis(
     hypothesis_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> HypothesisResponse:
-    """Get a specific hypothesis by ID."""
+    """Get one of the caller's hypotheses by ID."""
+    hypothesis = await fetch_owned_or_404(db, Hypothesis, hypothesis_id, current_user)
+    # Reload with evidence refs eagerly attached.
     query = (
         select(Hypothesis)
         .options(selectinload(Hypothesis.evidence_refs))
-        .where(Hypothesis.id == hypothesis_id)
+        .where(Hypothesis.id == hypothesis.id)
     )
     result = await db.execute(query)
-    hypothesis = result.scalar_one_or_none()
-
-    if not hypothesis:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
-
+    hypothesis = result.scalar_one()
     return hypothesis_to_response(hypothesis)
 
 
@@ -460,18 +474,17 @@ async def update_hypothesis(
     hypothesis_id: UUID,
     update: HypothesisUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> HypothesisResponse:
-    """Update a hypothesis."""
+    """Update one of the caller's hypotheses."""
+    await fetch_owned_or_404(db, Hypothesis, hypothesis_id, current_user)
     query = (
         select(Hypothesis)
         .options(selectinload(Hypothesis.evidence_refs))
         .where(Hypothesis.id == hypothesis_id)
     )
     result = await db.execute(query)
-    hypothesis = result.scalar_one_or_none()
-
-    if not hypothesis:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
+    hypothesis = result.scalar_one()
 
     update_data = update.model_dump(exclude_unset=True)
 
@@ -503,15 +516,10 @@ async def update_hypothesis(
 async def delete_hypothesis(
     hypothesis_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> None:
-    """Delete a hypothesis."""
-    query = select(Hypothesis).where(Hypothesis.id == hypothesis_id)
-    result = await db.execute(query)
-    hypothesis = result.scalar_one_or_none()
-
-    if not hypothesis:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
-
+    """Delete one of the caller's hypotheses."""
+    hypothesis = await fetch_owned_or_404(db, Hypothesis, hypothesis_id, current_user)
     await db.delete(hypothesis)
     await db.commit()
     logger.info("Hypothesis deleted", hypothesis_id=str(hypothesis_id))
@@ -522,24 +530,23 @@ async def verify_hypothesis(
     hypothesis_id: UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> HypothesisResponse:
-    """Trigger verification of a hypothesis against knowledge graph.
+    """Trigger verification of one of the caller's hypotheses against the
+    knowledge graph.
 
-    This updates the hypothesis with supporting/contradicting evidence
-    and recalculates confidence scores.
+    Updates the hypothesis with supporting/contradicting evidence and
+    recalculates confidence scores.
     """
+    await fetch_owned_or_404(db, Hypothesis, hypothesis_id, current_user)
     query = (
         select(Hypothesis)
         .options(selectinload(Hypothesis.evidence_refs))
         .where(Hypothesis.id == hypothesis_id)
     )
     result = await db.execute(query)
-    hypothesis = result.scalar_one_or_none()
+    hypothesis = result.scalar_one()
 
-    if not hypothesis:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
-
-    # Queue verification task
     background_tasks.add_task(_verify_hypothesis_task, hypothesis_id)
 
     logger.info("Hypothesis verification queued", hypothesis_id=str(hypothesis_id))
@@ -559,18 +566,17 @@ async def add_evidence_reference(
     hypothesis_id: UUID,
     evidence_ref: EvidenceReferenceSchema,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> HypothesisResponse:
-    """Add an evidence reference to a hypothesis."""
+    """Add an evidence reference to one of the caller's hypotheses."""
+    await fetch_owned_or_404(db, Hypothesis, hypothesis_id, current_user)
     query = (
         select(Hypothesis)
         .options(selectinload(Hypothesis.evidence_refs))
         .where(Hypothesis.id == hypothesis_id)
     )
     result = await db.execute(query)
-    hypothesis = result.scalar_one_or_none()
-
-    if not hypothesis:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
+    hypothesis = result.scalar_one()
 
     # Create evidence reference
     ref = EvidenceReferenceModel(

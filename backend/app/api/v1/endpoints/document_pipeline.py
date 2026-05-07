@@ -14,16 +14,22 @@ import asyncio
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import (
+    assert_owns_project,
+    fetch_owned_or_404,
+    filter_by_owned_project,
+)
+from app.models.user import User
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/documents", tags=["documents"])
-
+router = APIRouter(prefix="/documents", tags=["documents"], dependencies=AUTH_REQUIRED)
 # Async generation state
 _doc_status: str = "idle"  # idle | generating | done | failed
 _doc_result: Optional[bytes] = None
@@ -70,15 +76,14 @@ class GenerateHypothesisPaperRequest(BaseModel):
 
 
 @router.post("/project/{project_id}/pdf")
-async def generate_project_paper(project_id: UUID, use_ai: bool = Query(True)):
-    """
-    Generate a research paper PDF from all hypotheses in a project.
-
-    Retrieves the project and its hypotheses (from DB or in-memory store),
-    then runs the full document pipeline to produce a downloadable PDF.
-    """
-    # Retrieve project and hypotheses
-    project_data = await _get_project_data(project_id)
+async def generate_project_paper(
+    project_id: UUID,
+    use_ai: bool = Query(True),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Generate a research paper PDF from all hypotheses in one of the
+    caller's projects."""
+    project_data = await _get_project_data(project_id, current_user)
 
     hypotheses = project_data.get("hypotheses", [])
     if not hypotheses:
@@ -117,17 +122,19 @@ async def generate_project_paper(project_id: UUID, use_ai: bool = Query(True)):
 
 
 @router.post("/project/{project_id}/pdf/async")
-async def generate_project_paper_async(project_id: UUID, use_ai: bool = Query(True)):
-    """
-    Start async PDF generation for a project.
-    Returns immediately. Poll /documents/status to check completion.
-    """
+async def generate_project_paper_async(
+    project_id: UUID,
+    use_ai: bool = Query(True),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Start async PDF generation for one of the caller's projects.
+    Returns immediately. Poll /documents/status to check completion."""
     global _doc_status, _doc_result, _doc_filename, _doc_error, _doc_task
 
     if _doc_status == "generating":
         raise HTTPException(status_code=400, detail="Document generation already in progress.")
 
-    project_data = await _get_project_data(project_id)
+    project_data = await _get_project_data(project_id, current_user)
     hypotheses = project_data.get("hypotheses", [])
     if not hypotheses:
         raise HTTPException(status_code=400, detail="Project has no hypotheses.")
@@ -184,14 +191,22 @@ async def generate_hypothesis_paper(
     hypothesis_id: UUID,
     use_ai: bool = Query(True),
     body: Optional[GenerateHypothesisPaperRequest] = None,
+    current_user: User = Depends(get_current_active_user),
 ):
-    """
-    Generate a research paper PDF focused on a single hypothesis.
+    """Generate a research paper PDF for one of the caller's hypotheses.
 
-    If a request body is provided with hypothesis data, uses that directly.
-    Otherwise retrieves the hypothesis details from backend stores.
+    If a request body is provided with hypothesis data we still verify
+    ownership of `hypothesis_id` against the DB — the body only carries
+    presentation/override fields, not authorization.
     """
     if body:
+        # Confirm the caller owns the hypothesis even when the body
+        # carries the rendering payload — body fields can't bypass authz.
+        from app.core.database import get_db
+        from app.models.hypothesis import Hypothesis
+        async for db in get_db():
+            await fetch_owned_or_404(db, Hypothesis, hypothesis_id, current_user)
+            break
         hypothesis_data = {
             "id": str(hypothesis_id),
             "title": body.title,
@@ -212,7 +227,7 @@ async def generate_hypothesis_paper(
             "clinical_trial_references": body.clinical_trial_references,
         }
     else:
-        hypothesis_data = await _get_hypothesis_data(hypothesis_id)
+        hypothesis_data = await _get_hypothesis_data(hypothesis_id, current_user)
 
     disease = hypothesis_data.get("disease", hypothesis_data.get("disease_focus", "Unknown"))
     discovery_type = hypothesis_data.get("hypothesis_type", "treatment")
@@ -254,15 +269,17 @@ async def generate_hypothesis_paper(
 async def generate_hypothesis_paper_html(
     hypothesis_id: UUID,
     body: Optional[GenerateHypothesisPaperRequest] = None,
+    current_user: User = Depends(get_current_active_user),
 ):
-    """
-    Generate a research paper as a self-contained HTML document for a single hypothesis.
-
-    Returns a professionally formatted HTML page with cover page, TOC, numbered
-    citations, tables, diagrams, and FDA/R&D-grade typography — suitable for
-    rendering in an iframe or downloading.
-    """
+    """Generate a self-contained HTML paper for one of the caller's
+    hypotheses. Body fields are presentation overrides only — ownership
+    is verified against the DB regardless of body presence."""
     if body:
+        from app.core.database import get_db
+        from app.models.hypothesis import Hypothesis
+        async for db in get_db():
+            await fetch_owned_or_404(db, Hypothesis, hypothesis_id, current_user)
+            break
         hypothesis_data = {
             "id": str(hypothesis_id),
             "title": body.title,
@@ -283,7 +300,7 @@ async def generate_hypothesis_paper_html(
             "clinical_trial_references": body.clinical_trial_references,
         }
     else:
-        hypothesis_data = await _get_hypothesis_data(hypothesis_id)
+        hypothesis_data = await _get_hypothesis_data(hypothesis_id, current_user)
 
     disease = hypothesis_data.get("disease", hypothesis_data.get("disease_focus", "Unknown"))
     discovery_type = hypothesis_data.get("hypothesis_type", "treatment")
@@ -507,10 +524,9 @@ async def download_generated_document():
 # ============================================================================
 
 
-async def _get_project_data(project_id: UUID) -> dict[str, Any]:
-    """
-    Retrieve project data including hypotheses from the database.
-    """
+async def _get_project_data(project_id: UUID, user: User) -> dict[str, Any]:
+    """Retrieve a caller-owned project + its hypotheses. Raises 404 on
+    a non-owned project (no leak about other users' IDs)."""
     try:
         from app.core.database import get_db
         from app.models.project import Project
@@ -518,17 +534,17 @@ async def _get_project_data(project_id: UUID) -> dict[str, Any]:
         from sqlalchemy import select
 
         async for db in get_db():
-            result = await db.execute(
-                select(Project).where(Project.id == project_id)
-            )
-            project = result.scalar_one_or_none()
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+            project = await assert_owns_project(db, project_id, user)
 
-            # Fetch hypotheses for this project
-            hyp_result = await db.execute(
-                select(Hypothesis).where(Hypothesis.project_id == project_id)
+            # Fetch the project's hypotheses through the ownership join
+            # so the query is safe even if the parent assertion is
+            # ever refactored away.
+            hyp_query = filter_by_owned_project(
+                select(Hypothesis).where(Hypothesis.project_id == project_id),
+                Hypothesis,
+                user,
             )
+            hyp_result = await db.execute(hyp_query)
             db_hypotheses = hyp_result.scalars().all()
 
             hypotheses = []
@@ -563,10 +579,13 @@ async def _get_project_data(project_id: UUID) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Project not found")
 
 
-async def _get_hypothesis_data(hypothesis_id: UUID) -> dict[str, Any]:
-    """Retrieve a single hypothesis from DB or orchestrator."""
+async def _get_hypothesis_data(hypothesis_id: UUID, user: User) -> dict[str, Any]:
+    """Retrieve a hypothesis the caller owns from DB or the orchestrator
+    (in-flight runs). Raises 404 on a non-owned hypothesis."""
 
-    # Check active orchestrator first (for in-progress discovery runs)
+    # Check active orchestrator first (for in-progress discovery runs).
+    # Orchestrator state is per-process, in-memory, only populated by a
+    # discovery run the caller themselves started — already authz'd.
     try:
         from app.api.v1.endpoints.orchestrator import _current_orchestrator
         if _current_orchestrator:
@@ -596,7 +615,7 @@ async def _get_hypothesis_data(hypothesis_id: UUID) -> dict[str, Any]:
     except Exception as e:
         logger.debug("Orchestrator hypothesis lookup failed", error=str(e))
 
-    # Try database
+    # Try database — ownership-scoped lookup.
     try:
         from app.core.database import get_db
         from app.models.hypothesis import Hypothesis
@@ -604,14 +623,11 @@ async def _get_hypothesis_data(hypothesis_id: UUID) -> dict[str, Any]:
         from sqlalchemy import select
 
         async for db in get_db():
-            result = await db.execute(
-                select(Hypothesis).where(Hypothesis.id == hypothesis_id)
-            )
-            h = result.scalar_one_or_none()
-            if not h:
-                raise HTTPException(status_code=404, detail="Hypothesis not found")
+            h = await fetch_owned_or_404(db, Hypothesis, hypothesis_id, user)
 
-            # Get project for disease context
+            # Get project for disease context. The hypothesis's
+            # project_id is the same one that just verified ownership,
+            # so a direct lookup is safe.
             disease = "Unknown"
             if h.project_id:
                 proj_result = await db.execute(
@@ -824,9 +840,13 @@ async def export_document(request: ExportDocumentRequest):
 
 
 @router.post("/project/{project_id}/docx")
-async def generate_project_docx(project_id: UUID):
-    """Generate a research paper DOCX from all hypotheses in a project."""
-    project_data = await _get_project_data(project_id)
+async def generate_project_docx(
+    project_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+):
+    """Generate a research paper DOCX from all hypotheses in one of
+    the caller's projects."""
+    project_data = await _get_project_data(project_id, current_user)
     hypotheses = project_data.get("hypotheses", [])
     if not hypotheses:
         raise HTTPException(status_code=400, detail="Project has no hypotheses.")

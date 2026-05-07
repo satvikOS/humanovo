@@ -1,15 +1,24 @@
 # humanovo — Day-1 Production Readiness Audit & 27-Day Sprint Plan
 
-**Date**: 2026-05-04
+**Date**: 2026-05-04 (updated 2026-05-05)
 **Branch**: `claude/production-platform-analysis-30H5c`
 **Audience**: founder + engineering leads
 **Scope locked in (Day-1 Q&A)**:
 - v1 user: academic biomedical researchers (PhDs, postdocs, PIs)
-- Packaging: Tauri desktop (Win/macOS/Linux) + iOS PWA
+- Packaging: native apps only — Tauri (Win/macOS/Linux) + iOS native (no humanovo.com browser product)
 - Work mode: audit + plan first, then checkpointed sprints
 - Launch posture: closed beta May 26-31 → public launch mid-June (revised from "public launch May 31" — rationale below)
+- **Cloud strategy (locked 2026-05-05)**: three new clouds — AWS (full Org, Bedrock for Claude/Cohere/Nova), Azure (AI Foundry hub, 8 model deployments for the swarm), GCP (single project, `gemini-3-pro-image` only for 4K-8K publication-grade figures). See `MULTI_CLOUD_AGENT_ARCHITECTURE.md` for the full design.
+- **Pricing tiers (locked 2026-05-05)**: B2B from day one — Trial (3 hyp + 1 paper free) → Researcher $20/mo → Lab $200/mo → Institution custom. Real-time Stripe top-ups (Anthropic/OpenAI-style prepaid credits).
+- **Auth (locked 2026-05-05)**: email + Google OAuth + Apple OAuth; tokens in OS keychain; native apps only.
 
 This doc is the source of truth for the production push. Each sprint will append a checkpoint section as it closes.
+
+**Companion docs that this one references**:
+- `MULTI_CLOUD_AGENT_ARCHITECTURE.md` — swarm-per-stage design, lane pools, cross-cloud failover, model selector, figure-gen QA/QC pipeline
+- `KG_GOVERNANCE.md` — 4-layer KG model, Common KG promotion gates, HIPAA enforcement, downvote-quarantine
+- `CREDENTIALS_HANDOFF.md` — exact cloud-signup steps + GitHub Actions Secret names per cloud
+- `CREDENTIAL_POOL_DESIGN.md` — lane-pool primitives (still valid; extended in MULTI_CLOUD doc)
 
 ---
 
@@ -381,4 +390,101 @@ Total Sprint 3 budget: ~10-12 days for 30 sources. CI cost manageable: T1 daily 
 | Native packaging v1 | Win + macOS + iOS PWA; Linux deferred to v1.1 |
 | Launch dates (revised) | Closed beta **June 2-7**; public launch **~June 17-20** |
 
+---
+
+## 10. Cloud + business-model decisions — 2026-05-05 update
+
+This section captures decisions locked during the 2026-05-05 founder Q&A. The earlier sections of this doc remain valid; this section supersedes any apparent conflicts.
+
+### 10.1 Three new clouds, fully fresh accounts
+
+The existing AWS dev (under `genup-*`) is being replaced. New clouds:
+
+| Cloud | Role | Region | Models in scope |
+|---|---|---|---|
+| **AWS** (new Organization) | Full infra + Bedrock model agents | `us-east-1` | Claude Opus 4, Claude Sonnet 4.6, Claude Haiku 4.5, Cohere Embed v3 (English + Multilingual), Amazon Nova Pro |
+| **Azure** (new tenant + subscription) | AI Foundry hub + 8 model deployments + per-stage agents | `East US 2` | GPT-4o, GPT-4.1, o3-mini, Cohere Command R+, Mistral Large 2, Phi-4, Grok-3, text-embedding-3-large |
+| **GCP** (new project) | Figure generation **only** | `us-east1` | Gemini 3 Pro Image (4K-8K publication-grade figures) |
+
+The full setup-and-credentials guide is in `CREDENTIALS_HANDOFF.md` — that's what the founder works through during cloud signups.
+
+### 10.2 Architecture commitment — multi-cloud agent swarm
+
+The 12-stage pipeline is implemented as **per-stage swarms** of agents, each picking the best model from the registry at task-dispatch time. Not one cloud per pipeline; not one model per stage; not one agent per user. See `MULTI_CLOUD_AGENT_ARCHITECTURE.md`.
+
+Key properties:
+- **Per-user lane keys** in pre-provisioned pools per cloud (CredentialPool primitive). Pool size auto-scales from 30 lanes → up by 10 every time peak utilization sits at 80% for 15 min. Auto-provision first, then alert dev team.
+- **Shared swarm worker agents** (Bedrock Agents / AI Foundry Agents / Vertex Agents) — stateless executors scoped per-request to user's lane key + tenant_id + KG namespace. The only way to scale to 100K users.
+- **Cross-cloud failover always-on** — Bedrock down for Stage 1? Selector routes to Azure GPT-4.1. Azure down for embeddings? Routes to Bedrock Cohere. GCP down for figures? Queue + retry up to 30 min, fall back to "[figure pending]" placeholders so the paper text still ships.
+- **Cost-down loop via Common KG** — every successful run extracts verified edges into the Common KG (with HIPAA gating). Future runs hit the KG before calling source APIs. Per-run cost projects ~75% lower at month 12 vs launch.
+
+### 10.3 Pricing tiers — B2B from day one
+
+| Tier | Price | What it gets | CredentialPool monthly cap |
+|---|---|---|---|
+| **Trial** | Free | 3 hypotheses + 1 paper-synthesis run, signup-required (email + Google + Apple OAuth) | $1 lifetime |
+| **Researcher** | $20 / mo / seat | Limited monthly hypotheses, core discovery + citation export. Real-time Stripe top-ups. | $5 model-cost cap (~75% margin) |
+| **Lab** | $200 / mo / lab | Generous hypothesis volume, all discovery modes, API access, projects, burst top-ups for grant cycles | $50 |
+| **Institution** | Custom | Dedicated GCP project, larger reserved lane allocation, SSO, audit-log access, solutions engineering, contracted SLAs | $500-$2000+ per contract |
+
+Real-time top-up flow: Stripe checkout → webhook hits `/api/v1/billing/topup` → `monthly_credit_remaining` increases instantly → broker resumes accepting tasks within seconds. Same UX as Anthropic / OpenAI prepaid credits.
+
+### 10.4 Knowledge Graph layering — 4 levels
+
+See `KG_GOVERNANCE.md` for the full spec.
+
+| Layer | Owner | Visibility | PHI? |
+|---|---|---|---|
+| Common Corpus KG | platform | read-only to all users | never (auto-detector + user-mark dual gate at promotion) |
+| Private KG | the user | only the owner | yes — stays here forever |
+| Hypothesis KG | the user | only the owner; UI button next to each hypothesis opens KG view | inherits from Private |
+| Paper KG | the user | only the owner; UI button next to each paper opens KG view | inherits from Private |
+
+Promotion to Common requires: HIPAA-clean (auto-detector AND user-mark) + ≥3 distinct public-corpus sources + grounding ratio ≥ 0.85 + adversarial pass + confidence ≥ 0.75 + no model dissent. Auto-promote on those gates; community downvote → quarantine on N flags (where N depends on edge confidence).
+
+### 10.5 Distribution — native apps only
+
+humanovo.com is a marketing site. The product itself runs **only** as native apps:
+
+| Platform | Tech |
+|---|---|
+| Windows | Tauri (Rust + React frontend) |
+| macOS | Tauri |
+| Linux | Tauri |
+| iOS | Native (Swift wrapper around React + Tauri-equivalent on iOS) |
+
+Auth tokens live in OS keychain (Tauri's keytar / iOS Keychain). No browser-localStorage tokens. Distribution: Windows Store + Microsoft Store, App Store (iOS), direct download / snap / flatpak / AppImage (Linux), DMG + Mac App Store (macOS).
+
+### 10.6 Migration plan — parallel-run validation
+
+The existing langgraph pipeline keeps running. The new multi-cloud agent system runs in shadow for 1 week (results compared, only old pipeline output reaches users), then 50/50 split for 1 week with hypothesis-quality parity gates, then cutover. Two-week validation window protects against silent regressions on research output.
+
+### 10.7 What changes for the cloud cutover
+
+The existing AWS `genup-*` infrastructure gets archived (NOT migrated). Every name in production becomes `humanovo-*`. The Terraform state migrates fresh, no in-place imports. The cutover happens at the close of Sprint 1 and is the gate to Sprint 2 (auth + per-user data isolation work).
+
+### 10.8 Open items the founder is doing right now
+
+- Signing up for the three new clouds in the order specified by `CREDENTIALS_HANDOFF.md`
+- Submitting Bedrock model-access requests on day 1 of AWS (24-72 hour approval window)
+- Populating GitHub Actions Secrets per the handoff doc as each cloud comes online
+
+### 10.9 Decisions table — 2026-05-05 additions
+
+| Decision | Choice |
+|---|---|
+| Cloud stack | AWS (new Org, us-east-1) + Azure (new tenant, East US 2) + GCP (new project, us-east1, Gemini 3 Pro Image only) |
+| Agent architecture | Per-stage swarms + shared workers + per-user lane keys + cross-cloud failover always-on |
+| Per-user keys | Lane-assignment in pre-provisioned pool; auto-scale at 80% utilization; auto-provision first then alert dev team |
+| Trial flow | Free 3 hypotheses + 1 paper, **signup-required** (email + Google + Apple OAuth) at app first-launch |
+| Billing processor | Stripe with real-time top-ups (Anthropic/OpenAI-style prepaid credits) |
+| KG model | 4 layers: Common Corpus + Private + Hypothesis + Paper. Hypothesis/Paper KG visible via UI button next to each item. |
+| Common KG promotion | Auto-promote on validation gates + community downvote quarantine. Confidence-keyed downvote thresholds. |
+| HIPAA enforcement | Auto-detector at upload + user-mark; both must be clean for promotion. Default = cautious (PHI assumed unless cleared). |
+| Cloud failover | Always-on automatic; equivalents in registry. Figure-gen GCP-only with queue+retry+placeholder fallback. |
+| Migration | Parallel-run validation: 1 week shadow → 1 week 50/50 → cutover. |
+| Distribution | Native apps only — Win + macOS + Linux (Tauri) + iOS (native). No browser product. |
+| Marketing site | humanovo.com — marketing + download links only. Not a product surface. |
+| Bedrock Provisioned Throughput | Not used. All tiers on-demand. Institution "dedicated infrastructure" comes from dedicated GCP project + reserved lane allocation + SLA, not PT. |
+| GCP project structure | Single shared project for Researcher/Lab; dedicated project per Institution tenant. |
 

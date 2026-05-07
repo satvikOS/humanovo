@@ -9,9 +9,12 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import authenticate_websocket
+from app.core.database import get_db
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -109,6 +112,7 @@ class WSMessage(BaseModel):
 async def project_websocket(
     websocket: WebSocket,
     project_id: UUID,
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """WebSocket for project-level updates.
 
@@ -118,8 +122,11 @@ async def project_websocket(
     - Agent task progress
     - Simulation progress
     """
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     channel = f"project:{project_id}"
-    await manager.connect(websocket, channel, {"project_id": str(project_id)})
+    await manager.connect(websocket, channel, {"project_id": str(project_id), "user_id": str(user.id)})
 
     try:
         # Send connection confirmation
@@ -155,6 +162,7 @@ async def project_websocket(
 async def task_websocket(
     websocket: WebSocket,
     task_id: UUID,
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """WebSocket for tracking a specific agent task.
 
@@ -164,8 +172,11 @@ async def task_websocket(
     - Intermediate results
     - Completion or failure
     """
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     channel = f"task:{task_id}"
-    await manager.connect(websocket, channel, {"task_id": str(task_id)})
+    await manager.connect(websocket, channel, {"task_id": str(task_id), "user_id": str(user.id)})
 
     try:
         await manager.send_personal(
@@ -194,6 +205,7 @@ async def task_websocket(
 async def simulation_websocket(
     websocket: WebSocket,
     simulation_id: UUID,
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """WebSocket for tracking simulation progress.
 
@@ -202,8 +214,11 @@ async def simulation_websocket(
     - Intermediate statistics
     - Completion or failure
     """
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     channel = f"simulation:{simulation_id}"
-    await manager.connect(websocket, channel, {"simulation_id": str(simulation_id)})
+    await manager.connect(websocket, channel, {"simulation_id": str(simulation_id), "user_id": str(user.id)})
 
     try:
         await manager.send_personal(
@@ -231,6 +246,7 @@ async def simulation_websocket(
 @router.websocket("/global")
 async def global_websocket(
     websocket: WebSocket,
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """WebSocket for global system updates.
 
@@ -239,8 +255,11 @@ async def global_websocket(
     - Ingestion pipeline progress
     - Knowledge graph updates
     """
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     channel = "global"
-    await manager.connect(websocket, channel)
+    await manager.connect(websocket, channel, {"user_id": str(user.id)})
 
     try:
         await manager.send_personal(

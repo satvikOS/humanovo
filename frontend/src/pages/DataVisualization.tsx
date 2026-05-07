@@ -38,6 +38,8 @@ interface DataPoint {
   errorMinus?: number  // error bar lower
   size?: number        // bubble size
   trend?: number       // trend line value
+  ciLow?: number       // confidence-interval lower bound (computed by ciBand)
+  ciHigh?: number      // confidence-interval upper bound (computed by ciBand)
 }
 
 type ChartType =
@@ -627,7 +629,7 @@ function addCIBands(data: DataPoint[], level: number): DataPoint[] {
   const sd = Math.sqrt(variance)
   const z = Z_SCORES[level.toFixed(2)] || 1.96
   const margin = z * sd / Math.sqrt(vals.length)
-  return data.map(d => ({ ...d, ciLow: d.value - margin, ciHigh: d.value + margin } as any))
+  return data.map(d => ({ ...d, ciLow: d.value - margin, ciHigh: d.value + margin }))
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -706,10 +708,10 @@ function computeHistogram(values: number[], bins = 15): { label: string; count: 
 function computeLinearRegression(data: DataPoint[]): { slope: number; intercept: number; r2: number } {
   const n = data.length
   if (n < 2) return { slope: 0, intercept: 0, r2: 0 }
-  let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0
+  let sx = 0, sy = 0, sxx = 0, sxy = 0
   data.forEach((d, i) => {
     const x = i; const y = d.value
-    sx += x; sy += y; sxx += x * x; sxy += x * y; syy += y * y
+    sx += x; sy += y; sxx += x * x; sxy += x * y
   })
   const denom = n * sxx - sx * sx
   if (denom === 0) return { slope: 0, intercept: sy / n, r2: 0 }
@@ -824,13 +826,13 @@ function GlassSelect({ value, options, onChange, placeholder }: {
 // ─── Component ──────────────────────────────────────────────────
 export default function DataVisualization() {
   const [charts, setCharts] = useState<ChartConfig[]>(() => {
-    const raw = persistGet<any[]>('charts', [])
+    const raw = persistGet<Partial<ChartConfig>[]>('charts', [])
     // Migrate old charts that lack the `options` field
-    return raw.map((c: any) => ({
+    return raw.map((c) => ({
       ...c,
       annotations: c.annotations || [],
-      options: c.options ? { ...defaultOptions, ...c.options } : { ...defaultOptions, color: c.color || defaultOptions.color },
-    }))
+      options: c.options ? { ...defaultOptions, ...c.options } : { ...defaultOptions, color: (c as { color?: string }).color || defaultOptions.color },
+    })) as ChartConfig[]
   })
   // Deep-link `?add=1` auto-opens the Add Chart dialog so dashboard
   // and cross-page links can drop users straight into the creation
@@ -1279,7 +1281,7 @@ export default function DataVisualization() {
       baseData = addCIBands(baseData, o.ciLevel || 0.95)
     }
     const finalData = baseData
-    const hasCI = o.showCI && finalData.some((d: any) => d.ciLow !== undefined)
+    const hasCI = o.showCI && finalData.some((d) => d.ciLow !== undefined)
     // Resolve color palette. Custom overrides win over the named
     // palette so a user can hand-tune individual series colors via
     // the per-color picker without leaving the original palette
@@ -1298,12 +1300,15 @@ export default function DataVisualization() {
     const tooltipStyle = { ...TOOLTIP_STYLE, background: theme.tooltipBg, color: theme.textColor, border: `1px solid ${theme.gridColor}` }
     const gridEl = o.showGrid ? <CartesianGrid strokeDasharray={theme.gridDash} stroke={theme.gridColor} strokeWidth={theme.gridStrokeWidth} /> : null
     const cursorStyle = o.showCrosshair ? { stroke: theme.mutedColor, strokeWidth: 1, strokeDasharray: '4 4' } : undefined
-    const tooltipEl = <Tooltip contentStyle={tooltipStyle} cursor={cursorStyle} formatter={(v: any) => yTickFmt(v)} />
+    const tooltipEl = <Tooltip contentStyle={tooltipStyle} cursor={cursorStyle} formatter={(v) => yTickFmt(Number(v ?? 0))} />
     const hidden = hiddenSeries[chart.id] || new Set<string>()
-    const handleLegendClick = (e: any) => { if (e?.dataKey) toggleSeries(chart.id, e.dataKey) }
+    const handleLegendClick = (e: { dataKey?: string | number | ((obj: unknown) => unknown) }) => {
+      const k = e?.dataKey
+      if (typeof k === 'string' || typeof k === 'number') toggleSeries(chart.id, String(k))
+    }
     const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11 * fs, cursor: 'pointer', fontFamily: theme.bodyFont, color: theme.textColor }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none', color: theme.textColor }}>{value}</span>} /> : null
     const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke={theme.axisColor} fill={theme.bg === 'transparent' ? 'var(--glass-bg)' : '#F0F0F0'} travellerWidth={8} /> : null
-    const xAxisProps: any = {
+    const xAxisProps: Record<string, unknown> = {
       dataKey: 'label',
       tick: tickStyle,
       stroke: theme.axisColor,
@@ -1314,7 +1319,7 @@ export default function DataVisualization() {
     }
     if (o.tickCountX && o.tickCountX > 0) xAxisProps.tickCount = o.tickCountX
     const xAxisEl = <XAxis {...xAxisProps} />
-    const yAxisProps: any = {
+    const yAxisProps: Record<string, unknown> = {
       tick: tickStyle,
       stroke: theme.axisColor,
       strokeWidth: theme.axisStrokeWidth,
@@ -1605,7 +1610,7 @@ export default function DataVisualization() {
           <ResponsiveContainer width="100%" height={height}>
             <PieChart>
               <Pie data={data} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={height / 3}
-                label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`} startAngle={o.startAngle} endAngle={o.startAngle + 360}>
+                label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`} startAngle={o.startAngle} endAngle={o.startAngle + 360}>
                 {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
               </Pie>
               {tooltipEl}{legendEl}
@@ -1619,7 +1624,7 @@ export default function DataVisualization() {
             <PieChart>
               <Pie data={data} dataKey="value" nameKey="label" cx="50%" cy="50%"
                 innerRadius={o.innerRadius} outerRadius={height / 3}
-                label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`}
                 startAngle={o.startAngle} endAngle={o.startAngle + 360}>
                 {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
               </Pie>
@@ -2039,10 +2044,10 @@ export default function DataVisualization() {
             <Treemap
               data={data.map((d, i) => ({ name: d.label, size: d.value, fill: colors[i % colors.length] }))}
               dataKey="size" aspectRatio={4 / 3} stroke="var(--color-border)"
-              content={({ x, y, width, height: h, name, fill }: any) => (
+              content={({ x, y, width, height: h, name, fill }: { x?: number; y?: number; width?: number; height?: number; name?: string; fill?: string }) => (
                 <g>
                   <rect x={x} y={y} width={width} height={h} fill={fill} stroke="var(--color-border)" strokeWidth={1} rx={4} />
-                  {width > 40 && h > 20 && <text x={x + width / 2} y={y + h / 2} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11}>{name}</text>}
+                  {(width ?? 0) > 40 && (h ?? 0) > 20 && <text x={(x ?? 0) + (width ?? 0) / 2} y={(y ?? 0) + (h ?? 0) / 2} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11}>{name}</text>}
                 </g>
               )}
             />
@@ -2380,7 +2385,7 @@ export default function DataVisualization() {
           <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Legend Position</label>
           <GlassSelect
             value={chart.options.legendPosition}
-            onChange={val => updateChartOptions(chart.id, { legendPosition: val as any })}
+            onChange={val => updateChartOptions(chart.id, { legendPosition: val as 'top' | 'bottom' | 'left' | 'right' })}
             options={[
               { value: 'top', label: 'Top' },
               { value: 'bottom', label: 'Bottom' },
@@ -2449,7 +2454,7 @@ export default function DataVisualization() {
           Trend:
           <select
             value={chart.options.trendLine}
-            onChange={e => updateChartOptions(chart.id, { trendLine: e.target.value as any })}
+            onChange={e => updateChartOptions(chart.id, { trendLine: e.target.value as 'none' | 'linear' | 'movingAvg' })}
             className="text-xs rounded px-1 py-0.5"
             style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
           >

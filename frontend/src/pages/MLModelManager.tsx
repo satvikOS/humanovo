@@ -8,10 +8,15 @@ import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
 import { keyboardClickProps } from '../utils/clickable'
 
+interface TrainingHistoryRow { epoch: number; train_loss: number; val_loss?: number }
+interface FeatureImportanceRow { feature: string; importance: number }
+interface ROCPoint { fpr: number; tpr: number }
+interface ModelMetrics extends Record<string, unknown> { roc_curve?: ROCPoint[] }
+interface ModelPrediction { class_label?: string; prediction?: string | number; probability?: number; confidence?: number }
 interface MLModel {
   id: string; name: string; model_type: string; status: string; description: string; version: string
-  framework: string; hyperparameters: Record<string, any>; features: string[]; target: string
-  metrics: Record<string, number | null>; training_history: any[]; feature_importance: any[]
+  framework: string; hyperparameters: Record<string, unknown>; features: string[]; target: string
+  metrics: Record<string, number | null>; training_history: TrainingHistoryRow[]; feature_importance: FeatureImportanceRow[]
   created_at: string; updated_at: string
 }
 
@@ -24,11 +29,11 @@ const STATUS_COLORS: Record<string, string> = { draft: 'var(--color-text-muted)'
 export default function MLModelManager() {
   const [models, setModels] = useState<MLModel[]>([])
   const [selected, setSelected] = useState<MLModel | null>(null)
-  const [metrics, setMetrics] = useState<any>(null)
+  const [metrics, setMetrics] = useState<ModelMetrics | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ name: '', model_type: 'classification', description: '', framework: 'scikit-learn' })
   const [predInput, setPredInput] = useState('')
-  const [prediction, setPrediction] = useState<any>(null)
+  const [prediction, setPrediction] = useState<ModelPrediction | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const load = async () => {
@@ -74,7 +79,7 @@ export default function MLModelManager() {
 
   const predict = async () => {
     if (!selected) return
-    const features: Record<string, any> = {}
+    const features: Record<string, unknown> = {}
     predInput.split(',').forEach(pair => { const [k, v] = pair.split(':').map(s => s.trim()); if (k) features[k] = isNaN(Number(v)) ? v : Number(v) })
     try {
       const { data } = await apiClient.post(`${BASE}/${selected.id}/predict`, { model_id: selected.id, features })

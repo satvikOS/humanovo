@@ -54,27 +54,30 @@ const VALID_STATUS_FILTERS = new Set(['', 'planned', 'in_progress', 'completed',
 // page still renders while the fetch is in flight after a reload.
 const CACHE_KEY = 'experiments'
 
-function normalizeFromApi(row: any): Experiment {
+function normalizeFromApi(row: Record<string, unknown>): Experiment {
+  const s = (v: unknown, dflt = ''): string => typeof v === 'string' ? v : dflt
+  const sOpt = (v: unknown): string | undefined => typeof v === 'string' ? v : undefined
+  const arr = (v: unknown): string[] => Array.isArray(v) ? (v as string[]) : []
   return {
     id: String(row.id),
-    title: row.title ?? '',
-    hypothesis: row.hypothesis ?? '',
-    status: (row.status ?? 'planned') as Experiment['status'],
-    protocol: row.protocol ?? [],
-    materials: row.materials ?? [],
-    observations: row.observations ?? '',
-    results: row.results ?? '',
-    conclusion: row.conclusion ?? '',
-    tags: row.tags ?? [],
-    startDate: row.start_date ?? row.startDate ?? undefined,
-    endDate: row.end_date ?? row.endDate ?? undefined,
-    createdAt: row.created_at ?? row.createdAt ?? new Date().toISOString(),
-    updatedAt: row.updated_at ?? row.updatedAt ?? new Date().toISOString(),
+    title: s(row.title),
+    hypothesis: s(row.hypothesis),
+    status: (s(row.status, 'planned')) as Experiment['status'],
+    protocol: arr(row.protocol),
+    materials: arr(row.materials),
+    observations: s(row.observations),
+    results: s(row.results),
+    conclusion: s(row.conclusion),
+    tags: arr(row.tags),
+    startDate: sOpt(row.start_date) ?? sOpt(row.startDate),
+    endDate: sOpt(row.end_date) ?? sOpt(row.endDate),
+    createdAt: sOpt(row.created_at) ?? sOpt(row.createdAt) ?? new Date().toISOString(),
+    updatedAt: sOpt(row.updated_at) ?? sOpt(row.updatedAt) ?? new Date().toISOString(),
   }
 }
 
-function toApiPayload(exp: Partial<Experiment>): Record<string, any> {
-  const out: Record<string, any> = {}
+function toApiPayload(exp: Partial<Experiment>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
   if (exp.title !== undefined) out.title = exp.title
   if (exp.hypothesis !== undefined) out.hypothesis = exp.hypothesis
   if (exp.status !== undefined) out.status = exp.status
@@ -177,8 +180,9 @@ export default function ExperimentTracker() {
       setShowAdd(false)
       setSelected(exp)
       toast('success', 'Experiment created')
-    } catch (err: any) {
-      toast('error', err?.message || 'Create failed', { title: 'Could not create experiment' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Create failed'
+      toast('error', msg, { title: 'Could not create experiment' })
     }
   }
 
@@ -193,13 +197,14 @@ export default function ExperimentTracker() {
       setExperiments(prev => prev.map(e => e.id === id ? updated : e))
       if (selected?.id === id) setSelected(updated)
       logActivity({ type: 'evidence', action: 'updated', title: `Updated experiment: ${previous?.title || id}` })
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Roll back to previous state if server rejects
       if (previous) {
         setExperiments(prev => prev.map(e => e.id === id ? previous : e))
         if (selected?.id === id) setSelected(previous)
       }
-      toast('error', err?.message || 'Update failed', { title: 'Could not save changes' })
+      const msg = err instanceof Error ? err.message : 'Update failed'
+      toast('error', msg, { title: 'Could not save changes' })
     }
   }
 
@@ -218,8 +223,9 @@ export default function ExperimentTracker() {
       logActivity({ type: 'project', action: 'deleted', title: `Deleted experiment: ${deletedExp?.title || id}` })
       if (selected?.id === id) setSelected(null)
       toast('success', `Deleted ${deletedExp?.title || 'experiment'}`)
-    } catch (err: any) {
-      toast('error', err?.message || 'Delete failed', { title: 'Could not delete' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Delete failed'
+      toast('error', msg, { title: 'Could not delete' })
     }
   }
 

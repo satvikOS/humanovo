@@ -1,5 +1,22 @@
 name: Deploy humanovo Infrastructure & Backend
 
+ claude/production-platform-analysis-30H5c
+# DISABLED — auto-trigger removed 2026-05-06. This workflow targets
+# the legacy `genup-*` AWS infrastructure in the OLD account, whose
+# credentials were rotated to the NEW business account on 2026-05-06.
+# Every push to humanovo OR a claude/* feature branch was firing this
+# workflow against creds that don't exist (and naming that doesn't
+# match the new infra), producing a failed run per push.
+#
+# Old infra is being decommissioned as part of the AWS-account migration
+# (see docs/planning/PRODUCTION_AUDIT_2026-05.md §10). Fresh `humanovo-*`
+# infra in the new account is provisioned by `bootstrap-aws-org.yml`
+# plus a future deploy-infra-prod variant.
+#
+# Until then this workflow is dispatch-only so it doesn't fire on every
+# commit. It'll be deleted entirely once Phase 7 (decommission old
+# account) lands.
+
 # DISABLED — auto-trigger removed 2026-05-05. This workflow targets
 # the legacy `genup-*` AWS infrastructure in the OLD account, whose
 # credentials are no longer in GitHub Secrets (the founder rotated
@@ -14,6 +31,7 @@ name: Deploy humanovo Infrastructure & Backend
 #
 # Until then this workflow is dispatch-only so it doesn't fire on
 # every commit. Eventually it'll be deleted.
+ humanovo
 
 on:
   workflow_dispatch:
@@ -115,28 +133,62 @@ jobs:
         working-directory: infrastructure/terraform
         continue-on-error: true
         run: |
+          # The DynamoDB lock item can end up in three states:
+          #   (a) absent          → no cleanup needed
+          #   (b) present + valid → parse the Info JSON for the LockID and
+          #                         use `terraform force-unlock`
+          #   (c) present + malformed Info → the case that produced
+          #       "Error releasing the state lock: failed to retrieve lock
+          #        info: unexpected end of JSON input" in CI. force-unlock
+          #       can't help because the LockID is unparseable; delete the
+          #       DynamoDB row directly so the next plan starts clean.
+          set -e
           echo "Checking for stale Terraform state locks..."
+          LOCK_KEY='genup-terraform-state/infrastructure/terraform.tfstate'
+
           LOCK_ITEM=$(aws dynamodb get-item \
             --table-name "$TF_LOCK_TABLE" \
-            --key '{"LockID": {"S": "genup-terraform-state/infrastructure/terraform.tfstate"}}' \
+            --key "{\"LockID\": {\"S\": \"$LOCK_KEY\"}}" \
             --output json 2>/dev/null || echo '{}')
 
-          LOCK_ID=$(echo "$LOCK_ITEM" | python3 -c "
+          # Three-way classify: missing | parseable | malformed.
+          STATUS=$(echo "$LOCK_ITEM" | python3 -c "
           import json, sys
           try:
-              item = json.load(sys.stdin)
-              info = json.loads(item.get('Item', {}).get('Info', {}).get('S', '{}'))
-              print(info.get('ID', ''))
+              item = json.load(sys.stdin).get('Item') or {}
+              if not item:
+                  print('missing')
+              else:
+                  info_raw = (item.get('Info') or {}).get('S') or ''
+                  try:
+                      info = json.loads(info_raw)
+                      lid = info.get('ID', '')
+                      print('valid:' + lid if lid else 'malformed')
+                  except Exception:
+                      print('malformed')
           except Exception:
-              print('')
-          " 2>/dev/null)
+              print('missing')
+          ")
 
-          if [ -n "$LOCK_ID" ]; then
-            echo "Found stale lock: $LOCK_ID — force-unlocking..."
-            terraform force-unlock -force "$LOCK_ID" || echo "Force-unlock returned non-zero (lock may already be released)"
-          else
-            echo "No stale lock found"
-          fi
+          case "$STATUS" in
+            missing)
+              echo "No stale lock found"
+              ;;
+            valid:*)
+              LOCK_ID="${STATUS#valid:}"
+              echo "Found stale lock: $LOCK_ID — force-unlocking..."
+              terraform force-unlock -force "$LOCK_ID" \
+                || echo "Force-unlock returned non-zero (lock may already be released)"
+              ;;
+            malformed)
+              echo "Found malformed lock item — deleting DynamoDB row directly"
+              aws dynamodb delete-item \
+                --table-name "$TF_LOCK_TABLE" \
+                --key "{\"LockID\": {\"S\": \"$LOCK_KEY\"}}" \
+                && echo "Deleted malformed lock item" \
+                || echo "Delete returned non-zero (item may already be gone)"
+              ;;
+          esac
 
       - name: Import Existing Resources
         working-directory: infrastructure/terraform
@@ -429,3 +481,29 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Lambda Functions Deployed" >> $GITHUB_STEP_SUMMARY
           echo "All Lambda handlers packaged from \`backend/lambda/handlers/\` and deployed." >> $GITHUB_STEP_SUMMARY
+
+      # Always run, even on failure: ensures we never leave a malformed
+      # lock item that would block the next run with
+      # "Error releasing the state lock: failed to retrieve lock info:
+      #  unexpected end of JSON input".
+      - name: Cleanup Stale Lock (always)
+        if: always()
+        continue-on-error: true
+        working-directory: infrastructure/terraform
+        run: |
+          set +e
+          LOCK_KEY='genup-terraform-state/infrastructure/terraform.tfstate'
+          LOCK_ITEM=$(aws dynamodb get-item \
+            --table-name "$TF_LOCK_TABLE" \
+            --key "{\"LockID\": {\"S\": \"$LOCK_KEY\"}}" \
+            --output json 2>/dev/null)
+          if [ -z "$LOCK_ITEM" ] || [ "$LOCK_ITEM" = "{}" ]; then
+            echo "Post-run: no lock to clean up"
+            exit 0
+          fi
+          echo "Post-run: lock row still present — deleting"
+          aws dynamodb delete-item \
+            --table-name "$TF_LOCK_TABLE" \
+            --key "{\"LockID\": {\"S\": \"$LOCK_KEY\"}}" \
+            && echo "Post-run: lock cleared" \
+            || echo "Post-run: delete returned non-zero (item may be gone)"

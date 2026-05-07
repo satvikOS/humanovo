@@ -88,8 +88,9 @@ function CreateProjectModal({ onClose, onCreate }: { onClose: () => void; onCrea
       })
       if (result === true) onClose()
       else setError(typeof result === 'string' ? result : 'Failed to create project. Open browser console (F12) for details.')
-    } catch (e: any) {
-      setError(e?.message || 'Failed to create project. Open browser console (F12) for details.')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to create project. Open browser console (F12) for details.'
+      setError(msg)
     } finally {
       setCreating(false)
     }
@@ -528,17 +529,18 @@ export default function Projects() {
       apiProjects.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
       setProjects(apiProjects)
       setApiStatus('connected')
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load projects:', err)
       setApiStatus('error')
-      const status = err?.response?.status
-      const ct = err?.response?.headers?.['content-type'] || ''
+      const e = err as { response?: { status?: number; headers?: Record<string, string>; data?: { detail?: string } }; message?: string }
+      const status = e?.response?.status
+      const ct = e?.response?.headers?.['content-type'] || ''
       if (ct.includes('text/html')) {
         setApiError('API Gateway not connected — CloudFront returning HTML instead of JSON. Run deploy-infra workflow.')
       } else if (status) {
-        setApiError(`API returned ${status}: ${err?.response?.data?.detail || err?.message}`)
+        setApiError(`API returned ${status}: ${e?.response?.data?.detail || e?.message}`)
       } else {
-        setApiError(`Cannot reach API: ${err?.message}`)
+        setApiError(`Cannot reach API: ${e?.message}`)
       }
     } finally {
       setLoading(false)
@@ -551,10 +553,11 @@ export default function Projects() {
       setProjects(prev => [project, ...prev])
       logActivity({ type: 'project', action: 'created', title: `Created project: ${project.name || data.name}`, project: project.name || data.name })
       return true
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Extract the real error for debugging
-      const status = err?.response?.status
-      const detail = err?.response?.data?.detail || err?.response?.data?.message || err?.message || String(err)
+      const e = err as { response?: { status?: number; data?: { detail?: string; message?: string } }; message?: string }
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail || e?.response?.data?.message || e?.message || String(err)
       const msg = status
         ? `API error ${status}: ${detail}`
         : `Network error: ${detail}`
@@ -580,9 +583,10 @@ export default function Projects() {
       setProjects(prev => prev.filter(p => p.id !== id))
       logActivity({ type: 'project', action: 'deleted', title: `Deleted project: ${deletedProject?.name || 'Unknown'}`, project: deletedProject?.name })
       toast('success', `Deleted ${deletedProject?.name || 'project'}`)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to delete project:', err)
-      toast('error', err?.message || 'Delete failed', { title: 'Could not delete' })
+      const msg = err instanceof Error ? err.message : 'Delete failed'
+      toast('error', msg, { title: 'Could not delete' })
     }
   }
 
@@ -598,9 +602,10 @@ export default function Projects() {
         project: previous?.name,
       })
       toast('success', `${restore ? 'Restored' : 'Archived'} ${previous?.name || 'project'}`)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to archive project:', err)
-      toast('error', err?.message || 'Archive failed', { title: 'Could not archive' })
+      const msg = err instanceof Error ? err.message : 'Archive failed'
+      toast('error', msg, { title: 'Could not archive' })
     }
   }, [projects])
 
@@ -626,8 +631,9 @@ export default function Projects() {
       setProjects(prev => prev.map(p => updatedSet.has(p.id) ? { ...p, status: res.status } : p))
       toast('success', `${restore ? 'Restored' : 'Archived'} ${res.updated_count} project${res.updated_count === 1 ? '' : 's'}`)
       exitSelectMode()
-    } catch (err: any) {
-      toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Bulk archive failed'
+      toast('error', msg, { title: 'Could not archive' })
     }
   }, [selectedIds, exitSelectMode])
 
@@ -641,8 +647,9 @@ export default function Projects() {
       setProjects(prev => prev.filter(p => !deletedSet.has(p.id)))
       toast('success', `Deleted ${res.deleted_count} project${res.deleted_count === 1 ? '' : 's'}`)
       exitSelectMode()
-    } catch (err: any) {
-      toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Bulk delete failed'
+      toast('error', msg, { title: 'Could not delete' })
     }
   }, [selectedIds, exitSelectMode])
 

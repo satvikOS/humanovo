@@ -28,7 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import assert_owns_project
 from app.models.citation import Citation, CitationFolder, CitationHighlight
+from app.models.user import User
 from app.citations_io import (
     parse_bibtex,
     parse_endnote,
@@ -40,9 +43,7 @@ from app.citations_io import (
 )
 
 logger = get_logger(__name__)
-router = APIRouter(tags=["citations"])
-
-
+router = APIRouter(tags=["citations"], dependencies=AUTH_REQUIRED)
 # ─── Schemas ─────────────────────────────────────────────────────
 
 
@@ -259,6 +260,22 @@ def _highlight_to_out(h: CitationHighlight) -> HighlightOut:
 # ─── Citations CRUD ──────────────────────────────────────────────
 
 
+async def _owned_citation_or_404(
+    db: AsyncSession, citation_id: UUID, current_user: User,
+) -> Citation:
+    """Look up a citation and confirm `current_user` owns it."""
+    result = await db.execute(
+        select(Citation).where(
+            Citation.id == citation_id,
+            Citation.owner_id == current_user.id,
+        )
+    )
+    c = result.scalar_one_or_none()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Citation not found")
+    return c
+
+
 @router.get("/citations", response_model=list[CitationOut])
 async def list_citations(
     q: str | None = Query(None, description="Search across title/authors/abstract/doi"),
@@ -272,8 +289,15 @@ async def list_citations(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> list[CitationOut]:
-    stmt = select(Citation).order_by(desc(Citation.starred), desc(Citation.updated_at)).limit(limit).offset(offset)
+    stmt = (
+        select(Citation)
+        .where(Citation.owner_id == current_user.id)
+        .order_by(desc(Citation.starred), desc(Citation.updated_at))
+        .limit(limit)
+        .offset(offset)
+    )
     if project_id is not None:
         stmt = stmt.where(Citation.project_id == project_id)
     if starred_only:
@@ -303,16 +327,28 @@ async def list_citations(
 
 
 @router.post("/citations", response_model=CitationOut, status_code=201)
-async def create_citation(body: CitationCreate, db: AsyncSession = Depends(get_db)) -> CitationOut:
+async def create_citation(
+    body: CitationCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CitationOut:
     data = body.model_dump(exclude_unset=False)
-    # Dedupe on DOI when one is provided — avoids library bloat from
-    # repeated imports of the same paper.
+    if data.get("project_id") is not None:
+        await assert_owns_project(db, data["project_id"], current_user)
+    # Dedupe per-user on DOI — avoids library bloat from repeated
+    # imports. Two different users with the same DOI keep separate
+    # rows.
     if data.get("doi"):
-        existing = await db.execute(select(Citation).where(Citation.doi == data["doi"]))
+        existing = await db.execute(
+            select(Citation).where(
+                Citation.doi == data["doi"],
+                Citation.owner_id == current_user.id,
+            )
+        )
         found = existing.scalar_one_or_none()
         if found is not None:
             return _to_out(found)
-    c = Citation(**data)
+    c = Citation(owner_id=current_user.id, **data)
     db.add(c)
     await db.commit()
     await db.refresh(c)
@@ -320,21 +356,26 @@ async def create_citation(body: CitationCreate, db: AsyncSession = Depends(get_d
 
 
 @router.get("/citations/{citation_id}", response_model=CitationOut)
-async def get_citation(citation_id: UUID, db: AsyncSession = Depends(get_db)) -> CitationOut:
-    result = await db.execute(select(Citation).where(Citation.id == citation_id))
-    c = result.scalar_one_or_none()
-    if c is None:
-        raise HTTPException(status_code=404, detail="Citation not found")
+async def get_citation(
+    citation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CitationOut:
+    c = await _owned_citation_or_404(db, citation_id, current_user)
     return _to_out(c)
 
 
 @router.patch("/citations/{citation_id}", response_model=CitationOut)
-async def update_citation(citation_id: UUID, body: CitationUpdate, db: AsyncSession = Depends(get_db)) -> CitationOut:
-    result = await db.execute(select(Citation).where(Citation.id == citation_id))
-    c = result.scalar_one_or_none()
-    if c is None:
-        raise HTTPException(status_code=404, detail="Citation not found")
+async def update_citation(
+    citation_id: UUID,
+    body: CitationUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> CitationOut:
+    c = await _owned_citation_or_404(db, citation_id, current_user)
     data = body.model_dump(exclude_unset=True)
+    if "project_id" in data and data["project_id"] is not None:
+        await assert_owns_project(db, data["project_id"], current_user)
     for k, v in data.items():
         setattr(c, k, v)
     await db.commit()
@@ -343,11 +384,12 @@ async def update_citation(citation_id: UUID, body: CitationUpdate, db: AsyncSess
 
 
 @router.delete("/citations/{citation_id}", status_code=204)
-async def delete_citation(citation_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(Citation).where(Citation.id == citation_id))
-    c = result.scalar_one_or_none()
-    if c is None:
-        raise HTTPException(status_code=404, detail="Citation not found")
+async def delete_citation(
+    citation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    c = await _owned_citation_or_404(db, citation_id, current_user)
     # Cascade highlights manually (no FK so we clean up here).
     await db.execute(
         CitationHighlight.__table__.delete().where(CitationHighlight.citation_id == citation_id)
@@ -361,13 +403,29 @@ class BulkDeleteBody(BaseModel):
 
 
 @router.post("/citations/bulk-delete", status_code=200)
-async def bulk_delete_citations(body: BulkDeleteBody, db: AsyncSession = Depends(get_db)) -> dict[str, int]:
+async def bulk_delete_citations(
+    body: BulkDeleteBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> dict[str, int]:
+    """Bulk-delete citations the caller owns. IDs the caller doesn't
+    own are silently skipped — no leak about which IDs exist."""
     if not body.ids:
         return {"deleted_count": 0}
-    await db.execute(
-        CitationHighlight.__table__.delete().where(CitationHighlight.citation_id.in_(body.ids))
+    # Limit the IN-list to rows the caller actually owns.
+    owned_rows = await db.execute(
+        select(Citation.id).where(
+            Citation.id.in_(body.ids),
+            Citation.owner_id == current_user.id,
+        )
     )
-    res = await db.execute(Citation.__table__.delete().where(Citation.id.in_(body.ids)))
+    owned_ids = [row[0] for row in owned_rows.all()]
+    if not owned_ids:
+        return {"deleted_count": 0}
+    await db.execute(
+        CitationHighlight.__table__.delete().where(CitationHighlight.citation_id.in_(owned_ids))
+    )
+    res = await db.execute(Citation.__table__.delete().where(Citation.id.in_(owned_ids)))
     await db.commit()
     return {"deleted_count": res.rowcount or 0}
 
@@ -375,12 +433,32 @@ async def bulk_delete_citations(body: BulkDeleteBody, db: AsyncSession = Depends
 # ─── Folders ─────────────────────────────────────────────────────
 
 
+async def _owned_folder_or_404(
+    db: AsyncSession, folder_id: UUID, current_user: User,
+) -> CitationFolder:
+    result = await db.execute(
+        select(CitationFolder).where(
+            CitationFolder.id == folder_id,
+            CitationFolder.owner_id == current_user.id,
+        )
+    )
+    f = result.scalar_one_or_none()
+    if f is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return f
+
+
 @router.get("/citation-folders", response_model=list[FolderOut])
 async def list_folders(
     project_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> list[FolderOut]:
-    stmt = select(CitationFolder).order_by(CitationFolder.order_index, CitationFolder.name)
+    stmt = (
+        select(CitationFolder)
+        .where(CitationFolder.owner_id == current_user.id)
+        .order_by(CitationFolder.order_index, CitationFolder.name)
+    )
     if project_id is not None:
         stmt = stmt.where(CitationFolder.project_id == project_id)
     result = await db.execute(stmt)
@@ -388,8 +466,18 @@ async def list_folders(
 
 
 @router.post("/citation-folders", response_model=FolderOut, status_code=201)
-async def create_folder(body: FolderCreate, db: AsyncSession = Depends(get_db)) -> FolderOut:
-    f = CitationFolder(**body.model_dump())
+async def create_folder(
+    body: FolderCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> FolderOut:
+    data = body.model_dump()
+    if data.get("project_id") is not None:
+        await assert_owns_project(db, data["project_id"], current_user)
+    if data.get("parent_id") is not None:
+        # Verify the parent folder belongs to the caller too.
+        await _owned_folder_or_404(db, data["parent_id"], current_user)
+    f = CitationFolder(owner_id=current_user.id, **data)
     db.add(f)
     await db.commit()
     await db.refresh(f)
@@ -397,12 +485,17 @@ async def create_folder(body: FolderCreate, db: AsyncSession = Depends(get_db)) 
 
 
 @router.patch("/citation-folders/{folder_id}", response_model=FolderOut)
-async def update_folder(folder_id: UUID, body: FolderUpdate, db: AsyncSession = Depends(get_db)) -> FolderOut:
-    result = await db.execute(select(CitationFolder).where(CitationFolder.id == folder_id))
-    f = result.scalar_one_or_none()
-    if f is None:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+async def update_folder(
+    folder_id: UUID,
+    body: FolderUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> FolderOut:
+    f = await _owned_folder_or_404(db, folder_id, current_user)
+    data = body.model_dump(exclude_unset=True)
+    if "parent_id" in data and data["parent_id"] is not None:
+        await _owned_folder_or_404(db, data["parent_id"], current_user)
+    for k, v in data.items():
         setattr(f, k, v)
     await db.commit()
     await db.refresh(f)
@@ -410,20 +503,29 @@ async def update_folder(folder_id: UUID, body: FolderUpdate, db: AsyncSession = 
 
 
 @router.delete("/citation-folders/{folder_id}", status_code=204)
-async def delete_folder(folder_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(CitationFolder).where(CitationFolder.id == folder_id))
-    f = result.scalar_one_or_none()
-    if f is None:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    # Reparent any children to this folder's parent (preserves tree
-    # rather than orphaning).
+async def delete_folder(
+    folder_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    f = await _owned_folder_or_404(db, folder_id, current_user)
+    # Reparent any children (within the same owner's tree) to this
+    # folder's parent — preserves tree rather than orphaning.
     await db.execute(
         CitationFolder.__table__.update()
-        .where(CitationFolder.parent_id == folder_id)
+        .where(
+            CitationFolder.parent_id == folder_id,
+            CitationFolder.owner_id == current_user.id,
+        )
         .values(parent_id=f.parent_id)
     )
-    # Remove the folder from every citation's folders array.
-    rows = await db.execute(select(Citation).where(Citation.folders.contains([str(folder_id)])))
+    # Remove the folder from every owned citation's folders array.
+    rows = await db.execute(
+        select(Citation).where(
+            Citation.folders.contains([str(folder_id)]),
+            Citation.owner_id == current_user.id,
+        )
+    )
     for c in rows.scalars().all():
         c.folders = [fid for fid in (c.folders or []) if fid != str(folder_id)]
     await db.delete(f)
@@ -433,17 +535,51 @@ async def delete_folder(folder_id: UUID, db: AsyncSession = Depends(get_db)) -> 
 # ─── Highlights ─────────────────────────────────────────────────
 
 
+async def _owned_highlight_or_404(
+    db: AsyncSession, highlight_id: UUID, current_user: User,
+) -> CitationHighlight:
+    """Look up a highlight whose parent Citation belongs to the caller."""
+    result = await db.execute(
+        select(CitationHighlight)
+        .join(Citation, Citation.id == CitationHighlight.citation_id)
+        .where(
+            CitationHighlight.id == highlight_id,
+            Citation.owner_id == current_user.id,
+        )
+    )
+    h = result.scalar_one_or_none()
+    if h is None:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    return h
+
+
 @router.get("/citations/{citation_id}/highlights", response_model=list[HighlightOut])
-async def list_highlights(citation_id: UUID, db: AsyncSession = Depends(get_db)) -> list[HighlightOut]:
-    stmt = select(CitationHighlight).where(CitationHighlight.citation_id == citation_id).order_by(CitationHighlight.page, CitationHighlight.created_at)
+async def list_highlights(
+    citation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> list[HighlightOut]:
+    # Verify ownership of the parent citation first.
+    await _owned_citation_or_404(db, citation_id, current_user)
+    stmt = (
+        select(CitationHighlight)
+        .where(CitationHighlight.citation_id == citation_id)
+        .order_by(CitationHighlight.page, CitationHighlight.created_at)
+    )
     result = await db.execute(stmt)
     return [_highlight_to_out(h) for h in result.scalars().all()]
 
 
 @router.post("/citations/{citation_id}/highlights", response_model=HighlightOut, status_code=201)
-async def create_highlight(citation_id: UUID, body: HighlightCreate, db: AsyncSession = Depends(get_db)) -> HighlightOut:
+async def create_highlight(
+    citation_id: UUID,
+    body: HighlightCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> HighlightOut:
     if body.citation_id != citation_id:
         raise HTTPException(status_code=400, detail="citation_id in body and path must match")
+    await _owned_citation_or_404(db, citation_id, current_user)
     h = CitationHighlight(**body.model_dump())
     db.add(h)
     await db.commit()
@@ -452,11 +588,13 @@ async def create_highlight(citation_id: UUID, body: HighlightCreate, db: AsyncSe
 
 
 @router.patch("/citation-highlights/{highlight_id}", response_model=HighlightOut)
-async def update_highlight(highlight_id: UUID, body: HighlightUpdate, db: AsyncSession = Depends(get_db)) -> HighlightOut:
-    result = await db.execute(select(CitationHighlight).where(CitationHighlight.id == highlight_id))
-    h = result.scalar_one_or_none()
-    if h is None:
-        raise HTTPException(status_code=404, detail="Highlight not found")
+async def update_highlight(
+    highlight_id: UUID,
+    body: HighlightUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> HighlightOut:
+    h = await _owned_highlight_or_404(db, highlight_id, current_user)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(h, k, v)
     await db.commit()
@@ -465,11 +603,12 @@ async def update_highlight(highlight_id: UUID, body: HighlightUpdate, db: AsyncS
 
 
 @router.delete("/citation-highlights/{highlight_id}", status_code=204)
-async def delete_highlight(highlight_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(CitationHighlight).where(CitationHighlight.id == highlight_id))
-    h = result.scalar_one_or_none()
-    if h is None:
-        raise HTTPException(status_code=404, detail="Highlight not found")
+async def delete_highlight(
+    highlight_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    h = await _owned_highlight_or_404(db, highlight_id, current_user)
     await db.delete(h)
     await db.commit()
 
@@ -478,12 +617,18 @@ async def delete_highlight(highlight_id: UUID, db: AsyncSession = Depends(get_db
 
 
 @router.post("/citations/import", response_model=ImportResponse)
-async def import_citations(body: ImportBody, db: AsyncSession = Depends(get_db)) -> ImportResponse:
-    """
-    Import a batch of citations from BibTeX / RIS / CSL-JSON / EndNote
-    text. Dedupes on DOI: entries whose DOI already exists in the
-    library are counted as skipped.
-    """
+async def import_citations(
+    body: ImportBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ImportResponse:
+    """Import a batch of citations into the caller's library from
+    BibTeX / RIS / CSL-JSON / EndNote text. Per-user DOI dedupe:
+    entries whose DOI already exists in this caller's library are
+    skipped, but other users' libraries don't collide."""
+    if body.project_id is not None:
+        await assert_owns_project(db, body.project_id, current_user)
+
     fmt = body.format.lower()
     try:
         if fmt == "bibtex":
@@ -506,12 +651,16 @@ async def import_citations(body: ImportBody, db: AsyncSession = Depends(get_db))
     if not parsed:
         return ImportResponse(imported=0, skipped_duplicates=0, citations=[])
 
-    # Existing DOIs in the library — single query so we don't hit the
-    # DB for each incoming row.
+    # Existing DOIs in THIS caller's library only — per-user dedupe.
     existing_dois = set()
     dois = [p.get("doi") for p in parsed if p.get("doi")]
     if dois:
-        result = await db.execute(select(Citation.doi).where(Citation.doi.in_(dois)))
+        result = await db.execute(
+            select(Citation.doi).where(
+                Citation.doi.in_(dois),
+                Citation.owner_id == current_user.id,
+            )
+        )
         existing_dois = {row[0] for row in result.all() if row[0]}
 
     imported: list[Citation] = []
@@ -534,7 +683,7 @@ async def import_citations(body: ImportBody, db: AsyncSession = Depends(get_db))
         clean = {k: v for k, v in p.items() if k in allowed}
         if not clean.get("title"):
             clean["title"] = "(untitled)"
-        c = Citation(**clean)
+        c = Citation(owner_id=current_user.id, **clean)
         db.add(c)
         imported.append(c)
     await db.commit()
@@ -548,9 +697,14 @@ async def import_citations(body: ImportBody, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/citations/export")
-async def export_citations(body: ExportBody, db: AsyncSession = Depends(get_db)):
-    """Export selected citations (or all) as BibTeX / RIS / CSL-JSON."""
-    stmt = select(Citation)
+async def export_citations(
+    body: ExportBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Export the caller's citations (or a selection) as BibTeX / RIS
+    / CSL-JSON. Cross-tenant IDs in body.ids are silently ignored."""
+    stmt = select(Citation).where(Citation.owner_id == current_user.id)
     if body.project_id is not None:
         stmt = stmt.where(Citation.project_id == body.project_id)
     if body.ids:
@@ -574,6 +728,7 @@ async def import_citations_file(
     format: str = Form(...),
     project_id: UUID | None = Form(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> ImportResponse:
     """Multipart variant of /citations/import — same parser, just accepts a file."""
     data = await file.read()
@@ -581,4 +736,6 @@ async def import_citations_file(
         text = data.decode("utf-8", errors="replace")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Could not decode file: {e}")
-    return await import_citations(ImportBody(format=format, text=text, project_id=project_id), db)
+    return await import_citations(
+        ImportBody(format=format, text=text, project_id=project_id), db, current_user,
+    )

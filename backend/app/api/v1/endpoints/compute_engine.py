@@ -21,6 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.compute.types import (
     ComputeDomain,
     ComputeRequest,
@@ -31,9 +32,7 @@ from app.compute.types import (
 )
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/compute-engine", tags=["compute-engine"])
-
-
+router = APIRouter(prefix="/compute-engine", tags=["compute-engine"], dependencies=AUTH_REQUIRED)
 # ── Request / Response Schemas ───────────────────────────────────
 
 

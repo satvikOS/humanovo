@@ -16,13 +16,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.auth import AUTH_REQUIRED
 from app.models.platform_entities import Manuscript
 from app.api.v1.endpoints._bulk import attach_bulk_delete, attach_bulk_archive
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
-
-
+router = APIRouter(dependencies=AUTH_REQUIRED)
 JOURNAL_TEMPLATES = {
     "Nature Medicine": {"max_words": 5000, "abstract_max": 150, "format": "nature", "reference_style": "numbered"},
     "NEJM": {"max_words": 2500, "abstract_max": 250, "format": "nejm", "reference_style": "numbered"},

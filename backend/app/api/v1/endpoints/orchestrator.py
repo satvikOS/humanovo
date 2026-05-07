@@ -10,12 +10,15 @@ import asyncio
 import json
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED, authenticate_websocket
 from app.agents.discovery_orchestrator import (
     DiscoveryOrchestrator,
     DiscoveryOrchestratorStats,
@@ -26,8 +29,7 @@ from app.agents.discovery_orchestrator import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/orchestrator", tags=["orchestrator"])
-
+router = APIRouter(prefix="/orchestrator", tags=["orchestrator"], dependencies=AUTH_REQUIRED)
 # Async paper generation state
 _paper_status: str = "idle"  # idle | generating | done | failed
 _paper_result: Optional[str] = None
@@ -831,7 +833,10 @@ async def orchestrator_health():
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    db: AsyncSession = Depends(get_db),
+):
     """
     WebSocket endpoint for real-time discovery updates.
 
@@ -841,6 +846,9 @@ async def websocket_endpoint(websocket: WebSocket):
     - state_change: State changed (running/paused/stopped)
     - paper_ready: Research paper generation complete
     """
+    user = await authenticate_websocket(websocket, db)
+    if user is None:
+        return
     await manager.connect(websocket)
 
     try:

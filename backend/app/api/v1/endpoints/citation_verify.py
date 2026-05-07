@@ -20,9 +20,10 @@ import json as _json
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from app.core.auth import AUTH_REQUIRED
 
 
-router = APIRouter()
+router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
 class CitationVerifyRequest(BaseModel):

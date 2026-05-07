@@ -16,14 +16,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import (
+    assert_owns_project,
+    fetch_owned_or_404,
+    filter_by_owned_project,
+)
 from app.models.agent_task import (
     AgentTask,
     AgentTaskStatus as AgentTaskStatusModel,
     AgentTaskType as AgentTaskTypeModel,
 )
+from app.models.user import User
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
 class AgentType(str, Enum):
@@ -197,8 +204,10 @@ async def create_agent_task(
     task: AgentTaskCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> AgentTaskResponse:
-    """Create and start a new agent task."""
+    """Create and start a new agent task under one of the caller's projects."""
+    await assert_owns_project(db, task.project_id, current_user)
     logger.info(
         "Creating agent task",
         task_type=task.task_type,
@@ -304,35 +313,29 @@ async def list_agent_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> AgentTaskListResponse:
-    """List agent tasks with filtering and pagination."""
-    # Build query
-    query = select(AgentTask)
+    """List the caller's agent tasks (across owned projects) with
+    filtering and pagination."""
+    query = filter_by_owned_project(select(AgentTask), AgentTask, current_user)
+    count_query = filter_by_owned_project(
+        select(func.count(AgentTask.id)), AgentTask, current_user,
+    )
 
-    # Apply filters
     if project_id:
         query = query.where(AgentTask.project_id == project_id)
-    if status:
-        query = query.where(AgentTask.status == AgentTaskStatusModel(status.value))
-    if task_type:
-        query = query.where(AgentTask.task_type == map_task_type(task_type))
-
-    # Get total count
-    count_query = select(func.count()).select_from(AgentTask)
-    if project_id:
         count_query = count_query.where(AgentTask.project_id == project_id)
     if status:
+        query = query.where(AgentTask.status == AgentTaskStatusModel(status.value))
         count_query = count_query.where(AgentTask.status == AgentTaskStatusModel(status.value))
     if task_type:
+        query = query.where(AgentTask.task_type == map_task_type(task_type))
         count_query = count_query.where(AgentTask.task_type == map_task_type(task_type))
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Sort by created_at descending
     query = query.order_by(desc(AgentTask.created_at))
-
-    # Paginate
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
 
@@ -351,15 +354,10 @@ async def list_agent_tasks(
 async def get_agent_task(
     task_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> AgentTaskResponse:
-    """Get a specific agent task by ID."""
-    query = select(AgentTask).where(AgentTask.id == task_id)
-    result = await db.execute(query)
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
+    """Get one of the caller's agent tasks by ID."""
+    task = await fetch_owned_or_404(db, AgentTask, task_id, current_user)
     return task_to_response(task)
 
 
@@ -367,14 +365,10 @@ async def get_agent_task(
 async def cancel_agent_task(
     task_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> AgentTaskResponse:
-    """Cancel a running agent task."""
-    query = select(AgentTask).where(AgentTask.id == task_id)
-    result = await db.execute(query)
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    """Cancel one of the caller's running agent tasks."""
+    task = await fetch_owned_or_404(db, AgentTask, task_id, current_user)
 
     if task.is_terminal():
         raise HTTPException(
@@ -395,14 +389,10 @@ async def retry_agent_task(
     task_id: UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> AgentTaskResponse:
-    """Retry a failed agent task."""
-    query = select(AgentTask).where(AgentTask.id == task_id)
-    result = await db.execute(query)
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    """Retry one of the caller's failed agent tasks."""
+    task = await fetch_owned_or_404(db, AgentTask, task_id, current_user)
 
     if not task.can_retry():
         raise HTTPException(
@@ -435,14 +425,10 @@ async def retry_agent_task(
 async def delete_agent_task(
     task_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> None:
-    """Delete an agent task."""
-    query = select(AgentTask).where(AgentTask.id == task_id)
-    result = await db.execute(query)
-    task = result.scalar_one_or_none()
-
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    """Delete one of the caller's agent tasks."""
+    task = await fetch_owned_or_404(db, AgentTask, task_id, current_user)
 
     await db.delete(task)
     await db.commit()

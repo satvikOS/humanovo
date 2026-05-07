@@ -30,6 +30,11 @@ openai>=1.55.0
 # boto3 — required for AWS Bedrock (Claude Opus/Sonnet, Cohere Embed v3)
 boto3>=1.35.0
 
+# moto — AWS service mocks for tests (Secrets Manager round-trip,
+# rotation Lambda harness). Pinned major version 5+ for the unified
+# `from moto import mock_aws` import surface.
+moto[secretsmanager]>=5.0.0
+
 # ─── AI/ML Orchestration ────────────────────────────────────────
 langchain>=0.3.0
 langchain-openai>=0.2.0
@@ -101,6 +106,14 @@ structlog>=24.4.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 email-validator>=2.2.0
+
+# ─── Billing (Stripe) ────────────────────────────────────────────
+# Used by app.services.stripe_service for Checkout + Customer Portal
+# session creation, webhook signature verification, and subscription
+# state translation to UserTier. Pinned major version 11+ which has
+# the modern object types we use (CheckoutSession, BillingPortalSession,
+# Webhook.construct_event signature).
+stripe>=11.0.0,<13.0.0
 
 # ─── Testing ────────────────────────────────────────────────────
 pytest>=8.3.0

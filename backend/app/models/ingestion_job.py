@@ -57,6 +57,14 @@ class IngestionJob(BaseModel):
 
     __tablename__ = "ingestion_jobs"
 
+    # Owner — see migration 016_owner_id_on_notebook_activity_ingestion.
+    owner_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     # Job metadata
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)

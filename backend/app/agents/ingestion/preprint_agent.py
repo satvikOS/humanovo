@@ -9,7 +9,8 @@ import hashlib
 from datetime import date, datetime, timedelta
 from typing import Any
 
-import aiohttp
+import httpx
+from app.core.http_allowlist import make_httpx_client
 
 from app.agents.ingestion.base import (
     IngestionAgent,
@@ -71,19 +72,19 @@ class PreprintIngestionAgent(IngestionAgent):
         config = config or PreprintConfig()
         super().__init__(config=config, **kwargs)
         self.preprint_config: PreprintConfig = config
-        self._session: aiohttp.ClientSession | None = None
+        self._session: httpx.AsyncClient | None = None
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create HTTP session."""
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=60)
-            self._session = aiohttp.ClientSession(timeout=timeout)
+    async def _get_session(self) -> httpx.AsyncClient:
+        """Get or create the SSRF-allowlisted httpx client."""
+        if self._session is None:
+            self._session = make_httpx_client(timeout=60.0, follow_redirects=True)
         return self._session
 
     async def _close_session(self) -> None:
-        """Close HTTP session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+        """Close the httpx client."""
+        if self._session is not None:
+            await self._session.aclose()
+            self._session = None
 
     async def _fetch_by_date_range(
         self,
@@ -109,9 +110,9 @@ class PreprintIngestionAgent(IngestionAgent):
         url = f"{self.BIORXIV_API}/details/{server}/{start_str}/{end_str}/{cursor}"
 
         try:
-            async with session.get(url) as response:
-                response.raise_for_status()
-                data = await response.json()
+            response = await session.get(url)
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
@@ -133,7 +134,7 @@ class PreprintIngestionAgent(IngestionAgent):
 
             return collection, total_count
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error(f"{server} API error", error=str(e))
             raise
 
@@ -171,9 +172,9 @@ class PreprintIngestionAgent(IngestionAgent):
         }
 
         try:
-            async with session.get(self.CROSSREF_API, params=params) as response:
-                response.raise_for_status()
-                data = await response.json()
+            response = await session.get(self.CROSSREF_API, params=params)
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
@@ -183,7 +184,7 @@ class PreprintIngestionAgent(IngestionAgent):
 
             return items, total_count
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("CrossRef API error", error=str(e))
             raise
 
@@ -449,11 +450,11 @@ class PreprintIngestionAgent(IngestionAgent):
             url = f"{self.BIORXIV_API}/details/{server}/{doi}"
 
             try:
-                async with session.get(url) as response:
-                    if response.status == 404:
-                        continue
-                    response.raise_for_status()
-                    data = await response.json()
+                response = await session.get(url)
+                if response.status_code == 404:
+                    continue
+                response.raise_for_status()
+                data = response.json()
 
                 self.state.metrics.api_calls_made += 1
 
@@ -463,19 +464,19 @@ class PreprintIngestionAgent(IngestionAgent):
                     latest = max(collection, key=lambda x: int(x.get("version", 0)))
                     return self._biorxiv_to_record(latest, server)
 
-            except aiohttp.ClientError:
+            except httpx.HTTPError:
                 continue
 
         # Fallback to CrossRef
         try:
             crossref_url = f"{self.CROSSREF_API}/{doi}"
-            async with session.get(crossref_url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    item = data.get("message", {})
-                    if item:
-                        return self._crossref_to_record(item)
-        except aiohttp.ClientError:
+            response = await session.get(crossref_url)
+            if response.status_code == 200:
+                data = response.json()
+                item = data.get("message", {})
+                if item:
+                    return self._crossref_to_record(item)
+        except httpx.HTTPError:
             pass
 
         return None

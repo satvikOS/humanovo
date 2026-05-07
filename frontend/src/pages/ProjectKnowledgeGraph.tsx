@@ -249,7 +249,7 @@ export default function ProjectKnowledgeGraph() {
             'text-outline-color': '#0f172a',
             'text-wrap': 'ellipsis',
             'text-max-width': '80px',
-          } as any,
+          } as Record<string, unknown>,
         },
         {
           selector: 'node:selected',
@@ -283,7 +283,7 @@ export default function ProjectKnowledgeGraph() {
             'text-margin-y': -8,
             'text-outline-width': 2,
             'text-outline-color': '#0f172a',
-          } as any,
+          } as Record<string, unknown>,
         },
         {
           selector: 'edge:selected',
@@ -303,7 +303,7 @@ export default function ProjectKnowledgeGraph() {
         edgeLength: 150,
         fit: true,
         padding: 40,
-      } as any,
+      } as unknown as cytoscape.LayoutOptions,
     })
 
     // Node click handler

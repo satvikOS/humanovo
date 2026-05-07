@@ -16,9 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import assert_owns_project, filter_by_owned_project
+from app.models.user import User
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
 def _get_project_model():
@@ -101,9 +104,13 @@ def project_to_response(project) -> ProjectResponse:
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
-async def create_project(project: ProjectCreate, db: AsyncSession = Depends(get_db)) -> ProjectResponse:
-    """Create a new research project."""
-    logger.info("Creating new project", name=project.name)
+async def create_project(
+    project: ProjectCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ProjectResponse:
+    """Create a new research project owned by the caller."""
+    logger.info("Creating new project", name=project.name, owner_id=str(current_user.id))
     Project, ProjectStatus = _get_project_model()
 
     db_project = Project(
@@ -113,6 +120,7 @@ async def create_project(project: ProjectCreate, db: AsyncSession = Depends(get_
         research_question=project.research_question,
         tags=project.tags,
         status=ProjectStatus.ACTIVE,
+        owner_id=current_user.id,
     )
     db.add(db_project)
     await db.flush()
@@ -128,11 +136,12 @@ async def list_projects(
     search: str | None = None,
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> ProjectListResponse:
-    """List all projects with pagination."""
+    """List the caller's projects with pagination."""
     Project, ProjectStatus = _get_project_model()
 
-    query = select(Project)
+    query = select(Project).where(Project.owner_id == current_user.id)
     if search:
         search_filter = f"%{search}%"
         query = query.where(
@@ -167,22 +176,41 @@ async def list_projects(
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -> ProjectResponse:
-    """Get a specific project by ID, including its hypotheses."""
+async def get_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ProjectResponse:
+    """Get one of the caller's projects by ID, including its hypotheses.
+
+    Returns 404 (not 403) on a non-owned project so callers can't probe
+    for the existence of someone else's IDs.
+    """
     Project, ProjectStatus = _get_project_model()
 
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Fetch hypotheses linked to this project
+    # Fetch hypotheses linked to this project. The Project ownership
+    # join is redundant given the explicit project ownership check
+    # above, but kept as defense-in-depth so the query stays safe if
+    # the upstream check is ever refactored.
     hypotheses_list = None
     try:
         from app.models.hypothesis import Hypothesis
-        hyp_result = await db.execute(
-            select(Hypothesis).where(Hypothesis.project_id == project_id)
+        hyp_query = filter_by_owned_project(
+            select(Hypothesis).where(Hypothesis.project_id == project_id),
+            Hypothesis,
+            current_user,
         )
+        hyp_result = await db.execute(hyp_query)
         db_hypotheses = hyp_result.scalars().all()
         if db_hypotheses:
             hypotheses_list = []
@@ -210,11 +238,21 @@ async def get_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -> P
 
 
 @router.patch("/{project_id}", response_model=ProjectResponse)
-async def update_project(project_id: UUID, project_update: ProjectUpdate, db: AsyncSession = Depends(get_db)) -> ProjectResponse:
-    """Update a project."""
+async def update_project(
+    project_id: UUID,
+    project_update: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ProjectResponse:
+    """Update one of the caller's projects."""
     Project, ProjectStatus = _get_project_model()
 
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -235,11 +273,20 @@ async def update_project(project_id: UUID, project_update: ProjectUpdate, db: As
 
 
 @router.delete("/{project_id}", status_code=204)
-async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    """Delete a project."""
+async def delete_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    """Delete one of the caller's projects."""
     Project, _ = _get_project_model()
 
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -262,16 +309,21 @@ class BulkIds(BaseModel):
 async def bulk_delete_projects(
     body: BulkIds,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict:
-    """Delete multiple projects in a single round-trip.
+    """Delete multiple of the caller's projects in one round-trip.
 
-    Returns the list of IDs that were actually found + deleted. IDs not
-    present in the database are silently skipped (idempotent — calling
-    twice with the same IDs on the second call returns an empty
-    `deleted` list rather than 404).
+    Idempotent. IDs the caller doesn't own are silently skipped (same
+    response shape as IDs that don't exist) — no leak about whether
+    the ID belongs to someone else.
     """
     Project, _ = _get_project_model()
-    result = await db.execute(select(Project).where(Project.id.in_(body.ids)))
+    result = await db.execute(
+        select(Project).where(
+            Project.id.in_(body.ids),
+            Project.owner_id == current_user.id,
+        )
+    )
     projects = result.scalars().all()
     found_ids = [str(p.id) for p in projects]
     for p in projects:
@@ -285,18 +337,24 @@ async def bulk_archive_projects(
     body: BulkIds,
     restore: bool = Query(False, description="If true, restore archived projects back to 'active'"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> dict:
-    """Archive (or restore) multiple projects in a single round-trip.
+    """Archive (or restore) multiple of the caller's projects.
 
     Defaults to archiving. Pass `?restore=true` to flip archived
-    projects back to active — pairs nicely with an `archived` filter in
-    the UI list to give a soft-delete / undo experience.
+    projects back to active. IDs the caller doesn't own are silently
+    skipped.
     """
     Project, ProjectStatus = _get_project_model()
     if not ProjectStatus:
         raise HTTPException(status_code=500, detail="ProjectStatus enum unavailable")
 
-    result = await db.execute(select(Project).where(Project.id.in_(body.ids)))
+    result = await db.execute(
+        select(Project).where(
+            Project.id.in_(body.ids),
+            Project.owner_id == current_user.id,
+        )
+    )
     projects = result.scalars().all()
     target = ProjectStatus.ACTIVE if restore else ProjectStatus.ARCHIVED
     updated_ids: list[str] = []
@@ -313,11 +371,20 @@ async def bulk_archive_projects(
 
 
 @router.get("/{project_id}/stats")
-async def get_project_stats(project_id: UUID, db: AsyncSession = Depends(get_db)) -> dict:
-    """Get statistics for a project."""
+async def get_project_stats(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> dict:
+    """Get statistics for one of the caller's projects."""
     Project, ProjectStatus = _get_project_model()
 
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -355,13 +422,21 @@ class DiscoveryConfig(BaseModel):
 
 
 @router.patch("/{project_id}/lab-profile")
-async def update_lab_profile(project_id: UUID, profile: LabProfile, db: AsyncSession = Depends(get_db)):
-    """Update the lab capability profile for a project."""
+async def update_lab_profile(
+    project_id: UUID,
+    profile: LabProfile,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Update the lab capability profile for one of the caller's projects."""
     Project, _ = _get_project_model()
     from sqlalchemy import update
     result = await db.execute(
         update(Project)
-        .where(Project.id == project_id)
+        .where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
         .values(lab_profile=profile.model_dump())
         .returning(Project.id)
     )
@@ -373,10 +448,19 @@ async def update_lab_profile(project_id: UUID, profile: LabProfile, db: AsyncSes
 
 
 @router.get("/{project_id}/lab-profile")
-async def get_lab_profile(project_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Get the lab capability profile for a project."""
+async def get_lab_profile(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get the lab capability profile for one of the caller's projects."""
     Project, _ = _get_project_model()
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -384,13 +468,22 @@ async def get_lab_profile(project_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{project_id}/discovery-config")
-async def update_discovery_config(project_id: UUID, config: DiscoveryConfig, db: AsyncSession = Depends(get_db)):
-    """Update the default discovery configuration for a project."""
+async def update_discovery_config(
+    project_id: UUID,
+    config: DiscoveryConfig,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Update the default discovery configuration for one of the
+    caller's projects."""
     Project, _ = _get_project_model()
     from sqlalchemy import update
     result = await db.execute(
         update(Project)
-        .where(Project.id == project_id)
+        .where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
         .values(discovery_config=config.model_dump())
         .returning(Project.id)
     )
@@ -402,11 +495,18 @@ async def update_discovery_config(project_id: UUID, config: DiscoveryConfig, db:
 
 
 @router.get("/{project_id}/discovery-config")
-async def get_discovery_config(project_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Get the discovery configuration for a project."""
+async def get_discovery_config(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get the discovery configuration for one of the caller's projects."""
     Project, _ = _get_project_model()
     result = await db.execute(
-        select(Project.discovery_config).where(Project.id == project_id)
+        select(Project.discovery_config).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id,
+        )
     )
     row = result.scalar_one_or_none()
     if row is None:
@@ -423,6 +523,7 @@ async def get_discovery_config(project_id: UUID, db: AsyncSession = Depends(get_
 async def get_project_knowledge_graph(
     project_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Return nodes + edges for the project-scoped knowledge subgraph.
 
@@ -430,10 +531,7 @@ async def get_project_knowledge_graph(
     entity tagging is wired up — this prevents 404s in the frontend
     and lets the page render the empty-state UX rather than crash.
     """
-    Project, _ = _get_project_model()
-    proj = await db.execute(select(Project).where(Project.id == project_id))
-    if proj.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    await assert_owns_project(db, project_id, current_user)
     return {
         "nodes": [],
         "edges": [],
@@ -447,12 +545,10 @@ async def get_project_knowledge_graph_neighbors(
     project_id: UUID,
     node_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """N-hop neighborhood of a single node within the project subgraph."""
-    Project, _ = _get_project_model()
-    proj = await db.execute(select(Project).where(Project.id == project_id))
-    if proj.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    await assert_owns_project(db, project_id, current_user)
     return {
         "node_id": node_id,
         "project_id": str(project_id),

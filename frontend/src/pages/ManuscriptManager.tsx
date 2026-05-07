@@ -11,10 +11,11 @@ import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
 import api from '../services/api'
 
+interface SubmissionHistoryEntry { id: string; journal: string; status: string; submitted_at: string }
 interface Manuscript {
   id: string; title: string; status: string; journal_target: string
   sections: Record<string, string>; authors: Author[]; keywords: string[]
-  submission_history: any[]; word_count: number; created_at: string; updated_at: string
+  submission_history: SubmissionHistoryEntry[]; word_count: number; created_at: string; updated_at: string
 }
 interface Author { id: string; name: string; affiliation: string; email: string; role: string; order: number }
 
@@ -222,8 +223,9 @@ export default function ManuscriptManager() {
                 toast('success', `Archived ${res.updated_count} manuscript${res.updated_count === 1 ? '' : 's'}`)
                 load()
                 setSelectMode(false); setSelectedIds(new Set())
-              } catch (err: any) {
-                toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : 'Bulk archive failed'
+                toast('error', msg, { title: 'Could not archive' })
               }
             }}
             onRestore={async () => {
@@ -232,8 +234,9 @@ export default function ManuscriptManager() {
                 toast('success', `Restored ${res.updated_count} manuscript${res.updated_count === 1 ? '' : 's'}`)
                 load()
                 setSelectMode(false); setSelectedIds(new Set())
-              } catch (err: any) {
-                toast('error', err?.message || 'Bulk restore failed', { title: 'Could not restore' })
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : 'Bulk restore failed'
+                toast('error', msg, { title: 'Could not restore' })
               }
             }}
             onDelete={() => setBulkDeleteConfirm(true)}
@@ -353,7 +356,7 @@ export default function ManuscriptManager() {
               {selected.submission_history.length > 0 && (
                 <div className="glass-card p-4">
                   <h3 className="text-xs font-medium mb-2">Submission History</h3>
-                  {selected.submission_history.map((s: any) => (
+                  {selected.submission_history.map((s) => (
                     <div key={s.id} className="flex items-center justify-between py-1.5 text-xs border-b border-[var(--color-border)]/30 last:border-0">
                       <span>{s.journal}</span><span className="text-[var(--color-text-muted)]">{s.status} — {formatDate(s.submitted_at)}</span>
                     </div>
@@ -382,8 +385,9 @@ export default function ManuscriptManager() {
             toast('success', `Deleted ${res.deleted_count} manuscript${res.deleted_count === 1 ? '' : 's'}`)
             load()
             setSelectMode(false); setSelectedIds(new Set())
-          } catch (err: any) {
-            toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Bulk delete failed'
+            toast('error', msg, { title: 'Could not delete' })
           }
         }}
         onCancel={() => setBulkDeleteConfirm(false)}

@@ -9,7 +9,8 @@ import hashlib
 from datetime import datetime
 from typing import Any
 
-import aiohttp
+import httpx
+from app.core.http_allowlist import make_httpx_client
 
 from app.agents.ingestion.base import (
     IngestionAgent,
@@ -126,19 +127,19 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
         config = config or ClinicalTrialsConfig()
         super().__init__(config=config, **kwargs)
         self.ct_config: ClinicalTrialsConfig = config
-        self._session: aiohttp.ClientSession | None = None
+        self._session: httpx.AsyncClient | None = None
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create HTTP session."""
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=60)
-            self._session = aiohttp.ClientSession(timeout=timeout)
+    async def _get_session(self) -> httpx.AsyncClient:
+        """Get or create the SSRF-allowlisted httpx client."""
+        if self._session is None:
+            self._session = make_httpx_client(timeout=60.0, follow_redirects=True)
         return self._session
 
     async def _close_session(self) -> None:
-        """Close HTTP session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+        """Close the httpx client."""
+        if self._session is not None:
+            await self._session.aclose()
+            self._session = None
 
     def _build_query_params(
         self,
@@ -230,9 +231,9 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
         url = f"{self.API_BASE}/studies"
 
         try:
-            async with session.get(url, params=params) as response:
-                response.raise_for_status()
-                data = await response.json()
+            response = await session.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
@@ -242,7 +243,7 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
 
             return studies, next_token, total_count
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("ClinicalTrials.gov API error", error=str(e))
             raise
 
@@ -470,17 +471,17 @@ class ClinicalTrialsIngestionAgent(IngestionAgent):
         }
 
         try:
-            async with session.get(url, params=params) as response:
-                if response.status == 404:
-                    return None
-                response.raise_for_status()
-                data = await response.json()
+            response = await session.get(url, params=params)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
             return self._study_to_record(data)
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("Failed to fetch study", nct_id=nct_id, error=str(e))
             return None
 

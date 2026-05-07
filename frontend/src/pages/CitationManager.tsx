@@ -76,7 +76,7 @@ export default function CitationManager() {
       ])
       setCitations(cs)
       setFolders(fs)
-    } catch (err) {
+    } catch {
       toast('error', 'Failed to load citation library')
     } finally {
       setLoading(false)
@@ -112,8 +112,8 @@ export default function CitationManager() {
     const dir = sortDir === 'asc' ? 1 : -1
     const key = sortKey
     rows = [...rows].sort((a, b) => {
-      const av = key === 'authors' ? (a.authors?.[0] || '') : key === 'updated' ? a.updated_at : (a as any)[key] ?? ''
-      const bv = key === 'authors' ? (b.authors?.[0] || '') : key === 'updated' ? b.updated_at : (b as any)[key] ?? ''
+      const av = key === 'authors' ? (a.authors?.[0] || '') : key === 'updated' ? a.updated_at : (a as unknown as Record<string, unknown>)[key] ?? ''
+      const bv = key === 'authors' ? (b.authors?.[0] || '') : key === 'updated' ? b.updated_at : (b as unknown as Record<string, unknown>)[key] ?? ''
       return av > bv ? dir : av < bv ? -dir : 0
     })
     return rows
@@ -167,8 +167,9 @@ export default function CitationManager() {
       const res = await api.importLibraryCitations({ format, text })
       toast('success', `Imported ${res.imported}${res.skipped_duplicates ? ` · ${res.skipped_duplicates} duplicates skipped` : ''}`)
       await reload()
-    } catch (err: any) {
-      toast('error', err?.response?.data?.detail || 'Import failed')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast('error', detail || 'Import failed')
     }
   }
 
@@ -209,7 +210,7 @@ export default function CitationManager() {
       let blob: Blob
       let filename: string
       if (format === 'csl') {
-        blob = new Blob([JSON.stringify((data as any).items, null, 2)], { type: 'application/json' })
+        blob = new Blob([JSON.stringify((data as { items: unknown[] }).items, null, 2)], { type: 'application/json' })
         filename = 'library.csl.json'
       } else {
         blob = data as Blob
@@ -264,7 +265,7 @@ export default function CitationManager() {
         text: payload.text || null,
         note: payload.note || null,
         color: payload.color,
-      } as any)
+      })
       setHighlights(hs => [...hs, h])
     } catch { toast('error', 'Could not save highlight') }
   }

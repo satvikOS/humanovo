@@ -29,12 +29,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import assert_owns_project
 from app.models.discovery_session import DiscoverySession
+from app.models.user import User
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/discovery-sessions", tags=["discovery-sessions"])
-
-
+router = APIRouter(prefix="/discovery-sessions", tags=["discovery-sessions"], dependencies=AUTH_REQUIRED)
 # ─── Default agent config ────────────────────────────────────────
 # Conservative defaults for a newly-created session. The user can
 # override any field via the right-side config drawer on the
@@ -170,6 +171,22 @@ def _to_detail(session: DiscoverySession) -> SessionDetail:
 # ─── Endpoints ───────────────────────────────────────────────────
 
 
+async def _owned_session_or_404(
+    db: AsyncSession, session_id: UUID, current_user: User,
+) -> DiscoverySession:
+    """Look up a session and confirm `current_user` owns it."""
+    result = await db.execute(
+        select(DiscoverySession).where(
+            DiscoverySession.id == session_id,
+            DiscoverySession.owner_id == current_user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Discovery session not found")
+    return session
+
+
 @router.get("", response_model=list[SessionSummary])
 async def list_sessions(
     project_id: UUID | None = Query(None),
@@ -177,20 +194,22 @@ async def list_sessions(
     pinned_only: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> list[SessionSummary]:
-    """
-    List conversations for the sidebar. Pinned sessions float to the
-    top regardless of updated_at; within each bucket we sort by most
-    recent activity.
-    """
-    stmt = select(DiscoverySession).order_by(desc(DiscoverySession.pinned), desc(DiscoverySession.updated_at)).limit(limit)
+    """List the caller's conversations for the sidebar. Pinned
+    sessions float to the top regardless of updated_at; within each
+    bucket we sort by most recent activity."""
+    stmt = (
+        select(DiscoverySession)
+        .where(DiscoverySession.owner_id == current_user.id)
+        .order_by(desc(DiscoverySession.pinned), desc(DiscoverySession.updated_at))
+        .limit(limit)
+    )
     if project_id is not None:
         stmt = stmt.where(DiscoverySession.project_id == project_id)
     if pinned_only:
         stmt = stmt.where(DiscoverySession.pinned.is_(True))
     if q:
-        # Simple ILIKE on title + notes. Full-text search can slot in
-        # later if the session list grows past a few hundred.
         like = f"%{q}%"
         stmt = stmt.where(or_(DiscoverySession.title.ilike(like), DiscoverySession.notes.ilike(like)))
     result = await db.execute(stmt)
@@ -198,13 +217,20 @@ async def list_sessions(
 
 
 @router.post("", response_model=SessionDetail, status_code=201)
-async def create_session(body: SessionCreate, db: AsyncSession = Depends(get_db)) -> SessionDetail:
+async def create_session(
+    body: SessionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> SessionDetail:
+    if body.project_id is not None:
+        await assert_owns_project(db, body.project_id, current_user)
     cfg = dict(DEFAULT_AGENT_CONFIG)
     if body.agent_config:
         cfg.update(body.agent_config)
     session = DiscoverySession(
         title=body.title or "New conversation",
         project_id=body.project_id,
+        owner_id=current_user.id,
         agent_config=cfg,
         messages=[],
         notes=body.notes,
@@ -216,28 +242,34 @@ async def create_session(body: SessionCreate, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-async def get_session(session_id: UUID, db: AsyncSession = Depends(get_db)) -> SessionDetail:
-    result = await db.execute(select(DiscoverySession).where(DiscoverySession.id == session_id))
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Discovery session not found")
+async def get_session(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db)  ,
+    current_user: User = Depends(get_current_active_user),
+) -> SessionDetail:
+    session = await _owned_session_or_404(db, session_id, current_user)
     return _to_detail(session)
 
 
 @router.patch("/{session_id}", response_model=SessionDetail)
-async def update_session(session_id: UUID, body: SessionUpdate, db: AsyncSession = Depends(get_db)) -> SessionDetail:
-    result = await db.execute(select(DiscoverySession).where(DiscoverySession.id == session_id))
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Discovery session not found")
+async def update_session(
+    session_id: UUID,
+    body: SessionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> SessionDetail:
+    session = await _owned_session_or_404(db, session_id, current_user)
     data = body.model_dump(exclude_unset=True)
     # Merge agent_config instead of overwriting so partial updates
-    # (e.g. just bumping the temperature) don't drop the system
-    # prompt.
+    # don't drop the system prompt.
     if "agent_config" in data and data["agent_config"] is not None:
         merged = dict(session.agent_config or {})
         merged.update(data.pop("agent_config"))
         session.agent_config = merged
+    # If the caller is reassigning project_id, require ownership of
+    # the new target project.
+    if "project_id" in data and data["project_id"] is not None:
+        await assert_owns_project(db, data["project_id"], current_user)
     for key, value in data.items():
         setattr(session, key, value)
     await db.commit()
@@ -246,11 +278,12 @@ async def update_session(session_id: UUID, body: SessionUpdate, db: AsyncSession
 
 
 @router.delete("/{session_id}", status_code=204)
-async def delete_session(session_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(DiscoverySession).where(DiscoverySession.id == session_id))
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Discovery session not found")
+async def delete_session(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    session = await _owned_session_or_404(db, session_id, current_user)
     await db.delete(session)
     await db.commit()
 
@@ -260,23 +293,19 @@ async def append_message(
     session_id: UUID,
     body: AppendMessagePayload,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> SessionDetail:
-    """
-    Append a single message to a session atomically. Writing the full
-    message list via PATCH would race with concurrent streaming
-    writers; this endpoint rebinds the JSONB array in-place.
+    """Append a single message to one of the caller's sessions
+    atomically. Writing the full message list via PATCH would race
+    with concurrent streaming writers; this endpoint rebinds the
+    JSONB array in-place.
 
     Auto-retitles the session from the first user message if it's
-    still the default "New conversation".
-    """
-    result = await db.execute(select(DiscoverySession).where(DiscoverySession.id == session_id))
-    session = result.scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=404, detail="Discovery session not found")
+    still the default "New conversation"."""
+    session = await _owned_session_or_404(db, session_id, current_user)
     messages = list(session.messages or [])
     messages.append(body.message.model_dump())
     session.messages = messages
-    # Auto-title from the first user message when still at default.
     if session.title in ("New conversation", "", None) and body.message.role == "user":
         text = body.message.content.strip()
         session.title = text[:60] + ("..." if len(text) > 60 else "")
@@ -286,15 +315,17 @@ async def append_message(
 
 
 @router.post("/{session_id}/fork", response_model=SessionDetail, status_code=201)
-async def fork_session(session_id: UUID, db: AsyncSession = Depends(get_db)) -> SessionDetail:
-    """Duplicate a session — typically used to try a different system prompt or model."""
-    result = await db.execute(select(DiscoverySession).where(DiscoverySession.id == session_id))
-    source = result.scalar_one_or_none()
-    if source is None:
-        raise HTTPException(status_code=404, detail="Discovery session not found")
+async def fork_session(
+    session_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> SessionDetail:
+    """Duplicate one of the caller's sessions."""
+    source = await _owned_session_or_404(db, session_id, current_user)
     fork = DiscoverySession(
         title=f"{source.title} (fork)",
         project_id=source.project_id,
+        owner_id=current_user.id,
         agent_config=dict(source.agent_config or DEFAULT_AGENT_CONFIG),
         messages=list(source.messages or []),
         notes=source.notes,

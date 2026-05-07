@@ -3,6 +3,11 @@ PubMed Ingestion Agent
 
 Specialized agent for ingesting biomedical literature from PubMed/MEDLINE
 using NCBI E-utilities API.
+
+HTTP transport: httpx (via the SSRF-allowlisted factory in
+app.core.http_allowlist). Migrated from aiohttp in Sprint 1 / D7
+follow-up so every outbound request from this agent goes through the
+host-allowlist check before hitting the network.
 """
 
 import hashlib
@@ -10,7 +15,7 @@ import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from typing import Any
 
-import aiohttp
+import httpx
 
 from app.agents.ingestion.base import (
     IngestionAgent,
@@ -18,6 +23,7 @@ from app.agents.ingestion.base import (
     IngestionRecord,
     SourceType,
 )
+from app.core.http_allowlist import make_httpx_client
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -69,19 +75,19 @@ class PubMedIngestionAgent(IngestionAgent):
         config = config or PubMedConfig()
         super().__init__(config=config, **kwargs)
         self.pubmed_config: PubMedConfig = config
-        self._session: aiohttp.ClientSession | None = None
+        self._client: httpx.AsyncClient | None = None
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create HTTP session."""
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=30)
-            self._session = aiohttp.ClientSession(timeout=timeout)
-        return self._session
+    async def _get_session(self) -> httpx.AsyncClient:
+        """Get or create the SSRF-allowlisted httpx client."""
+        if self._client is None:
+            self._client = make_httpx_client(timeout=30.0, follow_redirects=True)
+        return self._client
 
     async def _close_session(self) -> None:
-        """Close HTTP session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+        """Close the httpx client."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     def _build_search_params(
         self,
@@ -140,9 +146,9 @@ class PubMedIngestionAgent(IngestionAgent):
         url = f"{self.EUTILS_BASE}/esearch.fcgi"
 
         try:
-            async with session.get(url, params=params) as response:
-                response.raise_for_status()
-                data = await response.json()
+            response = await session.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
 
             result = data.get("esearchresult", {})
             pmids = result.get("idlist", [])
@@ -154,7 +160,7 @@ class PubMedIngestionAgent(IngestionAgent):
 
             return pmids, total_count, webenv, query_key
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("ESearch failed", error=str(e))
             raise
 
@@ -196,16 +202,16 @@ class PubMedIngestionAgent(IngestionAgent):
         url = f"{self.EUTILS_BASE}/efetch.fcgi"
 
         try:
-            async with session.get(url, params=params) as response:
-                response.raise_for_status()
-                xml_content = await response.text()
+            response = await session.get(url, params=params)
+            response.raise_for_status()
+            xml_content = response.text
 
             self.state.metrics.api_calls_made += 1
             self.state.metrics.bytes_downloaded += len(xml_content.encode())
 
             return self._parse_pubmed_xml(xml_content)
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("EFetch failed", error=str(e))
             raise
 
@@ -545,9 +551,9 @@ class PubMedIngestionAgent(IngestionAgent):
         url = f"{self.EUTILS_BASE}/elink.fcgi"
 
         try:
-            async with session.get(url, params=params) as response:
-                response.raise_for_status()
-                data = await response.json()
+            response = await session.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
@@ -568,7 +574,7 @@ class PubMedIngestionAgent(IngestionAgent):
             articles = await self._efetch(related_pmids[:max_results])
             return [self._article_to_record(a) for a in articles]
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("ELink failed", error=str(e))
             return []
 
@@ -604,9 +610,9 @@ class PubMedIngestionAgent(IngestionAgent):
         url = f"{self.EUTILS_BASE}/elink.fcgi"
 
         try:
-            async with session.get(url, params=params) as response:
-                response.raise_for_status()
-                data = await response.json()
+            response = await session.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
 
             self.state.metrics.api_calls_made += 1
 
@@ -627,7 +633,7 @@ class PubMedIngestionAgent(IngestionAgent):
             articles = await self._efetch(citing_pmids[:max_results])
             return [self._article_to_record(a) for a in articles]
 
-        except aiohttp.ClientError as e:
+        except httpx.HTTPError as e:
             self.logger.error("ELink (citations) failed", error=str(e))
             return []
 

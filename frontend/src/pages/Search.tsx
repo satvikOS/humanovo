@@ -574,14 +574,14 @@ export default function Search() {
                               {formatDate(result.created_at)}
                             </span>
                           )}
-                          {result.metadata?.citation_count !== undefined && (
+                          {(typeof result.metadata?.citation_count === 'number' || typeof result.metadata?.citation_count === 'string') && (
                             <span>{String(result.metadata.citation_count)} citations</span>
                           )}
-                          {result.metadata?.confidence !== undefined && (
-                            <span>Confidence: {Math.round(Number(result.metadata.confidence) * 100)}%</span>
+                          {typeof result.metadata?.confidence === 'number' && (
+                            <span>Confidence: {Math.round(result.metadata.confidence * 100)}%</span>
                           )}
-                          {result.metadata?.entity_type && (
-                            <span className="capitalize">{String(result.metadata.entity_type)}</span>
+                          {typeof result.metadata?.entity_type === 'string' && (
+                            <span className="capitalize">{result.metadata.entity_type}</span>
                           )}
                         </div>
 

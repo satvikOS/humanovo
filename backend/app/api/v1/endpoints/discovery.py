@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.core.errors import ErrorCode, safe_error
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.services.disease_discovery_service import (
     DiscoveryResult,
     DiscoveryType,
@@ -21,7 +22,7 @@ from app.services.disease_discovery_service import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/discovery", tags=["discovery"])
+router = APIRouter(prefix="/discovery", tags=["discovery"], dependencies=AUTH_REQUIRED)
 
 
 class DiscoveryRequest(BaseModel):

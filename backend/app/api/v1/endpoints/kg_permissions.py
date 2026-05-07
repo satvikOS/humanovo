@@ -29,6 +29,7 @@ from sqlalchemy import text
 
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED
 from app.services.kg_first_service import (
     UploadPermission,
     get_kg_first_service,
@@ -36,9 +37,7 @@ from app.services.kg_first_service import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/kg", tags=["kg-permissions"])
-
-
+router = APIRouter(prefix="/kg", tags=["kg-permissions"], dependencies=AUTH_REQUIRED)
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------

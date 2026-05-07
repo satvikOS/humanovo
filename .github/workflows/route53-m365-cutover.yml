@@ -1,9 +1,12 @@
 name: Route53 — humanovo.net M365 email cutover
 
+ claude/production-platform-analysis-30H5c
+
 # Re-trigger marker: humanovo-admin gained Route53Access inline policy
 # (route53:ListHostedZones[ByName], GetHostedZone, ListResourceRecordSets,
 #  ChangeResourceRecordSets, GetChange). Preflight should pass now.
 #
+ humanovo
 # One-shot DNS change to switch humanovo.net inbound email to Microsoft 365.
 #
 # What this does in a single atomic ChangeResourceRecordSets batch:
@@ -39,12 +42,16 @@ name: Route53 — humanovo.net M365 email cutover
 #   - resend._domainkey.humanovo.net TXT (Resend DKIM)
 #   - _dmarc.humanovo.net TXT
 #
+ claude/production-platform-analysis-30H5c
+# Trigger: workflow_dispatch only. Confirmation phrase required.
+
 # Trigger:
 #   - workflow_dispatch (manual run from the Actions UI; requires a
 #     confirmation phrase input)
 #   - push to humanovo when THIS workflow file changes (auto-fires
 #     once when the agent pushes a config update; idempotent because
 #     all DNS changes are UPSERTs)
+ humanovo
 
 on:
   workflow_dispatch:
@@ -70,10 +77,13 @@ on:
         description: 'Type humanovo-net-m365-cutover to confirm'
         required: true
         type: string
+ claude/production-platform-analysis-30H5c
+
   push:
     branches: [humanovo]
     paths:
       - '.github/workflows/route53-m365-cutover.yml'
+ humanovo
 
 env:
   AWS_REGION: us-east-1
@@ -85,6 +95,13 @@ concurrency:
 
 jobs:
   apply:
+ claude/production-platform-analysis-30H5c
+    name: ${{ inputs.phase }} — SPF mode ${{ inputs.spf_mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify confirmation phrase
+
     name: ${{ github.event_name == 'push' && 'apply (auto, push)' || format('{0} — SPF mode {1}', inputs.phase, inputs.spf_mode) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -97,11 +114,14 @@ jobs:
     steps:
       - name: Verify confirmation phrase (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch'
+ humanovo
         run: |
           if [ "${{ inputs.confirm_intent }}" != "humanovo-net-m365-cutover" ]; then
             echo "::error::Confirmation phrase did not match. Aborting."
             exit 1
           fi
+
+ claude/production-platform-analysis-30H5c
 
       - name: Note for push trigger
         if: github.event_name == 'push'
@@ -111,12 +131,15 @@ jobs:
           echo "Effective SPF mode: $EFFECTIVE_SPF_MODE"
           echo "All DNS changes are UPSERTs — re-running this workflow is harmless."
 
+ humanovo
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+ claude/production-platform-analysis-30H5c
 
       - name: Identify IAM caller + preflight Route53 access
         id: caller
@@ -155,6 +178,7 @@ jobs:
           fi
           echo "Route 53 access OK for $USER_NAME."
 
+ humanovo
       - name: Find hosted zone ID
         id: hz
         run: |
@@ -170,6 +194,113 @@ jobs:
           fi
           echo "Hosted zone: $ZONE_ID"
           echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
+
+ claude/production-platform-analysis-30H5c
+      - name: Read existing apex TXT to preserve MS=... value
+        id: txt
+        run: |
+          set -e
+          # Pull all values currently in the apex TXT record set so we
+          # can rewrite them in the change batch (Route 53 record sets
+          # are atomic — UPSERT replaces the whole set, so we must
+          # include the existing MS=... verification line.)
+          EXISTING=$(aws route53 list-resource-record-sets \
+            --hosted-zone-id "${{ steps.hz.outputs.zone_id }}" \
+            --query "ResourceRecordSets[?Name=='${DOMAIN}.' && Type=='TXT'].ResourceRecords" \
+            --output json)
+          echo "Existing apex TXT values:"
+          echo "$EXISTING"
+          # Filter out any prior v=spf1 entries (we're replacing) and
+          # any prior MS= duplicates; keep all MS= entries deduped.
+          FILTERED=$(echo "$EXISTING" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin) or [[]]
+          flat = [r['Value'] for arr in data for r in arr]
+          # Drop any prior SPF (apex). Keep MS= and others.
+          kept = [v for v in flat if not v.startswith('\"v=spf1') and not v.startswith('v=spf1')]
+          print(json.dumps(kept))
+          ")
+          echo "Preserved (non-SPF) values: $FILTERED"
+          echo "preserved=$FILTERED" >> "$GITHUB_OUTPUT"
+
+      - name: Build change batch
+        id: batch
+        run: |
+          set -e
+          case "${{ inputs.spf_mode }}" in
+            "m365+resend")
+              SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"'
+              ;;
+            "m365+resend+ses")
+              SPF='"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com include:amazonses.com -all"'
+              ;;
+            "m365-only")
+              SPF='"v=spf1 include:spf.protection.outlook.com -all"'
+              ;;
+            *)
+              echo "::error::Unknown spf_mode '${{ inputs.spf_mode }}'"
+              exit 1
+              ;;
+          esac
+          echo "SPF value: $SPF"
+
+          # Compose the apex TXT ResourceRecords array: SPF + every
+          # preserved value (e.g. "MS=ms68533928"). Each must be a
+          # quoted string in Route 53 JSON, so we wrap items that
+          # don't already start with a quote.
+          PRESERVED='${{ steps.txt.outputs.preserved }}'
+          TXT_RECORDS=$(python3 -c "
+          import json, sys
+          spf = '''$SPF'''
+          preserved = json.loads('''$PRESERVED''')
+          records = [{'Value': spf}]
+          for v in preserved:
+              # Route 53 wants the value wrapped in escaped quotes if
+              # it isn't already.
+              if not (v.startswith('\"') and v.endswith('\"')):
+                  v = '\"' + v + '\"'
+              records.append({'Value': v})
+          print(json.dumps(records))
+          ")
+
+          cat > /tmp/change-batch.json <<EOF
+          {
+            "Comment": "M365 email cutover for humanovo.net (workflow run ${{ github.run_id }})",
+            "Changes": [
+              {
+                "Action": "UPSERT",
+                "ResourceRecordSet": {
+                  "Name": "${DOMAIN}.",
+                  "Type": "MX",
+                  "TTL": 3600,
+                  "ResourceRecords": [
+                    {"Value": "0 humanovo-net.mail.protection.outlook.com"}
+                  ]
+                }
+              },
+              {
+                "Action": "UPSERT",
+                "ResourceRecordSet": {
+                  "Name": "autodiscover.${DOMAIN}.",
+                  "Type": "CNAME",
+                  "TTL": 3600,
+                  "ResourceRecords": [
+                    {"Value": "autodiscover.outlook.com"}
+                  ]
+                }
+              },
+              {
+                "Action": "UPSERT",
+                "ResourceRecordSet": {
+                  "Name": "${DOMAIN}.",
+                  "Type": "TXT",
+                  "TTL": 3600,
+                  "ResourceRecords": $TXT_RECORDS
+                }
+              }
+            ]
+          }
+          EOF
 
       - name: Build change batch (read TXT + compose JSON in one pass)
         # Combined to avoid round-tripping JSON through GitHub Actions
@@ -280,12 +411,17 @@ jobs:
           }
           print(json.dumps(batch, indent=2))
           PYEOF
+ humanovo
           echo "=== Change batch ==="
           cat /tmp/change-batch.json
           echo "==================="
 
       - name: Apply (Route 53 ChangeResourceRecordSets)
+ claude/production-platform-analysis-30H5c
+        if: inputs.phase == 'apply'
+
         if: env.EFFECTIVE_PHASE == 'apply'
+ humanovo
         id: change
         run: |
           set -e
@@ -298,7 +434,11 @@ jobs:
           echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Wait for INSYNC
+ claude/production-platform-analysis-30H5c
+        if: inputs.phase == 'apply'
+
         if: env.EFFECTIVE_PHASE == 'apply'
+ humanovo
         run: |
           set -e
           echo "Waiting for change ${{ steps.change.outputs.change_id }} to propagate to Route 53 edges (typically 30-90s)…"
@@ -306,7 +446,11 @@ jobs:
           echo "Change is INSYNC across Route 53."
 
       - name: Verify via public DNS resolvers
+ claude/production-platform-analysis-30H5c
+        if: inputs.phase == 'apply'
+
         if: env.EFFECTIVE_PHASE == 'apply'
+ humanovo
         run: |
           set +e
           echo "## Post-change verification" >> $GITHUB_STEP_SUMMARY
@@ -333,11 +477,19 @@ jobs:
           {
             echo "## Route 53 — humanovo.net M365 email cutover"
             echo ""
+ claude/production-platform-analysis-30H5c
+            echo "Phase: \`${{ inputs.phase }}\`"
+            echo "SPF mode: \`${{ inputs.spf_mode }}\`"
+            echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
+            echo ""
+            if [ "${{ inputs.phase }}" = "apply" ]; then
+
             echo "Phase: \`${{ env.EFFECTIVE_PHASE }}\`"
             echo "SPF mode: \`${{ env.EFFECTIVE_SPF_MODE }}\`"
             echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
             echo ""
             if [ "${{ env.EFFECTIVE_PHASE }}" = "apply" ]; then
+ humanovo
               echo "### Next steps"
               echo "1. Wait 5-10 min for global DNS propagation (some recursive resolvers cache up to TTL)."
               echo "2. In Microsoft 365 admin → Setup → Domains → humanovo.net → click **Re-check DNS**."

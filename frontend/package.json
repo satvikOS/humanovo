@@ -6,13 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "lint": "eslint src --report-unused-disable-directives --max-warnings 335",
+    "lint": "eslint src --report-unused-disable-directives --max-warnings 19",
     "preview": "vite preview",
     "test": "vitest",
     "type-check": "tsc --noEmit",
     "e2e": "playwright test",
     "e2e:screenshots": "playwright test visual-screenshots --reporter=list",
-    "e2e:install": "playwright install --with-deps chromium"
+    "e2e:install": "playwright install --with-deps chromium",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:icon": "tauri icon"
   },
   "dependencies": {
     "@react-three/drei": "^9.96.5",

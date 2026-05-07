@@ -27,7 +27,7 @@ export default function KnowledgeGraphViewer() {
   const [typeFilter, setTypeFilter] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [newNode, setNewNode] = useState({ name: '', type: 'gene', description: '' })
-  const [stats, setStats] = useState<any>(null)
+  const [stats, setStats] = useState<Record<string, unknown> | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -188,7 +188,7 @@ export default function KnowledgeGraphViewer() {
             <h1 className="text-2xl font-semibold tracking-tight">Knowledge Graph</h1>
             <p className="text-sm text-[var(--color-text-muted)] mt-1">
               Explore biomedical entities and relationships
-              {stats && <span className="ml-2">({stats.total_nodes} nodes, {stats.total_edges} edges)</span>}
+              {stats && <span className="ml-2">({String(stats.total_nodes ?? 0)} nodes, {String(stats.total_edges ?? 0)} edges)</span>}
             </p>
           </div>
           <button onClick={() => setShowAdd(!showAdd)} className="btn text-sm" style={{ color: 'var(--color-text-secondary)' }}><FiPlus className="w-4 h-4" /> Add Node</button>

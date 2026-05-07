@@ -13,7 +13,7 @@ export interface SSEChatEvents {
   onStart?: (meta: { run_id: string; model: string; session_id: string }) => void
   onToken?: (delta: string) => void
   onStatus?: (msg: string) => void
-  onCard?: (card: { kind: string; payload: Record<string, any> }) => void
+  onCard?: (card: { kind: string; payload: Record<string, unknown> }) => void
   onDone?: (meta: { finish_reason: string; tokens?: { prompt: number; completion: number }; message_id?: string }) => void
   onError?: (message: string) => void
 }
@@ -24,7 +24,7 @@ export function useSSEChat() {
   const send = useCallback(async (
     sessionId: string,
     userMessage: string,
-    overrides: Record<string, any> | undefined,
+    overrides: Record<string, unknown> | undefined,
     events: SSEChatEvents,
   ): Promise<void> => {
     // Cancel any in-flight stream before starting a new one.
@@ -38,7 +38,7 @@ export function useSSEChat() {
       // apiClient carries auth headers; we forward them manually since
       // we're using native fetch for the streaming body.
       const authHeaders: Record<string, string> = {}
-      const headerSrc = apiClient.defaults.headers as any
+      const headerSrc = apiClient.defaults.headers as unknown as Record<string, Record<string, unknown>>
       for (const bucket of ['common', 'post']) {
         const h = headerSrc?.[bucket] || {}
         for (const [k, v] of Object.entries(h)) {
@@ -91,9 +91,10 @@ export function useSSEChat() {
           }
         }
       }
-    } catch (err: any) {
-      if (err?.name !== 'AbortError') {
-        events.onError?.(err?.message || 'Stream failed')
+    } catch (err: unknown) {
+      const e = err as { name?: string; message?: string }
+      if (e?.name !== 'AbortError') {
+        events.onError?.(e?.message || 'Stream failed')
       }
     }
   }, [])

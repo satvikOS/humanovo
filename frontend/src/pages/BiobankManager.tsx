@@ -10,12 +10,15 @@ import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
 import api from '../services/api'
 
+interface ChainOfCustodyEntry { action: string; by: string; date: string; notes?: string }
+interface InventoryAlert { severity?: string; message: string }
+interface StorageUtilizationRow { name: string; utilization_pct: number }
 interface Sample {
   id: string; barcode: string; sample_type: string; status: string; project: string
   tissue_type: string; patient_id: string; collection_date: string; quantity: string
-  quality_score: number; chain_of_custody: any[]; storage_details: any
+  quality_score: number; chain_of_custody: ChainOfCustodyEntry[]; storage_details: Record<string, unknown>
 }
-interface Inventory { total_samples: number; by_type: Record<string, number>; by_status: Record<string, number>; by_project: Record<string, number>; alerts: any[]; storage_utilization: any[] }
+interface Inventory { total_samples: number; by_type: Record<string, number>; by_status: Record<string, number>; by_project: Record<string, number>; alerts: InventoryAlert[]; storage_utilization: StorageUtilizationRow[] }
 
 // apiClient's baseURL already includes /api/v1
 const BASE = '/biobank'
@@ -238,7 +241,7 @@ export default function BiobankManager() {
                 <h3 className="text-xs font-medium mb-3">By Type</h3>
                 <ResponsiveContainer width="100%" height={200}>
                   <PieChart>
-                    <Pie data={typeData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(p: any) => `${p.name} (${p.value})`}>
+                    <Pie data={typeData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(p: { name?: string; value?: number }) => `${p.name} (${p.value})`}>
                       {typeData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                     </Pie>
                     <Tooltip contentStyle={{ background: 'var(--color-surface-solid)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '11px', color: 'var(--color-text)' }} />
@@ -293,8 +296,9 @@ export default function BiobankManager() {
                     toast('success', `Archived ${res.updated_count} sample${res.updated_count === 1 ? '' : 's'}`)
                     load()
                     setSelectMode(false); setSelectedIds(new Set())
-                  } catch (err: any) {
-                    toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+                  } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : 'Bulk archive failed'
+                    toast('error', msg, { title: 'Could not archive' })
                   }
                 }}
                 onRestore={async () => {
@@ -304,8 +308,9 @@ export default function BiobankManager() {
                     toast('success', `Restored ${res.updated_count} sample${res.updated_count === 1 ? '' : 's'}`)
                     load()
                     setSelectMode(false); setSelectedIds(new Set())
-                  } catch (err: any) {
-                    toast('error', err?.message || 'Bulk restore failed', { title: 'Could not restore' })
+                  } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : 'Bulk restore failed'
+                    toast('error', msg, { title: 'Could not restore' })
                   }
                 }}
                 onDelete={() => setBulkDeleteConfirm(true)}
@@ -413,7 +418,7 @@ export default function BiobankManager() {
 
                   <div className="glass-card p-4">
                     <h4 className="text-xs font-medium mb-2">Chain of Custody</h4>
-                    {selected.chain_of_custody.map((c: any, i: number) => (
+                    {selected.chain_of_custody.map((c, i) => (
                       <div key={i} className="text-xxs py-1 border-l-2 border-[var(--color-border)] pl-2 mb-1">
                         <div className="font-medium">{c.action}</div>
                         <div className="text-[var(--color-text-muted)]">{c.by} — {c.date}</div>
@@ -446,8 +451,9 @@ export default function BiobankManager() {
             toast('success', `Deleted ${res.deleted_count} sample${res.deleted_count === 1 ? '' : 's'}`)
             load()
             setSelectMode(false); setSelectedIds(new Set())
-          } catch (err: any) {
-            toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Bulk delete failed'
+            toast('error', msg, { title: 'Could not delete' })
           }
         }}
         onCancel={() => setBulkDeleteConfirm(false)}

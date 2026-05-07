@@ -9,7 +9,7 @@ import {
 import clsx from 'clsx'
 import api, { Project, apiClient } from '../services/api'
 import { logActivity, formatDate, usePersistentState, blobPut, blobGet, blobDelete } from '../utils/persistence'
-import HypothesisDocViewer from '../components/HypothesisDocViewer'
+import HypothesisDocViewer, { type TranslationalRoadmapDoc } from '../components/HypothesisDocViewer'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { useEscapeKey } from '../utils/clickable'
 
@@ -37,7 +37,7 @@ interface SavedHypothesis {
   project_id: string
   created_at: string
   model_used?: string
-  translational_roadmap?: any
+  translational_roadmap?: TranslationalRoadmapDoc
 }
 
 interface ProjectDocument {
@@ -253,7 +253,7 @@ export default function ProjectDetail() {
       setProject(updated)
       setIsEditing(false)
       logActivity({ type: 'project', action: 'updated', title: `Edited project: ${updated.name}` })
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to update project', err)
     } finally {
       setEditSaving(false)
@@ -284,17 +284,18 @@ export default function ProjectDetail() {
     try {
       const proj = await api.getProject(projectId)
       setProject(proj)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('ProjectDetail: failed to load project from API', err)
-      const status = err?.response?.status
-      const errData = err?.response?.data
+      const e = err as { response?: { status?: number; data?: { error?: string } }; message?: string }
+      const status = e?.response?.status
+      const errData = e?.response?.data
       // Lambda returns 400 with error:"not_found" (not 404, to avoid CloudFront HTML intercept)
       if (status === 404 || (status === 400 && errData?.error === 'not_found')) {
         setLoadError('This project does not exist in the database.')
       } else if (status === 422) {
         setLoadError('Invalid project ID format.')
       } else {
-        setLoadError(err?.message || 'Failed to load project. The backend may be unavailable.')
+        setLoadError(e?.message || 'Failed to load project. The backend may be unavailable.')
       }
     } finally {
       setLoadingProject(false)
@@ -307,7 +308,7 @@ export default function ProjectDetail() {
     title: h.title,
     description: h.description,
     mechanism: h.mechanism,
-    confidence: (h as any).confidence ?? (h as any).confidence_score ?? 0,
+    confidence: (h as { confidence?: number; confidence_score?: number }).confidence ?? (h as { confidence?: number; confidence_score?: number }).confidence_score ?? 0,
     tags: [] as string[],
     disease: project?.disease_focus || '',
     discovery_type: 'treatment',
@@ -424,7 +425,7 @@ export default function ProjectDetail() {
       }
 
       // Step 2: Trigger Lambda paper generation (the pipeline that actually works)
-      let triggerData: any = null
+      let triggerData: Record<string, unknown> | null = null
       let triggerOk = false
       try {
         const triggerRes = await apiClient.post('/orchestrator/generate-paper/markdown', {

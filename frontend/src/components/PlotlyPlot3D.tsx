@@ -7,7 +7,15 @@
 import { useMemo } from 'react'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import Plotly from 'plotly.js-dist-min'
+import type { Data, Layout } from 'plotly.js'
 import { plotlyConfig } from '../utils/plotlyConfig'
+
+// 3D plot traces are heterogeneous (scatter3d / mesh3d / surface / cone /
+// streamtube / ...). Plotly's strict union narrowing on `Data` rejects
+// objects with mixed shape, so we type traces with a permissive structural
+// shape and cast at the JSX boundary. This keeps the code free of explicit
+// `any` while preserving the field-flexibility this file relies on.
+type Plot3DTrace = Record<string, unknown>
 
 const Plot = createPlotlyComponent(Plotly)
 
@@ -129,7 +137,7 @@ export default function PlotlyPlot3D({
     const uniqueCats = [...new Set(categories.filter(Boolean))]
     const hasCats = uniqueCats.length > 1
 
-    const buildTraces = (): any[] => {
+    const buildTraces = (): Plot3DTrace[] => {
       switch (resolvedType) {
         case 'scatter_3d': {
           if (hasCats) {
@@ -182,7 +190,7 @@ export default function PlotlyPlot3D({
           // alphahull=-1 asks Plotly to convex-hull the 8 corner points,
           // which always yields a valid box (hand-rolled i/j/k indices
           // can collapse on some inputs, producing invisible bars).
-          const traces: any[] = []
+          const traces: Plot3DTrace[] = []
           for (let i = 0; i < data.length; i++) {
             const d = data[i]
             traces.push({
@@ -197,7 +205,7 @@ export default function PlotlyPlot3D({
               showlegend: i < 10,
               flatshading: true,
               hovertext: `${labels[i] || ''}<br>(${d.x}, ${d.y}, ${d.z})`,
-            } as any)
+            } as Plot3DTrace)
           }
           return traces.slice(0, 30) // limit for performance
         }
@@ -260,7 +268,7 @@ export default function PlotlyPlot3D({
                 y: { show: true, color: '#3b82f6', width: 1 },
                 z: { show: true, color: '#22c55e', width: 1 },
               },
-            } as any]
+            } as Plot3DTrace]
           }
           return [{
             type: 'scatter3d' as const,
@@ -280,7 +288,7 @@ export default function PlotlyPlot3D({
               contours: {
                 z: { show: true, usecolormap: true, project: { z: true } },
               },
-            } as any]
+            } as Plot3DTrace]
           }
           return [{
             type: 'scatter3d' as const,
@@ -291,7 +299,7 @@ export default function PlotlyPlot3D({
         }
 
         case 'stem_3d': {
-          const traces: any[] = []
+          const traces: Plot3DTrace[] = []
           // Stems (vertical lines from z=0)
           for (const d of data.slice(0, 100)) {
             traces.push({
@@ -322,7 +330,7 @@ export default function PlotlyPlot3D({
             hole: 0,
             textinfo: 'label+percent',
             marker: { colors: CATEGORY_COLORS },
-          } as any]
+          } as Plot3DTrace]
         }
 
         case 'trisurf_3d': {
@@ -352,7 +360,7 @@ export default function PlotlyPlot3D({
               showlegend: false,
               hovertemplate: '%{text}<br>(%{x:.2f}, %{y:.2f}, %{z:.2f})<extra></extra>',
             },
-          ] as any[]
+          ] as Plot3DTrace[]
         }
 
         case 'quiver_3d': {
@@ -392,7 +400,7 @@ export default function PlotlyPlot3D({
               showlegend: false,
               hoverinfo: 'skip',
             },
-          ] as any[]
+          ] as Plot3DTrace[]
         }
 
         case 'isosurface_3d': {
@@ -453,7 +461,7 @@ export default function PlotlyPlot3D({
               showlegend: false,
               hovertemplate: '%{text}<br>(%{x:.2f}, %{y:.2f}, %{z:.2f})<extra></extra>',
             },
-          ] as any[]
+          ] as Plot3DTrace[]
         }
 
         case 'voxel_3d': {
@@ -461,7 +469,7 @@ export default function PlotlyPlot3D({
           // 8 corner points asks Plotly to convex-hull them, which always
           // yields a valid cube — avoids hand-rolled i/j/k indices that
           // can degenerate into invisible meshes.
-          const traces: any[] = []
+          const traces: Plot3DTrace[] = []
           let zMax = 1
           for (let i = 0; i < zs.length; i++) if (zs[i] > zMax) zMax = zs[i]
           for (let i = 0; i < Math.min(data.length, 80); i++) {
@@ -482,7 +490,7 @@ export default function PlotlyPlot3D({
               showlegend: false,
               flatshading: true,
               hovertext: `${d.label || `voxel ${i + 1}`}<br>z=${d.z}`,
-            } as any)
+            } as Plot3DTrace)
           }
           return traces
         }
@@ -497,7 +505,7 @@ export default function PlotlyPlot3D({
             line: { width: 6, color: zs, colorscale },
             marker: { size: pointSize + 1, color: zs, colorscale, symbol: 'circle', opacity: 0.9 },
             name: 'Streamline',
-          } as any]
+          } as Plot3DTrace]
         }
 
         case 'slice_3d': {
@@ -530,13 +538,13 @@ export default function PlotlyPlot3D({
               z: { show: true, usecolormap: true, highlightcolor: '#fff', project: { z: true } },
             },
             colorbar: { title: zLabel },
-          } as any]
+          } as Plot3DTrace]
         }
 
         case 'waterfall_3d': {
           // Grouped 3D bars. Convex hull of 8 cube corners renders a
           // robust box; negative deltas are recoloured red.
-          const traces: any[] = []
+          const traces: Plot3DTrace[] = []
           const seriesMap: Record<string, DataPoint3D[]> = {}
           for (const d of data) {
             const key = String(d.y)
@@ -561,7 +569,7 @@ export default function PlotlyPlot3D({
                 showlegend: false,
                 hovertext: `${d.label || `Δ ${d.z}`}<br>x=${d.x}, y=${d.y}, z=${d.z}`,
                 flatshading: true,
-              } as any)
+              } as Plot3DTrace)
             }
             idx++
           }
@@ -575,7 +583,7 @@ export default function PlotlyPlot3D({
             const key = String(d.y)
             ;(rows[key] = rows[key] || []).push(d)
           }
-          const traces: any[] = []
+          const traces: Plot3DTrace[] = []
           let i = 0
           const rowKeys = Object.keys(rows).sort((a, b) => parseFloat(a) - parseFloat(b))
           for (const key of rowKeys) {
@@ -591,7 +599,7 @@ export default function PlotlyPlot3D({
               colorscale,
               showscale: i === 0,
               opacity: 0.9,
-            } as any)
+            } as Plot3DTrace)
             i++
           }
           return traces
@@ -637,7 +645,7 @@ export default function PlotlyPlot3D({
                 return hexToRgba(c, 0.35)
               }),
             },
-          } as any]
+          } as Plot3DTrace]
         }
 
         // Default: scatter3d for remaining types
@@ -654,7 +662,7 @@ export default function PlotlyPlot3D({
     }
 
     const is2D = resolvedType === 'pie_3d' || resolvedType === 'sankey'
-    const baseLayout: Record<string, any> = {
+    const baseLayout: Record<string, unknown> = {
       title: title ? { text: title, font: { color: '#c8c8cc', size: 13, family: "'Inter', system-ui, sans-serif" } } : undefined,
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
@@ -669,10 +677,11 @@ export default function PlotlyPlot3D({
     }
 
     // Apply thin, curved colorbar to all traces with colorbars
-    const applyColorbarStyle = (trace: any) => {
-      if (trace.marker?.colorbar) {
-        trace.marker.colorbar = {
-          ...trace.marker.colorbar,
+    const applyColorbarStyle = (trace: Plot3DTrace): Plot3DTrace => {
+      const marker = trace.marker as { colorbar?: Record<string, unknown> } | undefined
+      if (marker?.colorbar) {
+        marker.colorbar = {
+          ...marker.colorbar,
           thickness: 10,
           len: 0.6,
           outlinewidth: 0,
@@ -685,7 +694,7 @@ export default function PlotlyPlot3D({
     }
 
     if (!is2D) {
-      (baseLayout as any).scene = {
+      baseLayout.scene = {
         xaxis: { title: { text: xLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
         yaxis: { title: { text: yLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
         zaxis: { title: { text: zLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
@@ -720,8 +729,8 @@ export default function PlotlyPlot3D({
       `}</style>
       <div className="plotly-plot3d-wrapper" style={{ width: '100%', height: '100%' }}>
         <Plot
-          data={traces}
-          layout={layout as any}
+          data={traces as unknown as Data[]}
+          layout={layout as Partial<Layout>}
           config={{
             ...plotlyConfig({ hide: true }),
             toImageButtonOptions: {

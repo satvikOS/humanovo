@@ -207,6 +207,26 @@ class Settings(BaseSettings):
     SECRET_KEY: SecretStr = SecretStr("change-this-in-production")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # ─── Stripe billing ─────────────────────────────────────────────
+    # All five values come from the Stripe dashboard. STRIPE_SECRET_KEY
+    # is `sk_live_...` (or `sk_test_...` in dev); STRIPE_WEBHOOK_SECRET
+    # is `whsec_...` from the webhook endpoint settings. The three
+    # PRICE_* values are the IDs of the *recurring monthly* prices on
+    # the Researcher / Lab / Institution products. Trial tier has no
+    # Stripe price (free).
+    #
+    # When any of these are unset the billing endpoints return 503 with
+    # a clear message — useful in local dev where you don't want to
+    # touch Stripe at all.
+    STRIPE_SECRET_KEY: SecretStr | None = None
+    STRIPE_WEBHOOK_SECRET: SecretStr | None = None
+    STRIPE_PRICE_RESEARCHER_MONTHLY: str | None = None
+    STRIPE_PRICE_LAB_MONTHLY: str | None = None
+    STRIPE_PRICE_INSTITUTION_MONTHLY: str | None = None
+    STRIPE_CHECKOUT_SUCCESS_URL: str = "humanovo://billing/success"
+    STRIPE_CHECKOUT_CANCEL_URL: str = "humanovo://billing/cancel"
+    STRIPE_PORTAL_RETURN_URL: str = "humanovo://billing/portal"
+
     @property
     def neo4j_password_value(self) -> str:
         """Get Neo4j password value."""

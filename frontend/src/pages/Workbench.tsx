@@ -3092,7 +3092,10 @@ export default function Workbench() {
           if (comp.description) parts.push(comp.description)
           if (comp.diseaseRelevance) parts.push(`\n**Disease relevance:** ${comp.diseaseRelevance}`)
           if (comp.therapeuticTargets?.length) parts.push(`\n**Therapeutic targets:** ${comp.therapeuticTargets.join(', ')}`)
-          if ((comp as any).clinicalSignificance) parts.push(`\n**Clinical significance:** ${(comp as any).clinicalSignificance}`)
+          {
+            const cs = (comp as { clinicalSignificance?: string }).clinicalSignificance
+            if (cs) parts.push(`\n**Clinical significance:** ${cs}`)
+          }
           if (comp.keyFacts?.length) parts.push(`\n**Key facts:**\n${comp.keyFacts.map(f => `- ${f}`).join('\n')}`)
           return parts.join('\n')
         }
@@ -3334,8 +3337,9 @@ IMPORTANT: If the user asks you to connect nodes, suggest connections, or explai
       const wsUrl = data.websocket_url || `/ws/discovery/${data.run_id}`
       const runnerUrl = `/projects/${projectId}/discover?run_id=${data.run_id}&ws=${encodeURIComponent(wsUrl)}`
       window.open(runnerUrl, '_blank')
-    } catch (e: any) {
-      setDiscoveryError(e.message || 'Discovery launch failed')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Discovery launch failed'
+      setDiscoveryError(msg)
     } finally {
       setDiscoveryLoading(false)
     }

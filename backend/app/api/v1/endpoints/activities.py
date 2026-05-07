@@ -2,10 +2,16 @@
 Activity / Timeline API Endpoints
 
 CRUD operations for tracking and managing platform activities.
+
+Tenant-scoped: every R/U/D filters by `owner_id` so a caller only
+sees their own activity timeline. The `log_activity` helper takes a
+`user_id` so internal callers (project create, hypothesis verify,
+etc.) can attribute activities to the right user.
 """
 
 import logging
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -13,12 +19,12 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, async_session_factory
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.models.activity import Activity
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
-
-
+router = APIRouter(dependencies=AUTH_REQUIRED)
 # ── Schemas ──────────────────────────────────────────────────────
 
 class ActivityUpdate(BaseModel):
@@ -32,6 +38,7 @@ async def log_activity(
     type: str,
     action: str,
     title: str,
+    user_id: UUID | str | None = None,
     description: str = None,
     entity_id: str = None,
     entity_type: str = None,
@@ -39,10 +46,13 @@ async def log_activity(
     metadata: dict = None,
     db: AsyncSession = None,
 ) -> dict:
-    """Helper to programmatically log an activity.
+    """Helper to programmatically log an activity for a specific user.
 
-    If *db* is provided, the caller is responsible for committing.
-    Otherwise a standalone session is created and committed internally.
+    Pass `user_id` to attribute the entry to a real account; rows
+    without `user_id` are still legal (orphan / system events) but
+    don't appear on any user's timeline. If `db` is provided, the
+    caller is responsible for committing. Otherwise a standalone
+    session is created and committed internally.
     """
     owns_session = db is None
     if owns_session:
@@ -50,6 +60,7 @@ async def log_activity(
 
     try:
         activity = Activity(
+            owner_id=user_id,
             type=type,
             action=action,
             title=title,
@@ -77,6 +88,22 @@ async def log_activity(
             await db.close()
 
 
+async def _owned_activity_or_404(
+    db: AsyncSession, activity_id: str, current_user: User,
+) -> Activity:
+    """Look up an activity row and confirm `current_user` owns it."""
+    result = await db.execute(
+        select(Activity).where(
+            Activity.id == activity_id,
+            Activity.owner_id == current_user.id,
+        )
+    )
+    activity = result.scalar_one_or_none()
+    if activity is None:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    return activity
+
+
 # ── Endpoints ────────────────────────────────────────────────────
 
 @router.get("")
@@ -88,8 +115,9 @@ async def list_activities(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    """List activities with optional filters.
+    """List the caller's activities with optional filters.
 
     Returns JSONResponse directly — FastAPI's jsonable_encoder hits a
     RecursionError on this response shape under fastapi 0.136 +
@@ -99,8 +127,10 @@ async def list_activities(
     """
     import json
     from fastapi.responses import JSONResponse
-    query = select(Activity)
-    count_query = select(func.count(Activity.id))
+    query = select(Activity).where(Activity.owner_id == current_user.id)
+    count_query = select(func.count(Activity.id)).where(
+        Activity.owner_id == current_user.id
+    )
 
     if type:
         query = query.where(Activity.type == type)
@@ -137,14 +167,13 @@ async def list_activities(
 
 
 @router.get("/{activity_id}")
-async def get_activity(activity_id: str, db: AsyncSession = Depends(get_db)):
-    """Get a single activity."""
-    result = await db.execute(
-        select(Activity).where(Activity.id == activity_id)
-    )
-    activity = result.scalar_one_or_none()
-    if activity is None:
-        raise HTTPException(status_code=404, detail="Activity not found")
+async def get_activity(
+    activity_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get one of the caller's activities."""
+    activity = await _owned_activity_or_404(db, activity_id, current_user)
     return activity.to_dict()
 
 
@@ -153,14 +182,10 @@ async def update_activity(
     activity_id: str,
     data: ActivityUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    """Update an activity (annotation, description)."""
-    result = await db.execute(
-        select(Activity).where(Activity.id == activity_id)
-    )
-    activity = result.scalar_one_or_none()
-    if activity is None:
-        raise HTTPException(status_code=404, detail="Activity not found")
+    """Update one of the caller's activities (annotation, description)."""
+    activity = await _owned_activity_or_404(db, activity_id, current_user)
 
     if data.annotation is not None:
         activity.annotation = data.annotation
@@ -173,15 +198,13 @@ async def update_activity(
 
 
 @router.delete("/{activity_id}")
-async def delete_activity(activity_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete an activity."""
-    result = await db.execute(
-        select(Activity).where(Activity.id == activity_id)
-    )
-    activity = result.scalar_one_or_none()
-    if activity is None:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
+async def delete_activity(
+    activity_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Delete one of the caller's activities."""
+    activity = await _owned_activity_or_404(db, activity_id, current_user)
     await db.delete(activity)
     await db.flush()
     return {"status": "deleted"}

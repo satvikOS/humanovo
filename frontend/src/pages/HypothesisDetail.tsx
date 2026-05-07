@@ -6,7 +6,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { api, apiClient } from '../services/api'
-import HypothesisDocViewer from '../components/HypothesisDocViewer'
+import HypothesisDocViewer, { type TranslationalRoadmapDoc } from '../components/HypothesisDocViewer'
 import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
 
 const PAPER_PHASES = [
@@ -412,7 +412,7 @@ export default function HypothesisDetail() {
     setPaperHtml(null)
     startPhaseAnimation()
 
-    const roadmapData = (hypothesis as any).translational_roadmap || undefined
+    const roadmapData = (hypothesis as { translational_roadmap?: TranslationalRoadmapDoc }).translational_roadmap || undefined
 
     // Helper: generate client-side HTML paper — runs through full pipeline animation
     const generateClientSide = () => {
@@ -620,7 +620,7 @@ export default function HypothesisDetail() {
   }
 
   // ---- Default: Document viewer ----
-  const roadmapData = (hypothesis as any).translational_roadmap || undefined
+  const roadmapData = (hypothesis as { translational_roadmap?: TranslationalRoadmapDoc }).translational_roadmap || undefined
   // Derive per-phase pass/fail from confidence_score — temporary until
   // the backend returns per-stage scores on the hypothesis payload.
   // Higher confidence → more phases cleanly passed; confidence<0.5 shows

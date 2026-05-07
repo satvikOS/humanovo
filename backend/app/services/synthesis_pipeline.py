@@ -225,12 +225,28 @@ VERBOSITY_INSTRUCTIONS = {
 
 
 class SynthesisPipeline:
-    """5-stage backward/synthesis pipeline for evidence review."""
+    """5-stage backward/synthesis pipeline for evidence review.
 
-    def __init__(self, llm):
-        """Initialize with a MultiModelLLM instance."""
+    Accepts an optional `budget_enforcer` (RunBudgetEnforcer from
+    `app.services.budget_enforcer_service`). When set, every stage
+    calls `enforcer.assert_allowed(stage_name=...)` before invoking
+    the LLM — this surfaces BudgetExceeded mid-pipeline so the
+    orchestrator can short-circuit cleanly. Per-call spend tracking
+    is handled by `cost_tracking_service` downstream of MultiModelLLM.
+    """
+
+    def __init__(self, llm, *, budget_enforcer=None, user_id: str | None = None):
+        """Initialize with a MultiModelLLM instance + optional enforcer."""
         self._llm = llm
+        self._budget = budget_enforcer
+        self._user_id = user_id
         self._constitutional_constraints = self._load_constraints()
+
+    def _assert_budget(self, stage_name: str) -> None:
+        """Pre-flight gate before each stage's model call. No-op when
+        the enforcer wasn't wired in (e.g., test or admin flows)."""
+        if self._budget is not None:
+            self._budget.assert_allowed(stage_name=stage_name)
 
     @staticmethod
     def _load_constraints() -> str:
@@ -272,6 +288,7 @@ class SynthesisPipeline:
 
         # Stage 1: DECOMPOSE
         logger.info(f"Synthesis {run_id}: Stage 1/5 DECOMPOSE")
+        self._assert_budget("DECOMPOSE")
         field_scope_text = f"Field scope: {field_scope}" if field_scope else ""
         decompose_prompt = DECOMPOSE_PROMPT.format(
             hypothesis=hypothesis,
@@ -301,6 +318,7 @@ class SynthesisPipeline:
 
         # Stage 3: SYNTHESIZE
         logger.info(f"Synthesis {run_id}: Stage 3/5 SYNTHESIZE")
+        self._assert_budget("SYNTHESIZE")
         grant_sections = GRANT_FORMATS.get(grant_type, "") if grant_type else ""
         synthesize_prompt = SYNTHESIZE_PROMPT.format(
             output_format=output_format,
@@ -325,6 +343,7 @@ class SynthesisPipeline:
 
         # Stage 4: GAP_ANALYZE
         logger.info(f"Synthesis {run_id}: Stage 4/5 GAP_ANALYZE")
+        self._assert_budget("GAP_ANALYZE")
         gap_prompt = GAP_ANALYZE_PROMPT.format(
             synthesis=narrative[:4000],
             hypothesis=hypothesis,
@@ -350,6 +369,7 @@ class SynthesisPipeline:
 
         # Stage 5: FORMAT
         logger.info(f"Synthesis {run_id}: Stage 5/5 FORMAT")
+        self._assert_budget("FORMAT")
         grant_format_instructions = GRANT_FORMATS.get(grant_type, "") if grant_type else ""
         format_specific = FORMAT_INSTRUCTIONS.get(output_format, FORMAT_INSTRUCTIONS["narrative"])
         format_prompt = FORMAT_PROMPT.format(

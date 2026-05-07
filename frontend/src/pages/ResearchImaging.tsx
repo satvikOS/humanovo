@@ -942,7 +942,7 @@ export default function ResearchImaging() {
               ctx.fillText(`REF: ${refStudy.title}`, 8, dispH - 8)
             }
           }
-        } catch (e) {
+        } catch {
           // Silently ignore registration overlay errors
         }
       }
@@ -1267,8 +1267,9 @@ export default function ResearchImaging() {
         }
         setStudies(prev => [study, ...prev])
         setSelectedId(study.id)
-      } catch (err: any) {
-        setUploadError(err?.message || `Failed to load "${file.name}"`)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : `Failed to load "${file.name}"`
+        setUploadError(msg)
       }
     }
     // Reset the input so the same file can be re-uploaded after an error
@@ -1342,9 +1343,10 @@ export default function ResearchImaging() {
       } else {
         setAiAnalysis('No analysis returned. Please try again.')
       }
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail
-      setAiAnalysis(`Analysis failed: ${detail || err?.message || 'Unknown error'}`)
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string }
+      const detail = e?.response?.data?.detail
+      setAiAnalysis(`Analysis failed: ${detail || e?.message || 'Unknown error'}`)
     }
     setAiLoading(false)
   }
@@ -1403,7 +1405,7 @@ export default function ResearchImaging() {
 
           <select
             value={filterModality}
-            onChange={e => setFilterModality(e.target.value as any)}
+            onChange={e => setFilterModality(e.target.value as Modality | 'all')}
             className="w-full px-2 py-1.5 text-xs rounded-md outline-none"
             style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text)' }}
           >

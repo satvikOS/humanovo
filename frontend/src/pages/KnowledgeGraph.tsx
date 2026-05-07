@@ -909,18 +909,18 @@ export default function KnowledgeGraph() {
                                   newNodes.push({
                                     id,
                                     label: name || id,
-                                    type: (type || 'entity') as any,
+                                    type: type || 'entity',
                                     confidence: 0.7,
-                                  } as any)
+                                  })
                                 }
-                                addNode(rel.source_id, rel.source_name, (rel as any).source_type)
-                                addNode(rel.target_id, rel.target_name, (rel as any).target_type)
+                                addNode(rel.source_id, rel.source_name, rel.source_type)
+                                addNode(rel.target_id, rel.target_name, rel.target_type)
                               }
                               const newEdges = top.map((rel, i) => ({
                                 id: `${rel.source_id}-${rel.target_id}-${i}`,
                                 source: rel.source_id,
                                 target: rel.target_id,
-                                relation: rel.relation_type as any,
+                                relation: rel.relation_type,
                                 confidence: rel.confidence ?? 0.7,
                                 evidenceCount: 0,
                               }))

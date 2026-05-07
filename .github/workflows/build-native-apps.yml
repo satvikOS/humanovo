@@ -1,0 +1,186 @@
+name: Build Native Apps (Win/Mac/Linux)
+
+# Cross-platform Tauri build for the desktop apps users actually
+# install. Triggers:
+#
+#   - tag push  (refs/tags/v*) -> build all 3 platforms + create a
+#     GitHub Release with the artifacts attached. Path for shipping:
+#     tag the commit, the workflow does the rest.
+#   - workflow_dispatch         -> manual build for testing without
+#     cutting a release. Artifacts uploaded but no release created.
+#
+# Build matrix:
+#   - macos-latest    -> .app + .dmg (universal: x86_64 + aarch64)
+#   - windows-latest  -> .exe + .msi
+#   - ubuntu-22.04    -> .deb + .AppImage  (22.04 not 24.04 because of
+#                        the libwebkit2gtk-4.1 ABI break)
+#
+# Code signing: handled via tauri.conf.json platform sections, populated
+# from secrets when present. A run with empty signing secrets still
+# produces unsigned binaries — useful for developer testing only.
+#
+# Prerequisite: icon files must exist under frontend/src-tauri/icons/.
+# Run `cd frontend && npm run tauri:icon path/to/source.png` once
+# locally before the first CI build, OR commit pre-built icons.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional: tag to attach the build to (leave blank for dispatch-only build, no release)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: native-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+            label: macos-universal
+          - platform: ubuntu-22.04
+            args: ''
+            label: linux-x86_64
+          - platform: windows-latest
+            args: ''
+            label: windows-x86_64
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust deps
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+
+      - name: Install Linux build deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev
+
+      - name: Install npm deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Verify icon assets exist
+        working-directory: frontend
+        shell: bash
+        run: |
+          required_icons=(
+            "src-tauri/icons/32x32.png"
+            "src-tauri/icons/128x128.png"
+            "src-tauri/icons/icon.icns"
+            "src-tauri/icons/icon.ico"
+          )
+          missing=()
+          for icon in "${required_icons[@]}"; do
+            if [ ! -f "$icon" ]; then
+              missing+=("$icon")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing icon files: ${missing[*]}"
+            echo "Run `cd frontend && npm run tauri:icon path/to/1024x1024.png` once locally and commit the generated files. See frontend/src-tauri/icons/README.md."
+            exit 1
+          fi
+          echo "All required icons present."
+
+      - name: Build native app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Code-signing secrets — empty in CI by default. Set them in
+          # repo Settings -> Secrets when ready to ship signed builds.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: frontend
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || github.event.inputs.release_tag }}
+          releaseName: humanovo ${{ github.ref_name }}
+          releaseBody: |
+            humanovo ${{ github.ref_name }} — native app builds.
+
+            Install the artifact matching your OS:
+              - macOS:   humanovo_${{ github.ref_name }}_universal.dmg
+              - Windows: humanovo_${{ github.ref_name }}_x64-setup.exe or _x64_en-US.msi
+              - Linux:   humanovo_${{ github.ref_name }}_amd64.deb or _amd64.AppImage
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload artifacts (workflow_dispatch fallback)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag == ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: humanovo-${{ matrix.label }}
+          path: |
+            frontend/src-tauri/target/release/bundle/**/*.dmg
+            frontend/src-tauri/target/release/bundle/**/*.msi
+            frontend/src-tauri/target/release/bundle/**/*.exe
+            frontend/src-tauri/target/release/bundle/**/*.deb
+            frontend/src-tauri/target/release/bundle/**/*.AppImage
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Print results to job summary
+        shell: bash
+        run: |
+          {
+            echo "## humanovo native build — ${{ matrix.label }}"
+            echo ""
+            echo "Platform: \`${{ matrix.platform }}\`"
+            echo "Args: \`${{ matrix.args }}\`"
+            if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              echo ""
+              echo "Release: \`${{ github.ref_name }}\` (draft) — review + publish in the Releases tab"
+            else
+              echo ""
+              echo "workflow_dispatch run — artifacts uploaded under \`humanovo-${{ matrix.label }}\` for 14 days"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

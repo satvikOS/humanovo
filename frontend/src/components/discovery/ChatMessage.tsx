@@ -17,7 +17,7 @@ interface ChatMessageProps {
   // Set to true for the last assistant message while the stream is
   // still arriving — renders a blinking caret at the end of the body.
   streaming?: boolean
-  onCardAction?: (cardKind: string, payload: Record<string, any>) => void
+  onCardAction?: (cardKind: string, payload: Record<string, unknown>) => void
 }
 
 // Very small markdown-to-JSX — handles **bold**, *italic*, > blockquote,

@@ -15,10 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.ownership import (
+    assert_owns_project,
+    fetch_owned_or_global_or_404,
+    filter_by_owned_or_global_project,
+    filter_by_owned_project,
+)
 from app.models.evidence import Evidence, EvidenceSource as EvidenceSourceModel
+from app.models.user import User
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
 class EvidenceSource(str, Enum):
@@ -141,8 +149,13 @@ def evidence_to_response(e: Evidence) -> EvidenceResponse:
 async def create_evidence(
     evidence: EvidenceCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceResponse:
-    """Create a new evidence item manually."""
+    """Create a new evidence item, optionally attached to one of the
+    caller's projects. Evidence with no project_id is global-corpus
+    (will tighten once `created_by` lands on the model)."""
+    if evidence.project_id is not None:
+        await assert_owns_project(db, evidence.project_id, current_user)
     logger.info("Creating new evidence", title=evidence.title[:50])
 
     db_evidence = Evidence(
@@ -174,8 +187,10 @@ async def create_evidence(
 async def search_evidence(
     request: EvidenceSearchRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceSearchResponse:
-    """Search for evidence using semantic or keyword search."""
+    """Search the caller-visible evidence corpus (their project-attached
+    rows + globally-scoped rows) via semantic or keyword search."""
     logger.info(
         "Searching evidence",
         query=request.query,
@@ -198,10 +213,17 @@ async def search_evidence(
                 },
             )
 
-            # Fetch evidence from database using IDs from vector search
+            # Fetch evidence from database using IDs from vector search.
+            # Tenant filter strips out IDs the caller can't see (other
+            # users' project-attached rows leak into the global vector
+            # store today; explicit join enforces the boundary).
             if vector_results:
                 evidence_ids = [r.id for r in vector_results]
-                query = select(Evidence).where(Evidence.id.in_(evidence_ids))
+                query = filter_by_owned_or_global_project(
+                    select(Evidence).where(Evidence.id.in_(evidence_ids)),
+                    Evidence,
+                    current_user,
+                )
                 result = await db.execute(query)
                 evidence_items = result.scalars().all()
                 items = [evidence_to_response(e) for e in evidence_items]
@@ -211,10 +233,9 @@ async def search_evidence(
             search_type = "semantic"
         except Exception as e:
             logger.warning(f"Semantic search failed, falling back to keyword: {e}")
-            # Fall back to keyword search
-            items, search_type = await _keyword_search(db, request)
+            items, search_type = await _keyword_search(db, request, current_user)
     else:
-        items, search_type = await _keyword_search(db, request)
+        items, search_type = await _keyword_search(db, request, current_user)
 
     return EvidenceSearchResponse(
         items=items,
@@ -225,16 +246,22 @@ async def search_evidence(
 
 
 async def _keyword_search(
-    db: AsyncSession, request: EvidenceSearchRequest
+    db: AsyncSession,
+    request: EvidenceSearchRequest,
+    current_user: User,
 ) -> tuple[list[EvidenceResponse], str]:
-    """Perform keyword search in database."""
+    """Keyword search restricted to the caller-visible corpus."""
     query_lower = f"%{request.query.lower()}%"
 
-    query = select(Evidence).where(
-        or_(
-            Evidence.title.ilike(query_lower),
-            Evidence.abstract.ilike(query_lower),
-        )
+    query = filter_by_owned_or_global_project(
+        select(Evidence).where(
+            or_(
+                Evidence.title.ilike(query_lower),
+                Evidence.abstract.ilike(query_lower),
+            )
+        ),
+        Evidence,
+        current_user,
     )
 
     # Apply source type filter
@@ -263,35 +290,33 @@ async def list_evidence(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceListResponse:
-    """List evidence items with filtering and pagination."""
-    # Build base query
-    query = select(Evidence)
+    """List evidence items: rows attached to one of the caller's
+    projects, plus global-corpus rows (project_id IS NULL)."""
+    query = filter_by_owned_or_global_project(
+        select(Evidence), Evidence, current_user
+    )
+    count_query = filter_by_owned_or_global_project(
+        select(func.count(Evidence.id)), Evidence, current_user
+    )
 
-    # Apply filters
     if project_id:
         query = query.where(Evidence.project_id == project_id)
-    if source_type:
-        query = query.where(Evidence.source_type == EvidenceSourceModel(source_type.value))
-
-    # Get total count
-    count_query = select(func.count()).select_from(Evidence)
-    if project_id:
         count_query = count_query.where(Evidence.project_id == project_id)
     if source_type:
-        count_query = count_query.where(Evidence.source_type == EvidenceSourceModel(source_type.value))
+        query = query.where(Evidence.source_type == EvidenceSourceModel(source_type.value))
+        count_query = count_query.where(
+            Evidence.source_type == EvidenceSourceModel(source_type.value)
+        )
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Sort by date
     query = query.order_by(desc(Evidence.updated_at))
-
-    # Paginate
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
 
-    # Execute
     result = await db.execute(query)
     evidence_items = result.scalars().all()
 
@@ -307,15 +332,11 @@ async def list_evidence(
 async def get_evidence(
     evidence_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceResponse:
-    """Get a specific evidence item by ID."""
-    query = select(Evidence).where(Evidence.id == evidence_id)
-    result = await db.execute(query)
-    evidence = result.scalar_one_or_none()
-
-    if not evidence:
-        raise HTTPException(status_code=404, detail="Evidence not found")
-
+    """Get an evidence item if it belongs to one of the caller's
+    projects or is in the global corpus."""
+    evidence = await fetch_owned_or_global_or_404(db, Evidence, evidence_id, current_user)
     return evidence_to_response(evidence)
 
 
@@ -336,13 +357,13 @@ async def update_evidence(
     evidence_id: UUID,
     update: EvidenceUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> EvidenceResponse:
-    """Update an evidence item."""
-    query = select(Evidence).where(Evidence.id == evidence_id)
-    result = await db.execute(query)
-    evidence = result.scalar_one_or_none()
-
-    if not evidence:
+    """Update an evidence item the caller owns. Cannot mutate global
+    evidence (rows with project_id NULL) — returns 404."""
+    evidence = await fetch_owned_or_global_or_404(db, Evidence, evidence_id, current_user)
+    if evidence.project_id is None:
+        # Global rows are read-only until `created_by` ships.
         raise HTTPException(status_code=404, detail="Evidence not found")
 
     update_data = update.model_dump(exclude_unset=True)
@@ -364,15 +385,13 @@ async def update_evidence(
 async def delete_evidence(
     evidence_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> None:
-    """Delete an evidence item."""
-    query = select(Evidence).where(Evidence.id == evidence_id)
-    result = await db.execute(query)
-    evidence = result.scalar_one_or_none()
-
-    if not evidence:
+    """Delete an evidence item the caller owns. Global rows
+    (project_id NULL) are immutable to non-admins — returns 404."""
+    evidence = await fetch_owned_or_global_or_404(db, Evidence, evidence_id, current_user)
+    if evidence.project_id is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
-
     await db.delete(evidence)
     await db.commit()
     logger.info("Evidence deleted", evidence_id=str(evidence_id))
@@ -383,47 +402,49 @@ async def get_related_evidence(
     evidence_id: UUID,
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> list[EvidenceResponse]:
-    """Get evidence items related to a specific evidence item.
+    """Find evidence related to one of the caller-visible items.
 
-    Uses vector similarity to find semantically related evidence.
+    Uses vector similarity. Both the seed item and the related results
+    are scoped to the caller's accessible corpus (their projects +
+    global rows).
     """
-    query = select(Evidence).where(Evidence.id == evidence_id)
-    result = await db.execute(query)
-    evidence = result.scalar_one_or_none()
+    evidence = await fetch_owned_or_global_or_404(
+        db, Evidence, evidence_id, current_user
+    )
 
-    if not evidence:
-        raise HTTPException(status_code=404, detail="Evidence not found")
-
-    # If no embedding, return evidence with similar entities
     if not evidence.embedding_id:
         if evidence.entities:
-            # Find evidence with overlapping entities
-            related_query = (
+            related_query = filter_by_owned_or_global_project(
                 select(Evidence)
                 .where(Evidence.id != evidence_id)
                 .where(Evidence.entities.overlap(evidence.entities))
-                .limit(limit)
+                .limit(limit),
+                Evidence,
+                current_user,
             )
             related_result = await db.execute(related_query)
             related = related_result.scalars().all()
             return [evidence_to_response(e) for e in related]
         return []
 
-    # Use vector store to find similar
     try:
         from app.knowledge.vector_store import find_similar
 
         similar_ids = await find_similar(
             embedding_id=evidence.embedding_id,
-            limit=limit + 1,  # Include extra to filter out self
+            limit=limit + 1,
         )
 
-        # Filter out self and fetch from database
         similar_ids = [sid for sid in similar_ids if sid != evidence_id][:limit]
 
         if similar_ids:
-            related_query = select(Evidence).where(Evidence.id.in_(similar_ids))
+            related_query = filter_by_owned_or_global_project(
+                select(Evidence).where(Evidence.id.in_(similar_ids)),
+                Evidence,
+                current_user,
+            )
             related_result = await db.execute(related_query)
             related = related_result.scalars().all()
             return [evidence_to_response(e) for e in related]
@@ -437,8 +458,17 @@ async def get_related_evidence(
 async def bulk_create_evidence(
     items: list[EvidenceCreate],
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> list[EvidenceResponse]:
-    """Bulk create evidence items."""
+    """Bulk-create evidence items. project_id (when set) must reference
+    one of the caller's projects."""
+    # Validate project ownership for any non-global items up front so
+    # we don't insert half a batch then fail.
+    seen_projects: set[UUID] = set()
+    for item in items:
+        if item.project_id is not None and item.project_id not in seen_projects:
+            await assert_owns_project(db, item.project_id, current_user)
+            seen_projects.add(item.project_id)
     logger.info(f"Bulk creating {len(items)} evidence items")
 
     created = []

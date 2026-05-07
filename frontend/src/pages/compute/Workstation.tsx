@@ -14,6 +14,7 @@ import {
 } from 'recharts'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import Plotly from 'plotly.js-dist-min'
+import type { Data, Layout } from 'plotly.js'
 
 const PlotlyChart = createPlotlyComponent(Plotly)
 import {
@@ -136,12 +137,12 @@ function loadScripts(): ScriptStore {
       const parsed = JSON.parse(raw)
       if (parsed && Array.isArray(parsed.list) && parsed.list.length > 0) {
         return {
-          list: parsed.list.map((s: any) => ({
+          list: parsed.list.map((s: Record<string, unknown>) => ({
             id: String(s.id ?? makeScriptId()),
             name: String(s.name ?? 'untitled.hm'),
             code: String(s.code ?? ''),
           })),
-          activeId: String(parsed.activeId ?? parsed.list[0].id),
+          activeId: String(parsed.activeId ?? (parsed.list[0] as Record<string, unknown>).id),
         }
       }
     }
@@ -907,7 +908,7 @@ export default function Workstation() {
       const map = new Map<string, { scrollTop: number; scrollLeft: number; selStart: number; selEnd: number }>()
       for (const [k, v] of Object.entries(parsed)) {
         if (v && typeof v === 'object') {
-          const o = v as any
+          const o = v as Record<string, unknown>
           map.set(k, {
             scrollTop: Number(o.scrollTop) || 0,
             scrollLeft: Number(o.scrollLeft) || 0,
@@ -1453,8 +1454,9 @@ export default function Workstation() {
         const firstErr = res.outputs.find(o => o.kind === 'error' && typeof o.line === 'number')
         if (firstErr?.line) setErrorLine(firstErr.line)
         producedError = res.outputs.some(o => o.kind === 'error')
-      } catch (e: any) {
-        setEntries(prev => [...prev, mkEntry({ kind: 'error', text: String(e?.message ?? e) })])
+      } catch (e: unknown) {
+        const msg = (e instanceof Error ? e.message : String(e))
+        setEntries(prev => [...prev, mkEntry({ kind: 'error', text: msg })])
         producedError = true
       } finally {
         const ms = performance.now() - t0
@@ -1565,8 +1567,9 @@ export default function Workstation() {
     try {
       const res = runEngine(line, workspaceRef.current)
       appendOutputs(res.outputs)
-    } catch (e: any) {
-      setEntries(prev => [...prev, mkEntry({ kind: 'error', text: String(e?.message ?? e) })])
+    } catch (e: unknown) {
+      const msg = (e instanceof Error ? e.message : String(e))
+      setEntries(prev => [...prev, mkEntry({ kind: 'error', text: msg })])
     }
     setCmd('')
   }, [history, appendOutputs])
@@ -1929,8 +1932,9 @@ export default function Workstation() {
           kind: 'output',
           text: `Imported ${n} variable${n === 1 ? '' : 's'} from ${file.name}`,
         })])
-      } catch (e: any) {
-        setEntries(prev => [...prev, mkEntry({ kind: 'error', text: `${file.name}: ${String(e?.message ?? e)}` })])
+      } catch (e: unknown) {
+        const msg = (e instanceof Error ? e.message : String(e))
+        setEntries(prev => [...prev, mkEntry({ kind: 'error', text: `${file.name}: ${msg}` })])
       }
     }
     r.readAsText(file)
@@ -8411,10 +8415,10 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
   // 3D plot rendering via Plotly
   if (plot?.mode3d) {
     const cs = plot.colorscale || 'Viridis'
-    let traces: any[] = []
+    let traces: Array<Record<string, unknown>> = []
     const mode = plot.mode3d
     if (mode === 'surface' || mode === 'wireframe' || mode === 'contour') {
-      const base: any = {
+      const base: Record<string, unknown> = {
         type: 'surface', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ,
         colorscale: cs, opacity: mode === 'wireframe' ? 0.4 : 0.92,
       }
@@ -8432,7 +8436,7 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
       traces = [{ type: 'heatmap', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ, colorscale: cs }]
     }
     const is2D = mode === 'heatmap'
-    const layout: any = {
+    const layout: Record<string, unknown> = {
       paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: '#a1a1aa', size: 11 }, margin: { l: 10, r: 10, t: plot.title ? 30 : 10, b: 10 },
       showlegend: false, autosize: true,
@@ -8457,7 +8461,7 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
           exportName={(plot.title || `figure-${mode}`).replace(/[^\w-]+/g, '_')}
         >
           <div style={{ width: '100%', height: 480 }}>
-            <PlotlyChart data={traces} layout={layout} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
+            <PlotlyChart data={traces as unknown as Data[]} layout={layout as Partial<Layout>} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
           </div>
         </PublicationFigure>
       </div>

@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios'
 import { toast } from '../contexts/ToastContext'
+import { getToken, clearToken, isTokenExpired } from './auth'
 
 // In production (CloudFront), set VITE_API_BASE_URL to the backend URL
 // (e.g. https://api.humanovo.com or API Gateway URL).
@@ -11,6 +12,12 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
  * request shapes (form-data uploads, WebSocket auth, raw POST bodies)
  * can use the configured interceptor + baseURL directly instead of
  * hand-rolling fetch().
+ *
+ * Auth: a request interceptor attaches `Authorization: Bearer <jwt>`
+ * from local storage if present. A response interceptor clears the
+ * token on 401 and redirects the app to /login. Endpoints that should
+ * NOT trigger this redirect (e.g. /auth/login itself) use a separate
+ * axios instance defined in services/auth.ts.
  */
 export const apiClient: AxiosInstance = axios.create({
   baseURL: `${API_BASE}/api/v1`,
@@ -18,6 +25,27 @@ export const apiClient: AxiosInstance = axios.create({
     'Content-Type': 'application/json',
   },
 })
+
+// Request interceptor: attach the JWT to every request that has one.
+// Pre-emptively clears expired tokens — saves a server round-trip on
+// the first request after the TTL elapses.
+apiClient.interceptors.request.use(
+  (config) => {
+    if (isTokenExpired()) {
+      clearToken()
+      // Don't attach an expired token; let the request go through and
+      // the response interceptor handle the 401 redirect uniformly.
+      return config
+    }
+    const token = getToken()
+    if (token) {
+      config.headers = config.headers || {}
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error),
+)
 
 // Opt-out header: set `X-Silent-Error: '1'` on a request to suppress the
 // global toast (useful for background polls where failure is expected
@@ -77,6 +105,28 @@ apiClient.interceptors.response.use(
     } else if (error.request) {
       console.error(`[API] ${message}`)
     }
+    // 401 handling: clear the local token and redirect to /login. The
+    // RequireAuth route guard would catch a navigation that lands on a
+    // protected page without a token, but a 401 in-flight on a stale
+    // token (e.g. after the user idled past the JWT TTL) needs to be
+    // converted into a re-auth prompt directly.
+    if (error.response?.status === 401) {
+      const url = error.config?.url || ''
+      // Don't loop on /auth/login itself — that 401 means wrong creds,
+      // surfaced by the login page (which uses authClient, not this
+      // instance, but defensively skip anyway).
+      const isAuthEndpoint = typeof url === 'string' && /\/auth\/(login|register)/.test(url)
+      if (!isAuthEndpoint) {
+        clearToken()
+        // Avoid double-redirects from concurrent failures.
+        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+          // Preserve the page the user was on so we can return them
+          // there after re-login.
+          const next = encodeURIComponent(window.location.pathname + window.location.search)
+          window.location.href = `/login?next=${next}`
+        }
+      }
+    }
     if (!silent && error.response?.status !== 401 && error.response?.status !== 404) {
       // Collapse all 5xx + network errors under a single title/message so
       // the ToastContext dedup (3s window) merges a backend-down storm
@@ -116,7 +166,7 @@ export interface Project {
     confidence: number
     model_used: string
     validated: boolean
-    external_factors: any[]
+    external_factors: string[]
     created_at: string
   }>
   created_at: string
@@ -346,7 +396,7 @@ export interface OrchestratorStatus {
   agents_by_role: Record<string, number>
   agents_by_model: Record<string, number>
   models_active: string[]
-  token_pool_stats: Record<string, any>
+  token_pool_stats: Record<string, unknown>
   learning_stats: {
     total_explored: number
     low_value_paths: number
@@ -364,8 +414,8 @@ export interface DiscoveryHypothesis {
   mechanism: string
   confidence: number
   novelty_score: number
-  external_factors: any[]
-  evidence_summary: any[]
+  external_factors: string[]
+  evidence_summary: Array<Record<string, unknown>>
   risks: string[]
   validation_steps: string[]
   key_citations: string[]
@@ -384,6 +434,7 @@ export interface DiscoveryConfig {
   research_guidance?: string
   knowledge_base_ids?: string[]
   document_context?: boolean
+  external_factors?: string[]
 }
 
 // ─── RAG ───────────────────────────────────────────────────────────
@@ -406,7 +457,7 @@ export interface RAGResult {
     content: string
     source_type: string
     relevance_score: number
-    metadata: Record<string, any>
+    metadata: Record<string, unknown>
   }>
   total_results: number
   retrieval_mode: string
@@ -439,8 +490,8 @@ export interface AgentTask {
   task_type: string
   status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
   progress: number
-  input_data?: Record<string, any>
-  output_data?: Record<string, any>
+  input_data?: Record<string, unknown>
+  output_data?: Record<string, unknown>
   error_message?: string
   tokens_used?: number
   started_at?: string
@@ -487,7 +538,7 @@ export interface Activity {
   entity_id?: string
   entity_type?: string
   project_name?: string
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
   annotation?: string
   created_at: string
 }
@@ -507,6 +558,19 @@ export interface PaginationParams {
   page_size?: number
 }
 
+// Standard bulk-action response shapes used across all
+// `/X/bulk-delete` and `/X/bulk-archive` endpoints.
+export interface BulkDeleteResult {
+  deleted: string[]
+  deleted_count: number
+  status?: string
+}
+export interface BulkArchiveResult {
+  updated: string[]
+  updated_count: number
+  status: 'archived' | 'active' | string
+}
+
 // ─── Search ────────────────────────────────────────────────────────
 
 export interface SearchResult {
@@ -517,7 +581,7 @@ export interface SearchResult {
   source: string
   source_type: string
   relevance_score: number
-  metadata: Record<string, any>
+  metadata: Record<string, unknown>
   created_at?: string
   tags?: string[]
 }
@@ -553,7 +617,7 @@ export interface LibraryCitation {
   cite_key?: string | null
   pdf_url?: string | null
   pdf_file_id?: string | null
-  csl_json: Record<string, any>
+  csl_json: Record<string, unknown>
   project_id?: string | null
   created_at: string
   updated_at: string
@@ -586,7 +650,7 @@ export interface LibraryHighlight {
 // ── Discovery Sessions (conversational Discovery persistence) ──
 export interface DiscoveryMessageCard {
   kind: 'hypothesis' | 'evidence' | 'entity' | 'kg_subgraph' | 'citation' | string
-  payload: Record<string, any>
+  payload: Record<string, unknown>
 }
 
 export interface DiscoveryMessage {
@@ -598,7 +662,7 @@ export interface DiscoveryMessage {
   finish_reason?: string | null
   tokens?: { prompt: number; completion: number } | null
   tool_name?: string | null
-  tool_args?: Record<string, any> | null
+  tool_args?: Record<string, unknown> | null
 }
 
 export interface DiscoverySessionSummary {
@@ -765,7 +829,7 @@ export const api = {
     const { data } = await apiClient.post('/citations/import', body)
     return data
   },
-  async exportLibraryCitations(body: { format: 'bibtex' | 'ris' | 'csl'; ids?: string[]; project_id?: string }): Promise<Blob | { items: any[]; count: number }> {
+  async exportLibraryCitations(body: { format: 'bibtex' | 'ris' | 'csl'; ids?: string[]; project_id?: string }): Promise<Blob | { items: Record<string, unknown>[]; count: number }> {
     if (body.format === 'csl') {
       const { data } = await apiClient.post('/citations/export', body)
       return data
@@ -909,7 +973,7 @@ export const api = {
     nodes: Array<{
       id: string; name: string; kind: string; scope: string;
       group: string; color: string; shape: string; size: number;
-      canonical_id?: string; payload?: Record<string, any>;
+      canonical_id?: string; payload?: Record<string, unknown>;
     }>
     links: Array<{
       source: string; target: string; relation: string;
@@ -920,7 +984,7 @@ export const api = {
       project_private: number; project_common: number; public_domain: number;
     }
   }> {
-    const params: Record<string, any> = {}
+    const params: Record<string, unknown> = {}
     if (opts?.userId) params.user_id = opts.userId
     if (opts?.maxNodes) params.max_nodes = opts.maxNodes
     if (opts?.includeAncestors !== undefined)
@@ -966,7 +1030,7 @@ export const api = {
     return data
   },
 
-  async getProjectStats(id: string): Promise<any> {
+  async getProjectStats(id: string): Promise<unknown> {
     const { data } = await apiClient.get(`/projects/${id}/stats`)
     return data
   },
@@ -993,7 +1057,7 @@ export const api = {
     return data
   },
 
-  async getGenerationStatus(taskId: string): Promise<any> {
+  async getGenerationStatus(taskId: string): Promise<unknown> {
     const { data } = await apiClient.get(`/hypotheses/generation/${taskId}`)
     return data
   },
@@ -1012,7 +1076,7 @@ export const api = {
     return data
   },
 
-  async addEvidenceToHypothesis(hypothesisId: string, evidenceRef: Partial<EvidenceRef>): Promise<any> {
+  async addEvidenceToHypothesis(hypothesisId: string, evidenceRef: Partial<EvidenceRef>): Promise<unknown> {
     const { data } = await apiClient.post(`/hypotheses/${hypothesisId}/add-evidence`, evidenceRef)
     return data
   },
@@ -1053,7 +1117,7 @@ export const api = {
     return data
   },
 
-  async bulkCreateEvidence(items: EvidenceCreate[]): Promise<any> {
+  async bulkCreateEvidence(items: EvidenceCreate[]): Promise<unknown> {
     const { data } = await apiClient.post('/evidence/bulk', { items })
     return data
   },
@@ -1104,7 +1168,7 @@ export const api = {
     return data
   },
 
-  async queryCypher(query: string): Promise<any> {
+  async queryCypher(query: string): Promise<unknown> {
     const { data } = await apiClient.post('/knowledge/query', { query })
     return data
   },
@@ -1116,27 +1180,27 @@ export const api = {
     return data
   },
 
-  async ragContext(query: string, params?: { max_tokens?: number; source_types?: string[] }): Promise<any> {
+  async ragContext(query: string, params?: { max_tokens?: number; source_types?: string[] }): Promise<unknown> {
     const { data } = await apiClient.post('/rag/context', { query, ...params })
     return data
   },
 
-  async ragSimilar(documentId: string, params?: { top_k?: number }): Promise<any> {
+  async ragSimilar(documentId: string, params?: { top_k?: number }): Promise<unknown> {
     const { data } = await apiClient.post('/rag/similar', { document_id: documentId, ...params })
     return data
   },
 
-  async ragGraphContext(entities: string[]): Promise<any> {
+  async ragGraphContext(entities: string[]): Promise<unknown> {
     const { data } = await apiClient.post('/rag/graph-context', { entities })
     return data
   },
 
-  async ragStats(): Promise<any> {
+  async ragStats(): Promise<unknown> {
     const { data } = await apiClient.get('/rag/stats')
     return data
   },
 
-  async ragHealth(): Promise<any> {
+  async ragHealth(): Promise<unknown> {
     const { data } = await apiClient.get('/rag/health')
     return data
   },
@@ -1168,12 +1232,12 @@ export const api = {
     return data
   },
 
-  async getIngestionSources(): Promise<any[]> {
+  async getIngestionSources(): Promise<Array<Record<string, unknown>>> {
     const { data } = await apiClient.get('/ingestion/sources')
     return data
   },
 
-  async uploadDocument(file: File, params?: { project_id?: string }): Promise<any> {
+  async uploadDocument(file: File, params?: { project_id?: string }): Promise<{ id?: string; document_id?: string; job_id?: string; [k: string]: unknown }> {
     const formData = new FormData()
     formData.append('file', file)
     if (params?.project_id) formData.append('project_id', params.project_id)
@@ -1183,7 +1247,7 @@ export const api = {
     return data
   },
 
-  async getIngestionQueueStats(): Promise<any> {
+  async getIngestionQueueStats(): Promise<unknown> {
     const { data } = await apiClient.get('/ingestion/queue/stats')
     return data
   },
@@ -1214,7 +1278,7 @@ export const api = {
     return data
   },
 
-  async getSimulationResults(id: string): Promise<any> {
+  async getSimulationResults(id: string): Promise<unknown> {
     const { data } = await apiClient.get(`/simulations/${id}/results`)
     return data
   },
@@ -1241,7 +1305,7 @@ export const api = {
     return data
   },
 
-  async cancelAgentTask(id: string): Promise<any> {
+  async cancelAgentTask(id: string): Promise<unknown> {
     const { data } = await apiClient.post(`/agents/tasks/${id}/cancel`)
     return data
   },
@@ -1253,7 +1317,7 @@ export const api = {
 
   // ── Orchestrator ──────────────────────────────────────────────
 
-  async startDiscovery(config?: DiscoveryConfig): Promise<any> {
+  async startDiscovery(config?: DiscoveryConfig): Promise<{ project_id?: string; project_name?: string; [k: string]: unknown }> {
     const { data } = await apiClient.post('/orchestrator/start', config)
     return data
   },
@@ -1263,17 +1327,17 @@ export const api = {
     return data
   },
 
-  async pauseDiscovery(): Promise<any> {
+  async pauseDiscovery(): Promise<unknown> {
     const { data } = await apiClient.post('/orchestrator/pause')
     return data
   },
 
-  async resumeDiscovery(): Promise<any> {
+  async resumeDiscovery(): Promise<unknown> {
     const { data } = await apiClient.post('/orchestrator/resume')
     return data
   },
 
-  async stopDiscovery(): Promise<any> {
+  async stopDiscovery(): Promise<unknown> {
     const { data } = await apiClient.post('/orchestrator/stop')
     return data
   },
@@ -1285,12 +1349,12 @@ export const api = {
     return data
   },
 
-  async generatePaper(): Promise<any> {
+  async generatePaper(): Promise<unknown> {
     const { data } = await apiClient.post('/orchestrator/paper/generate')
     return data
   },
 
-  async getPaperStatus(): Promise<any> {
+  async getPaperStatus(): Promise<unknown> {
     const { data } = await apiClient.get('/orchestrator/paper/status')
     return data
   },
@@ -1302,7 +1366,7 @@ export const api = {
 
   // ── Discovery Analysis ────────────────────────────────────────
 
-  async analyzeDisease(config: DiscoveryConfig): Promise<any> {
+  async analyzeDisease(config: DiscoveryConfig): Promise<unknown> {
     const { data } = await apiClient.post('/discovery/analyze', config)
     return data
   },
@@ -1412,7 +1476,7 @@ export const api = {
       /* backend unreachable — pure localStorage path below */
     }
 
-    const raw = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as any[]
+    const raw = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Array<Activity & { timestamp?: string }>
     // Normalize: ensure created_at is set (legacy items may only have timestamp)
     const localItems: Activity[] = raw.map(a => ({
       ...a,
@@ -1446,14 +1510,14 @@ export const api = {
 
   async getActivity(id: string): Promise<Activity> {
     const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
-    const found = all.find((a: any) => a.id === id)
+    const found = all.find((a) => a.id === id)
     if (!found) throw new Error('Activity not found')
     return found
   },
 
   async updateActivity(id: string, update: { annotation?: string; description?: string }): Promise<Activity> {
     const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
-    const idx = all.findIndex((a: any) => a.id === id)
+    const idx = all.findIndex((a) => a.id === id)
     if (idx === -1) throw new Error('Activity not found')
     Object.assign(all[idx], update)
     localStorage.setItem('humanovo-activity-log', JSON.stringify(all))
@@ -1462,24 +1526,24 @@ export const api = {
 
   async deleteActivity(id: string): Promise<void> {
     const all = JSON.parse(localStorage.getItem('humanovo-activity-log') || '[]') as Activity[]
-    localStorage.setItem('humanovo-activity-log', JSON.stringify(all.filter((a: any) => a.id !== id)))
+    localStorage.setItem('humanovo-activity-log', JSON.stringify(all.filter((a) => a.id !== id)))
   },
 
   // ── Experiments ───────────────────────────────────────────────
 
-  async getExperiments(params?: PaginationParams & { status?: string; project_id?: string }): Promise<PaginatedResponse<any>> {
+  async getExperiments(params?: PaginationParams & { status?: string; project_id?: string }): Promise<PaginatedResponse<Record<string, unknown>>> {
     const { data } = await apiClient.get('/experiments', { params })
     return data
   },
-  async getExperiment(id: string): Promise<any> {
+  async getExperiment(id: string): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get(`/experiments/${id}`)
     return data
   },
-  async createExperiment(body: Record<string, any>): Promise<any> {
+  async createExperiment(body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { data } = await apiClient.post('/experiments', body)
     return data
   },
-  async updateExperiment(id: string, body: Record<string, any>): Promise<any> {
+  async updateExperiment(id: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { data } = await apiClient.patch(`/experiments/${id}`, body)
     return data
   },
@@ -1489,19 +1553,19 @@ export const api = {
 
   // ── Datasets ──────────────────────────────────────────────────
 
-  async getDatasets(params?: PaginationParams): Promise<PaginatedResponse<any>> {
+  async getDatasets(params?: PaginationParams): Promise<PaginatedResponse<Record<string, unknown>>> {
     const { data } = await apiClient.get('/datasets', { params })
     return data
   },
-  async getDataset(id: string): Promise<any> {
+  async getDataset(id: string): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get(`/datasets/${id}`)
     return data
   },
-  async createDataset(body: Record<string, any>): Promise<any> {
+  async createDataset(body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { data } = await apiClient.post('/datasets', body)
     return data
   },
-  async updateDataset(id: string, body: Record<string, any>): Promise<any> {
+  async updateDataset(id: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { data } = await apiClient.patch(`/datasets/${id}`, body)
     return data
   },
@@ -1511,15 +1575,15 @@ export const api = {
 
   // ── Imaging ───────────────────────────────────────────────────
 
-  async getImagingStudies(params?: PaginationParams): Promise<PaginatedResponse<any>> {
+  async getImagingStudies(params?: PaginationParams): Promise<PaginatedResponse<Record<string, unknown>>> {
     const { data } = await apiClient.get('/imaging/studies', { params })
     return data
   },
-  async getImagingStudy(id: string): Promise<any> {
+  async getImagingStudy(id: string): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get(`/imaging/studies/${id}`)
     return data
   },
-  async createImagingStudy(body: Record<string, any>): Promise<any> {
+  async createImagingStudy(body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { data } = await apiClient.post('/imaging/studies', body)
     return data
   },
@@ -1529,55 +1593,55 @@ export const api = {
 
   // ── Management lists (bulk-delete where available) ────────────
 
-  async getClinicalTrials(): Promise<any> {
+  async getClinicalTrials(): Promise<{ items: Array<Record<string, unknown>>; total?: number }> {
     const { data } = await apiClient.get('/clinical-trials')
     return data
   },
-  async bulkDeleteClinicalTrials(ids: string[]): Promise<any> {
+  async bulkDeleteClinicalTrials(ids: string[]): Promise<BulkDeleteResult> {
     const { data } = await apiClient.post('/clinical-trials/bulk-delete', { ids })
     return data
   },
-  async bulkArchiveClinicalTrials(ids: string[], restore = false): Promise<any> {
+  async bulkArchiveClinicalTrials(ids: string[], restore = false): Promise<BulkArchiveResult> {
     const { data } = await apiClient.post('/clinical-trials/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
     return data
   },
-  async getManuscripts(): Promise<any> {
+  async getManuscripts(): Promise<{ items: Array<Record<string, unknown>>; total?: number }> {
     const { data } = await apiClient.get('/manuscripts')
     return data
   },
-  async bulkDeleteManuscripts(ids: string[]): Promise<any> {
+  async bulkDeleteManuscripts(ids: string[]): Promise<BulkDeleteResult> {
     const { data } = await apiClient.post('/manuscripts/bulk-delete', { ids })
     return data
   },
-  async bulkArchiveManuscripts(ids: string[], restore = false): Promise<any> {
+  async bulkArchiveManuscripts(ids: string[], restore = false): Promise<BulkArchiveResult> {
     const { data } = await apiClient.post('/manuscripts/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
     return data
   },
-  async getBiobankSamples(params?: Record<string, any>): Promise<any> {
+  async getBiobankSamples(params?: Record<string, unknown>): Promise<{ items: Array<Record<string, unknown>>; total?: number }> {
     const { data } = await apiClient.get('/biobank/samples', { params })
     return data
   },
-  async bulkDeleteBiobankSamples(ids: string[]): Promise<any> {
+  async bulkDeleteBiobankSamples(ids: string[]): Promise<BulkDeleteResult> {
     const { data } = await apiClient.post('/biobank/samples/bulk-delete', { ids })
     return data
   },
-  async bulkArchiveBiobankSamples(ids: string[], restore = false): Promise<any> {
+  async bulkArchiveBiobankSamples(ids: string[], restore = false): Promise<BulkArchiveResult> {
     const { data } = await apiClient.post('/biobank/samples/bulk-archive', { ids }, { params: restore ? { restore: true } : {} })
     return data
   },
-  async getMLModels(): Promise<any> {
+  async getMLModels(): Promise<{ items: Array<Record<string, unknown>>; total?: number }> {
     const { data } = await apiClient.get('/ml-models')
     return data
   },
 
   // ── Monitoring ────────────────────────────────────────────────
 
-  async getHealthCheck(): Promise<any> {
+  async getHealthCheck(): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get('/monitoring/health')
     return data
   },
 
-  async getSystemMetrics(): Promise<any> {
+  async getSystemMetrics(): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get('/monitoring/metrics')
     return data
   },
@@ -1598,7 +1662,8 @@ export const api = {
     await Promise.allSettled([
       // Search evidence
       apiClient.post('/evidence/search', { query, limit: params?.limit || 20 }).then(r => {
-        (r.data.items || []).forEach((item: any) => {
+        type EvidenceItem = { id: string; title: string; abstract?: string; snippet?: string; source_type?: string; relevance_score?: number; authors?: unknown; journal?: string; doi?: string; citation_count?: number; created_at?: string; tags?: string[] }
+        ;(r.data.items || []).forEach((item: EvidenceItem) => {
           results.push({
             id: item.id,
             type: 'evidence',
@@ -1632,7 +1697,8 @@ export const api = {
       ]).then(([aliasRes, vectorRes]) => {
         const byId: Record<string, SearchResult> = {}
         if (aliasRes.status === 'fulfilled') {
-          (aliasRes.value.data || []).forEach((item: any) => {
+          type EntityHit = { id: string; name: string; description?: string; entity_type: string; source_count?: number; aliases?: string[]; external_ids?: Record<string, string> }
+          ;((aliasRes.value.data || []) as EntityHit[]).forEach((item) => {
             byId[item.id] = {
               id: item.id,
               type: 'entity',
@@ -1647,7 +1713,8 @@ export const api = {
           })
         }
         if (vectorRes.status === 'fulfilled') {
-          ((vectorRes.value.data as Array<{ entity: any; similarity: number }>) || []).forEach(row => {
+          type VectorEntity = { id: string; name: string; description?: string; entity_type: string; category?: string; aliases?: string[]; synonyms?: string[]; external_ids?: Record<string, string> }
+          ;((vectorRes.value.data as Array<{ entity: VectorEntity; similarity: number }>) || []).forEach(row => {
             const existing = byId[row.entity.id]
             const relevance = Math.max(0, row.similarity)
             const merged: SearchResult = {
@@ -1656,8 +1723,8 @@ export const api = {
               title: row.entity.name,
               snippet: row.entity.description ||
                 `${row.entity.category} · vector match (cos=${row.similarity.toFixed(3)})`,
-              source: row.entity.category,
-              source_type: row.entity.category,
+              source: row.entity.category || row.entity.entity_type,
+              source_type: row.entity.category || row.entity.entity_type,
               relevance_score: existing
                 ? Math.max(existing.relevance_score, relevance)
                 : relevance,
@@ -1677,7 +1744,8 @@ export const api = {
 
       // Search projects
       apiClient.get('/projects', { params: { search: query, page_size: 10 } }).then(r => {
-        (r.data.items || []).forEach((item: any) => {
+        type ProjectHit = { id: string; name: string; description?: string; research_question?: string; disease_focus?: string; hypothesis_count?: number; evidence_count?: number; created_at?: string; tags?: string[] }
+        ;((r.data.items || []) as ProjectHit[]).forEach((item) => {
           results.push({
             id: item.id,
             type: 'project',
@@ -1694,12 +1762,13 @@ export const api = {
       }),
 
       // Search hypotheses
-      apiClient.get('/hypotheses', { params: { page_size: 10 } }).then((r: any) => {
-        const items = (r.data.items || []).filter((item: any) =>
+      apiClient.get('/hypotheses', { params: { page_size: 10 } }).then((r) => {
+        type HypothesisHit = { id: string; statement: string; mechanism?: string; rationale?: string; confidence_score?: number; novelty_score?: number; status?: string; created_at?: string; tags?: string[] }
+        const items = ((r.data.items || []) as HypothesisHit[]).filter((item) =>
           item.statement?.toLowerCase().includes(query.toLowerCase()) ||
           item.mechanism?.toLowerCase().includes(query.toLowerCase())
         )
-        items.forEach((item: any) => {
+        items.forEach((item) => {
           results.push({
             id: item.id,
             type: 'hypothesis',
@@ -1716,8 +1785,9 @@ export const api = {
       }),
 
       // Search RAG
-      apiClient.post('/rag/query', { query, top_k: params?.limit || 10 }).then((r: any) => {
-        (r.data.results || []).forEach((item: any) => {
+      apiClient.post('/rag/query', { query, top_k: params?.limit || 10 }).then((r) => {
+        type RagHit = { id?: string; title?: string; content?: string; source_type?: string; relevance_score?: number; metadata?: Record<string, unknown> }
+        ;((r.data.results || []) as RagHit[]).forEach((item) => {
           // Avoid duplicates from evidence search
           if (!results.find(r => r.id === item.id)) {
             results.push({
@@ -1792,27 +1862,27 @@ export const api = {
     return data
   },
 
-  async listDiscoveryRuns(projectId: string, params?: { status?: string; limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
+  async listDiscoveryRuns(projectId: string, params?: { status?: string; limit?: number; offset?: number }): Promise<{ items: Array<Record<string, unknown>>; total: number }> {
     const { data } = await apiClient.get(`/projects/${projectId}/discovery-runs`, { params })
     return data
   },
 
-  async getDiscoveryRun(runId: string): Promise<any> {
+  async getDiscoveryRun(runId: string): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get(`/discovery-runs/${runId}`)
     return data
   },
 
-  async cancelDiscoveryRun(runId: string): Promise<any> {
+  async cancelDiscoveryRun(runId: string): Promise<unknown> {
     const { data } = await apiClient.delete(`/discovery-runs/${runId}`)
     return data
   },
 
-  async listProjectHypotheses(projectId: string, params?: { limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
+  async listProjectHypotheses(projectId: string, params?: { limit?: number; offset?: number }): Promise<{ items: Array<Record<string, unknown>>; total: number }> {
     const { data } = await apiClient.get(`/projects/${projectId}/hypotheses`, { params })
     return data
   },
 
-  async getProjectHypothesis(projectId: string, hypothesisId: string): Promise<any> {
+  async getProjectHypothesis(projectId: string, hypothesisId: string): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get(`/projects/${projectId}/hypotheses/${hypothesisId}`)
     return data
   },
@@ -1823,7 +1893,7 @@ export const api = {
     boolean_flags?: Record<string, boolean>
     tags?: string[]
     free_text?: string
-  }): Promise<any> {
+  }): Promise<unknown> {
     const { data } = await apiClient.post(`/hypotheses/${hypothesisId}/feedback`, feedback)
     return data
   },
@@ -1842,19 +1912,19 @@ export const api = {
     return data
   },
 
-  async listSynthesisRuns(projectId: string, params?: { limit?: number; offset?: number }): Promise<{ items: any[]; total: number }> {
+  async listSynthesisRuns(projectId: string, params?: { limit?: number; offset?: number }): Promise<{ items: Array<Record<string, unknown>>; total: number }> {
     const { data } = await apiClient.get(`/projects/${projectId}/synthesis-runs`, { params })
     return data
   },
 
-  async getSynthesisRun(projectId: string, runId: string): Promise<any> {
+  async getSynthesisRun(projectId: string, runId: string): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get(`/projects/${projectId}/synthesis-runs/${runId}`)
     return data
   },
 
   // ── Imaging ──────────────────────────────────────────────────
 
-  async uploadImaging(projectId: string, file: File): Promise<any> {
+  async uploadImaging(projectId: string, file: File): Promise<Record<string, unknown>> {
     const formData = new FormData()
     formData.append('file', file)
     const { data } = await apiClient.post(`/projects/${projectId}/imaging/upload`, formData, {
@@ -1863,61 +1933,61 @@ export const api = {
     return data
   },
 
-  async listImagingRecords(projectId: string): Promise<{ items: any[]; total: number }> {
+  async listImagingRecords(projectId: string): Promise<{ items: Array<Record<string, unknown>>; total: number }> {
     const { data } = await apiClient.get(`/projects/${projectId}/imaging`)
     return data
   },
 
-  async linkImagingToHypothesis(projectId: string, recordId: string, hypothesisId: string): Promise<any> {
+  async linkImagingToHypothesis(projectId: string, recordId: string, hypothesisId: string): Promise<unknown> {
     const { data } = await apiClient.post(`/projects/${projectId}/imaging/${recordId}/link-hypothesis`, { hypothesis_id: hypothesisId })
     return data
   },
 
   // ── pgvector Management ──────────────────────────────────────
 
-  async getPgvectorStats(): Promise<any> {
+  async getPgvectorStats(): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get('/dev/pgvector/stats')
     return data
   },
 
-  async pgvectorSearch(query: string, params?: { source?: string; threshold?: number; limit?: number }): Promise<any[]> {
+  async pgvectorSearch(query: string, params?: { source?: string; threshold?: number; limit?: number }): Promise<Array<Record<string, unknown>>> {
     const { data } = await apiClient.post('/dev/pgvector/search', { query, ...params })
     return data
   },
 
-  async pgvectorSimilarityTest(query: string): Promise<any> {
+  async pgvectorSimilarityTest(query: string): Promise<Record<string, unknown>> {
     const { data } = await apiClient.post('/dev/pgvector/similarity-test', { query })
     return data
   },
 
-  async pgvectorTtlCleanup(): Promise<any> {
+  async pgvectorTtlCleanup(): Promise<unknown> {
     const { data } = await apiClient.post('/dev/pgvector/maintenance/ttl-cleanup')
     return data
   },
 
-  async pgvectorReindex(): Promise<any> {
+  async pgvectorReindex(): Promise<unknown> {
     const { data } = await apiClient.post('/dev/pgvector/maintenance/reindex')
     return data
   },
 
-  async pgvectorVacuum(): Promise<any> {
+  async pgvectorVacuum(): Promise<unknown> {
     const { data } = await apiClient.post('/dev/pgvector/maintenance/vacuum')
     return data
   },
 
-  async pgvectorMaintenanceStatus(): Promise<any> {
+  async pgvectorMaintenanceStatus(): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get('/dev/pgvector/maintenance/status')
     return data
   },
 
   // ── Config ──────────────────────────────────────────────────
 
-  async getMethodsTaxonomy(): Promise<any> {
+  async getMethodsTaxonomy(): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get('/config/methods-taxonomy')
     return data
   },
 
-  async getModelPricing(): Promise<any> {
+  async getModelPricing(): Promise<Record<string, unknown>> {
     const { data } = await apiClient.get('/config/model-pricing')
     return data
   },

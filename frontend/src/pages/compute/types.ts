@@ -1,5 +1,7 @@
 // Unified Compute Lab — shared type definitions
 
+import type { ComponentType } from 'react'
+
 export interface ComputeResult {
   statistics?: { label: string; value: string }[]
   chartData?: { x: number; y: number; y2?: number; y3?: number; label?: string; group?: string }[]
@@ -10,14 +12,23 @@ export interface ComputeResult {
   seriesLabels?: string[]
   warnings?: string[]
   error?: string
-  rawData?: any
+  rawData?: unknown
 }
+
+// Each preset knows the concrete types of its own params. The compute()
+// callback receives `Record<string, ParamValue>` but each preset
+// internally treats values as the concrete type it expects (string for
+// text inputs, number for sliders, etc.). Tightening this further would
+// cascade into ~200 preset-specific narrowing calls; leave the contract
+// permissive at this layer and rely on each preset's local invariants.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ParamValue = any
 
 export interface PresetParam {
   key: string
   label: string
   type: 'number' | 'string' | 'select' | 'textarea'
-  default?: any
+  default?: ParamValue
   description?: string
   min?: number
   max?: number
@@ -34,15 +45,15 @@ export interface Preset {
   description: string
   referenceCode: string
   params: PresetParam[]
-  sampleData: Record<string, any>
-  compute: (params: Record<string, any>) => ComputeResult
+  sampleData: Record<string, ParamValue>
+  compute: (params: Record<string, ParamValue>) => ComputeResult
   workflowStage?: 'acquisition' | 'preprocessing' | 'analysis' | 'modeling' | 'visualization' | 'export'
 }
 
 export interface ToolboxCategory {
   id: string
   name: string
-  icon: any
+  icon: ComponentType<{ className?: string }>
   color: string
   presetCount?: number
 }
@@ -68,7 +79,7 @@ export interface MCResult {
   stats: { mean: number; median: number; std: number; ci95: [number, number] }
   histogram: { bin: string; count: number }[]
   convergence: { iteration: number; runningMean: number }[]
-  extra?: Record<string, any>
+  extra?: Record<string, unknown>
 }
 
 export interface SavedEquation {

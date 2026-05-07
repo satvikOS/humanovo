@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     agent_chat_stream,
     agents,
     auth,
+    billing,
     citation_verify,
     citations,
     biobank,
@@ -155,3 +156,8 @@ router.include_router(citation_verify.router, prefix="/citation", tags=["citatio
 
 # Citation Library — full Mendeley-equivalent reference manager.
 router.include_router(citations.router)
+
+# Stripe billing — Checkout + Customer Portal + webhook receiver.
+# Webhook endpoint is intentionally NOT under AUTH_REQUIRED; signature
+# verification on the Stripe-Signature header is the auth.
+router.include_router(billing.router)

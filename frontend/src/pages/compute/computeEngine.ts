@@ -4126,9 +4126,11 @@ export function run(source: string, workspace: Workspace = createWorkspace()): R
     if (ctx.currentPlot && ctx.currentPlot.series.length > 0) {
       outputs.push({ kind: 'plot', plot: ctx.currentPlot })
     }
-  } catch (err: any) {
-    const line = typeof err?.line === 'number' ? err.line : undefined
-    outputs.push({ kind: 'error', text: String(err?.message ?? err), line })
+  } catch (err: unknown) {
+    const e = err as { line?: number; message?: string }
+    const line = typeof e?.line === 'number' ? e.line : undefined
+    const text = err instanceof Error ? err.message : String(e?.message ?? err)
+    outputs.push({ kind: 'error', text, line })
   }
   return { outputs, workspace }
 }

@@ -12,10 +12,13 @@ import { toast } from '../contexts/ToastContext'
 import { apiClient } from '../services'
 import api from '../services/api'
 
+interface TrialArm { name: string; description?: string; target_n?: number }
+interface BudgetCategory { name: string; amount?: number }
+interface TrialBudget { total: number; spent: number; categories?: BudgetCategory[] }
 interface Trial {
   id: string; protocol_number: string; title: string; phase: string; status: string
   pi: string; target_enrollment: number; current_enrollment: number; description: string
-  arms: any[]; budget: any; start_date: string; estimated_end: string; created_at: string
+  arms: TrialArm[]; budget?: TrialBudget; start_date: string; estimated_end: string; created_at: string
 }
 interface Subject { id: string; subject_number: string; display_name: string; age: number; sex: string; arm: string; status: string; enrolled_date: string }
 interface Document { id: string; document_type: string; name: string; status: string; version: string; uploaded_by: string }
@@ -193,8 +196,9 @@ export default function ClinicalTrials() {
                 toast('success', `Archived ${res.updated_count} trial${res.updated_count === 1 ? '' : 's'}`)
                 load()
                 setSelectMode(false); setSelectedIds(new Set())
-              } catch (err: any) {
-                toast('error', err?.message || 'Bulk archive failed', { title: 'Could not archive' })
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : 'Bulk archive failed'
+                toast('error', msg, { title: 'Could not archive' })
               }
             }}
             onRestore={async () => {
@@ -203,8 +207,9 @@ export default function ClinicalTrials() {
                 toast('success', `Restored ${res.updated_count} trial${res.updated_count === 1 ? '' : 's'}`)
                 load()
                 setSelectMode(false); setSelectedIds(new Set())
-              } catch (err: any) {
-                toast('error', err?.message || 'Bulk restore failed', { title: 'Could not restore' })
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : 'Bulk restore failed'
+                toast('error', msg, { title: 'Could not restore' })
               }
             }}
             onDelete={() => setBulkDeleteConfirm(true)}
@@ -260,7 +265,7 @@ export default function ClinicalTrials() {
               <p className="text-xs text-[var(--color-text-muted)] mb-4">{selected.protocol_number} | {selected.phase} | PI: {selected.pi}</p>
 
               <div className="flex gap-1 mb-4">
-                {([['overview', 'Overview', FiClipboard], ['subjects', 'Subjects', FiUsers], ['documents', 'Documents', FiFileText], ['budget', 'Budget', FiDollarSign]] as [ViewTab, string, any][]).map(([id, label, Icon]) => (
+                {([['overview', 'Overview', FiClipboard], ['subjects', 'Subjects', FiUsers], ['documents', 'Documents', FiFileText], ['budget', 'Budget', FiDollarSign]] as [ViewTab, string, React.ComponentType<{ className?: string }>][]).map(([id, label, Icon]) => (
                   <button key={id} onClick={() => setViewTab(id)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${viewTab === id ? 'bg-[var(--glass-bg)] border border-[var(--color-border)]' : 'text-[var(--color-text-muted)]'}`}>
                     <Icon className="w-3.5 h-3.5" /> {label}
@@ -279,7 +284,7 @@ export default function ClinicalTrials() {
                   {selected.arms && selected.arms.length > 0 && (
                     <div className="glass-card p-4">
                       <h3 className="text-xs font-medium mb-2">Study Arms</h3>
-                      {selected.arms.map((arm: any, i: number) => (
+                      {selected.arms.map((arm, i) => (
                         <div key={i} className="flex items-center justify-between py-1.5 text-xs border-b border-[var(--color-border)]/30 last:border-0">
                           <span className="font-medium">{arm.name}</span><span className="text-[var(--color-text-muted)]">{arm.description} (n={arm.target_n})</span>
                         </div>
@@ -378,8 +383,9 @@ export default function ClinicalTrials() {
             toast('success', `Deleted ${res.deleted_count} trial${res.deleted_count === 1 ? '' : 's'}`)
             load()
             setSelectMode(false); setSelectedIds(new Set())
-          } catch (err: any) {
-            toast('error', err?.message || 'Bulk delete failed', { title: 'Could not delete' })
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Bulk delete failed'
+            toast('error', msg, { title: 'Could not delete' })
           }
         }}
         onCancel={() => setBulkDeleteConfirm(false)}

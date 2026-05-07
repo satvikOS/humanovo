@@ -19,7 +19,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
-import api from '../services/api'
+import api, { type IngestionJob } from '../services/api'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
@@ -350,7 +350,7 @@ function DataSettings() {
             <button
               className="btn text-[var(--color-text-secondary)] hover:bg-white/5 text-xs"
               onClick={() => {
-                const data: Record<string, any> = {}
+                const data: Record<string, unknown> = {}
                 for (let i = 0; i < localStorage.length; i++) {
                   const key = localStorage.key(i)
                   if (!key) continue
@@ -523,11 +523,14 @@ function _currentUserId(): string {
   return 'self'
 }
 
+type BudgetPayload = Awaited<ReturnType<typeof api.getUserBudget>>
+type BudgetUsagePayload = Awaited<ReturnType<typeof api.getUserBudgetUsage>>
+
 function UsageBillingSettings() {
   const userId = _currentUserId()
   const [loading, setLoading] = useState(true)
-  const [budget, setBudget] = useState<any>(null)
-  const [usage, setUsage] = useState<any>(null)
+  const [budget, setBudget] = useState<BudgetPayload | null>(null)
+  const [usage, setUsage] = useState<BudgetUsagePayload | null>(null)
   const [capUsd, setCapUsd] = useState<number>(50)
   const [threshold, setThreshold] = useState<number>(80)
   const [hardLimit, setHardLimit] = useState<boolean>(true)
@@ -550,8 +553,9 @@ function UsageBillingSettings() {
       setThreshold(b.alert_threshold_pct ?? 80)
       setHardLimit(Boolean(b.hard_limit))
       setNotifEmail(b.notification_email || '')
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load usage data')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to load usage data'
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -569,11 +573,12 @@ function UsageBillingSettings() {
         hard_limit: hardLimit,
         notification_email: notifEmail.trim() || null,
       })
-      setBudget(updated)
+      setBudget(updated as BudgetPayload)
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
-    } catch (e: any) {
-      setError(e?.message || 'Failed to save')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to save'
+      setError(msg)
     } finally {
       setSaving(false)
     }
@@ -775,7 +780,7 @@ function UsageBillingSettings() {
               <div style={{ width: '100%', height: 140 }}>
                 <ResponsiveContainer>
                   <AreaChart
-                    data={usage.by_day.map((d: any) => ({
+                    data={(usage?.by_day ?? []).map((d) => ({
                       day: (d.day || '').slice(5),
                       cost_usd: Number(d.cost_cents || 0) / 100,
                       n_calls: d.n_calls || 0,
@@ -797,7 +802,7 @@ function UsageBillingSettings() {
                         border: '1px solid var(--color-border)',
                         fontSize: 11,
                       }}
-                      formatter={(v: any) => `$${Number(v).toFixed(3)}`}
+                      formatter={(v) => `$${Number(v ?? 0).toFixed(3)}`}
                       labelStyle={{ color: 'var(--color-text-muted)' }}
                     />
                     <Area
@@ -813,13 +818,13 @@ function UsageBillingSettings() {
             </div>
           )}
 
-          {(usage?.by_model || []).length > 0 && (
+          {usage && usage.by_model && usage.by_model.length > 0 && (
             <div>
               <div className="text-xs text-[var(--color-text-muted)] mb-2">
                 Spend by model
               </div>
               <div className="space-y-1.5">
-                {usage.by_model.slice(0, 8).map((m: any) => (
+                {usage.by_model.slice(0, 8).map((m) => (
                   <div key={m.model} className="flex items-center gap-2 text-xs">
                     <div className="w-48 truncate" title={m.model}>
                       {m.model}
@@ -855,14 +860,19 @@ function UsageBillingSettings() {
 // scope between 'private' (no sharing) and 'common' (shared + royalty-
 // eligible).
 
+type KGOverviewPayload = Awaited<ReturnType<typeof api.getUserKGOverview>>
+type RoyaltiesPayload = Awaited<ReturnType<typeof api.getUserRoyalties>>
+type UploadScope = 'private' | 'common'
+
 function KGContributionsSettings() {
   const userId = _currentUserId()
-  const [overview, setOverview] = useState<any>(null)
-  const [royalties, setRoyalties] = useState<any>(null)
+  const [overview, setOverview] = useState<KGOverviewPayload | null>(null)
+  const [royalties, setRoyalties] = useState<RoyaltiesPayload | null>(null)
   const [loading, setLoading] = useState(true)
-  const [defaultScope, setDefaultScope] = useState<'private' | 'common'>(() => {
+  const [defaultScope, setDefaultScope] = useState<UploadScope>(() => {
     try {
-      return (localStorage.getItem('humanovo-default-upload-scope') as any) || 'private'
+      const v = localStorage.getItem('humanovo-default-upload-scope')
+      return v === 'private' || v === 'common' ? v : 'private'
     } catch { return 'private' }
   })
 
@@ -993,7 +1003,7 @@ function KGContributionsSettings() {
           </div>
           {(royalties?.by_kind || []).length > 0 ? (
             <div className="space-y-1.5">
-              {(royalties.by_kind || []).map((k: any) => (
+              {(royalties?.by_kind ?? []).map((k) => (
                 <div key={k.event_kind}
                      className="flex items-center justify-between text-xs">
                   <span className="capitalize">{k.event_kind}</span>
@@ -1056,10 +1066,8 @@ function AdminSeedSettings() {
   const [busy, setBusy] = useState<'kg' | 'corpus' | null>(null)
   const [lastMessage, setLastMessage] = useState<string>('')
   const [lastPolled, setLastPolled] = useState<Date | null>(null)
-  const [ingestionJobs, setIngestionJobs] = useState<Array<{
-    id: string; name: string; status: string; source: string; created_at: string
-  }> | null>(null)
-  const [queueStats, setQueueStats] = useState<Record<string, any> | null>(null)
+  const [ingestionJobs, setIngestionJobs] = useState<IngestionJob[] | null>(null)
+  const [queueStats, setQueueStats] = useState<Record<string, unknown> | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -1074,8 +1082,8 @@ function AdminSeedSettings() {
       ])
       setStats(s)
       setHealth(h)
-      setIngestionJobs(jobs ? (jobs.items as any) : null)
-      setQueueStats(qs || null)
+      setIngestionJobs(jobs ? jobs.items : null)
+      setQueueStats((qs as Record<string, unknown> | null) || null)
       setLastPolled(new Date())
     } catch {
       // already handled per-promise
@@ -1364,7 +1372,7 @@ function AdminSeedSettings() {
                   className="tabular-nums text-sm"
                   style={{ color: 'var(--color-text)' }}
                 >
-                  {queueStats[k] ?? queueStats[`${k}_count`] ?? 0}
+                  {String(queueStats[k] ?? queueStats[`${k}_count`] ?? 0)}
                 </span>
               </div>
             ))}
@@ -1399,9 +1407,9 @@ function AdminSeedSettings() {
                       color:
                         j.status === 'completed'
                           ? 'var(--color-success)'
-                          : j.status === 'failed'
+                          : j.status === 'failed' || j.status === 'cancelled'
                             ? 'var(--color-error)'
-                            : j.status === 'running'
+                            : j.status === 'fetching' || j.status === 'processing' || j.status === 'indexing'
                               ? 'var(--color-warning)'
                               : 'var(--color-text-muted)',
                     }}
@@ -1557,7 +1565,6 @@ export default function Settings() {
             <button
               key={section.id}
               onClick={() => {
-                if ((section as any).link) { window.location.href = (section as any).link; return }
                 setActiveSection(section.id)
               }}
               className={clsx(
