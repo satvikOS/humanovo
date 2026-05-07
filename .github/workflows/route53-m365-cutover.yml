@@ -92,35 +92,20 @@ jobs:
     name: ${{ inputs.phase }} — SPF mode ${{ inputs.spf_mode }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # EFFECTIVE_* env vars used by every step downstream. Auto-trigger
+    # was removed in commit 8f40533 so these now collapse to a direct
+    # passthrough of inputs.*; keeping the indirection so we don't have
+    # to rewrite every step's reference at the same time.
+    env:
+      EFFECTIVE_PHASE: ${{ inputs.phase }}
+      EFFECTIVE_SPF_MODE: ${{ inputs.spf_mode }}
     steps:
       - name: Verify confirmation phrase
-
-    name: ${{ github.event_name == 'push' && 'apply (auto, push)' || format('{0} — SPF mode {1}', inputs.phase, inputs.spf_mode) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # Resolve effective phase + SPF mode upfront so every step can read
-    # them. Push triggers default to apply + m365+resend (the safe
-    # combination for this setup); workflow_dispatch uses the inputs.
-    env:
-      EFFECTIVE_PHASE: ${{ github.event_name == 'push' && 'apply' || inputs.phase }}
-      EFFECTIVE_SPF_MODE: ${{ github.event_name == 'push' && 'm365+resend' || inputs.spf_mode }}
-    steps:
-      - name: Verify confirmation phrase (workflow_dispatch only)
-        if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ inputs.confirm_intent }}" != "humanovo-net-m365-cutover" ]; then
             echo "::error::Confirmation phrase did not match. Aborting."
             exit 1
           fi
-
-
-      - name: Note for push trigger
-        if: github.event_name == 'push'
-        run: |
-          echo "Triggered by push to humanovo (file change in route53-m365-cutover.yml)."
-          echo "Effective phase: $EFFECTIVE_PHASE"
-          echo "Effective SPF mode: $EFFECTIVE_SPF_MODE"
-          echo "All DNS changes are UPSERTs — re-running this workflow is harmless."
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
