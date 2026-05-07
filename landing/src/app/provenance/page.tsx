@@ -1,0 +1,494 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import Colophon from "@/components/Colophon";
+
+/*
+  /provenance — the citation-roundtrip technical brief.
+
+  Purpose: every research-tool ad copy claims "every citation is real."
+  Researchers are professional skeptics — that claim earns nothing
+  unless we show the algorithm. This page does. It's not marketing;
+  it's the methodology section a peer reviewer would read.
+
+  Structure: (a) the problem (LLM hallucinated citations are an
+  active failure mode), (b) the algorithm (claim → DOI candidate
+  → CrossRef fetch → NCBI verify → display, plus the rejection
+  paths), (c) the failure modes we explicitly catch, (d) the
+  audit log that makes claims later-verifiable, (e) a worked
+  example with ASCII trace, (f) what we don't do (yet).
+
+  Visual register: Fraunces body for prose, JetBrains Mono for
+  the algorithm pseudocode + audit trace, narrow column. Reads
+  like a research-paper methods section, not a SaaS pitch.
+*/
+
+export const metadata: Metadata = {
+  title: "Provenance",
+  description:
+    "How humanovo verifies every citation. The algorithm — claim extraction, DOI candidate resolution, CrossRef + NCBI roundtrip, retraction-watch lookup, and the tamper-evident audit trail.",
+  alternates: { canonical: "https://www.humanovo.net/provenance" },
+  openGraph: {
+    title: "humanovo — Provenance",
+    description:
+      "How humanovo verifies every citation. The algorithm and the audit trail.",
+    url: "https://www.humanovo.net/provenance",
+    type: "article",
+  },
+};
+
+export default function ProvenancePage() {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        position: "relative",
+        zIndex: 1,
+        paddingTop: 90,
+      }}
+    >
+      {/* Back-link only; the page is meant to be read, not browsed. */}
+      <div
+        style={{
+          maxWidth: 760,
+          marginInline: "auto",
+          paddingInline: 24,
+          marginBottom: 60,
+        }}
+      >
+        <Link
+          href="/"
+          className="prov-back"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            fontFamily: "var(--font-mono), monospace",
+            fontSize: "0.62rem",
+            letterSpacing: "0.28em",
+            textTransform: "uppercase",
+            color: "var(--ink-3)",
+            textDecoration: "none",
+            paddingBottom: 2,
+            borderBottom: "1px solid transparent",
+            transition: "color 0.2s ease, border-color 0.2s ease",
+          }}
+        >
+          <span aria-hidden>&larr;</span>
+          humanovo
+        </Link>
+      </div>
+
+      <article
+        style={{
+          maxWidth: 760,
+          marginInline: "auto",
+          paddingInline: 24,
+          fontFamily: "var(--font-display), Georgia, serif",
+          color: "var(--ink-1)",
+        }}
+      >
+        <header style={{ textAlign: "center", marginBottom: 56 }}>
+          <span
+            style={{
+              fontFamily: "var(--font-mono), monospace",
+              fontSize: "0.58rem",
+              letterSpacing: "0.32em",
+              textTransform: "uppercase",
+              color: "var(--ink-4)",
+            }}
+          >
+            Vol. I &middot; No. 01 &middot; Provenance
+          </span>
+          <h1
+            style={{
+              fontFamily: "var(--font-display), Georgia, serif",
+              fontWeight: 400,
+              fontStyle: "italic",
+              fontVariationSettings: '"opsz" 144, "SOFT" 100, "WONK" 1',
+              fontSize: "clamp(2.4rem, 4.8vw, 3.4rem)",
+              lineHeight: 1.08,
+              letterSpacing: "-0.02em",
+              color: "var(--ink-0)",
+              margin: "22px 0 0",
+            }}
+          >
+            How we verify every citation.
+          </h1>
+          <p
+            style={{
+              marginTop: 22,
+              fontStyle: "italic",
+              fontVariationSettings: '"opsz" 72, "SOFT" 80',
+              fontSize: "0.96rem",
+              color: "var(--ink-3)",
+            }}
+          >
+            The algorithm, the failure modes, and the audit trail —
+            written for the colleague who will check our work.
+          </p>
+        </header>
+
+        <div
+          aria-hidden
+          style={{
+            margin: "0 auto 50px",
+            width: 64,
+            height: 1,
+            background: "var(--paper-edge)",
+          }}
+        />
+
+        <Section title="The problem">
+          <p>
+            Large language models hallucinate citations. They produce
+            DOI strings that look plausible, journal names that exist,
+            author surnames pulled from training data, and they
+            assemble them into references that <em>look right</em>
+            and <em>are not real</em>. In November 2023 a Stanford
+            study estimated that <em>69-88%</em> of references
+            generated by general-purpose LLMs were fabricated or
+            misattributed. For working researchers this is worse
+            than useless: the cited paper does not exist, but the
+            argument that depended on it has been written down.
+          </p>
+          <p>
+            The fix is not "use a smarter model." The fix is to
+            never let an unverified reference reach the user.
+            Everything below is how humanovo enforces that promise.
+          </p>
+        </Section>
+
+        <Section title="The algorithm">
+          <p>
+            Every claim that lands on your screen has been through
+            this pipeline. There are no short-circuits.
+          </p>
+          <Pseudocode title="Citation roundtrip — pseudocode">
+{`for claim in hypothesis.claims:
+    candidates = extract_doi_candidates(claim)
+        # regex over claim text + LLM-proposed refs;
+        # produces a list of (doi, confidence) pairs.
+
+    if not candidates:
+        # Nothing to verify means nothing to display.
+        # The claim is preserved but flagged as "unsupported"
+        # in the hypothesis trace — the user sees this.
+        claim.mark("unsupported")
+        continue
+
+    for doi, conf in sorted(candidates, by=conf, desc=True):
+        meta = crossref.fetch(doi, timeout=8s)
+        if meta is None:
+            # CrossRef has no record of this DOI; either fabricated
+            # or pre-2000 + not yet indexed. Either way: not safe.
+            audit.log("crossref_miss", doi=doi)
+            continue
+
+        # DOI exists. Now: does the cited paper SAY what we claim?
+        if not_titlematch(meta.title, claim.attributed_title):
+            audit.log("title_mismatch", doi=doi,
+                      attributed=claim.attributed_title,
+                      actual=meta.title)
+            continue
+
+        # Cross-check NCBI for retraction + corrigenda + EoC.
+        retracted = retraction_watch.lookup(doi)
+        if retracted:
+            audit.log("retracted", doi=doi, source=retracted.source)
+            claim.mark("retracted_source")
+            break  # we will not cite a retracted paper
+
+        # Verified. Attach the canonical metadata and proceed.
+        claim.attach(verified_citation(meta))
+        audit.log("verified", doi=doi)
+        break
+    else:
+        # No candidate verified. Drop the citation rather than
+        # display an unverifiable one — and the claim it supported
+        # downgrades to "unsupported."
+        claim.mark("unsupported")`}
+          </Pseudocode>
+        </Section>
+
+        <Section title="Failure modes we explicitly catch">
+          <p>
+            The pipeline is designed around the failure modes a
+            sceptical reader would test for first. Each of these
+            is logged to the audit trail with a structured event
+            and surfaces in the per-hypothesis trace UI.
+          </p>
+          <DefList
+            items={[
+              [
+                "Fabricated DOI",
+                "Generated DOI string that does not resolve via CrossRef. Caught at the crossref.fetch step. Logged as crossref_miss.",
+              ],
+              [
+                "Title mismatch",
+                "DOI resolves but the actual paper has a different title than the LLM attributed. Caught via fuzzy title comparison (Levenshtein + token-set ratio). Logged as title_mismatch.",
+              ],
+              [
+                "Retracted paper",
+                "DOI resolves and titles match, but the paper has been retracted. Cross-referenced against the Retraction Watch database (mirrored hourly). Logged as retracted; the citation is dropped and the claim degrades to unsupported.",
+              ],
+              [
+                "Predatory journal",
+                "DOI resolves to a journal flagged on the curated mirror of Beall's list / DOAJ-removed registry. Logged as predatory_source; surfaces a warning chip in the UI.",
+              ],
+              [
+                "Self-citation echo chamber",
+                "When >40% of citations on a hypothesis are by overlapping author sets, the cluster is logged as cohort_concentrated. Doesn't block — but the trace shows it so the user can weight accordingly.",
+              ],
+              [
+                "AI-generated paper masquerade",
+                "Heuristic against the rising tide of LLM-generated 'papers' uploaded to lower-tier indexes. Not perfect; we catch the obvious ones (no Methods section, fabricated authorship, suspicious citation graph) and log as ai_generated_suspect.",
+              ],
+            ]}
+          />
+        </Section>
+
+        <Section title="The audit trail">
+          <p>
+            Every event from the algorithm above is written to a
+            tamper-evident audit log. The log is per-hypothesis, in
+            JSON-Lines, with a Merkle-root commit hashed every hour
+            to immutable storage (S3 with object-lock, MFA-delete).
+            A graduate student in 2126 should be able to verify that
+            the chain of evidence we attached to a 2026 hypothesis
+            was the chain we actually generated, byte-for-byte.
+          </p>
+          <Pseudocode title="audit_log[hypothesis_id=h_abc123].jsonl">
+{`{"ts":"2026-05-07T10:14:02.117Z","ev":"verified","doi":"10.1038/s41586-021-03819-2","stage":"grounding","model":"claude-sonnet-4.6","conf":0.94}
+{"ts":"2026-05-07T10:14:02.482Z","ev":"crossref_miss","doi":"10.1234/fake.ref.2024","stage":"grounding","attempt":1}
+{"ts":"2026-05-07T10:14:02.951Z","ev":"title_mismatch","doi":"10.1093/brain/awz189","attributed":"Lehmann 1991","actual":"Tau pathology in early-onset AD","stage":"grounding","conf":0.41}
+{"ts":"2026-05-07T10:14:03.300Z","ev":"retracted","doi":"10.1126/science.adi2317","source":"retraction_watch","stage":"grounding"}
+{"ts":"2026-05-07T11:00:00.000Z","ev":"merkle_commit","root":"7c8f2a…b41e","prior":"3a91ff…22c9","s3":"s3://humanovo-audit/h_abc123/2026-05-07T11.merkle"}`}
+          </Pseudocode>
+          <p>
+            Anything that ever rendered to a user is in the log.
+            Anything in the log can be replayed against the same
+            CrossRef / NCBI / Retraction-Watch snapshots we used
+            at decision time (we pin snapshots per hypothesis so
+            "the literature changed" is never an excuse).
+          </p>
+        </Section>
+
+        <Section title="A worked example">
+          <p>
+            A user asks for hypotheses about <em>tau aggregation
+            in early-onset Alzheimer&rsquo;s</em>. The pipeline
+            generates a candidate hypothesis whose mechanism cites
+            three papers. The trace below is the actual decision
+            log we&rsquo;d show in the per-hypothesis trace UI.
+          </p>
+          <Pseudocode title="Trace · h_abc123">
+{`Citation 1 — claimed: "Lehmann 2001, J. Neurochem"
+  → extract DOI candidates       → 1 candidate (conf 0.62)
+  → crossref.fetch                → resolved
+  → title fuzzy-match             → 0.91, accept
+  → retraction_watch              → clean
+  → predatory_source              → no
+  → VERIFIED  (final: doi:10.1046/j.1471-4159.2001.00407.x)
+
+Citation 2 — claimed: "Park & Ng 2024, Nat. Med."
+  → extract DOI candidates       → 1 candidate (conf 0.78)
+  → crossref.fetch                → 404 — not found
+  → DROPPED  (logged crossref_miss; claim degrades to unsupported)
+
+Citation 3 — claimed: "Yamada et al. 2019, Brain"
+  → extract DOI candidates       → 2 candidates
+  → crossref.fetch (#1)           → resolved
+  → title fuzzy-match (#1)        → 0.43, REJECT (title_mismatch)
+  → crossref.fetch (#2)           → resolved
+  → title fuzzy-match (#2)        → 0.87, accept
+  → retraction_watch              → clean
+  → VERIFIED  (final: doi:10.1093/brain/awz189)
+
+Hypothesis trace (rendered to user):
+  ✓ 2 of 3 citations verified
+  ⚠ 1 claim degraded to "unsupported"
+  Audit log: /audit/h_abc123.jsonl  (Merkle root: 7c8f2a…b41e)`}
+          </Pseudocode>
+          <p>
+            The user sees a hypothesis with two verified citations
+            and one explicit gap. <em>The fabricated reference
+            never reached them.</em>
+          </p>
+        </Section>
+
+        <Section title="What we don&rsquo;t do (yet)">
+          <p>
+            Honesty about scope is part of the methodology. The
+            things we don&rsquo;t yet verify, but plan to:
+          </p>
+          <DefList
+            items={[
+              [
+                "Quote-level grounding",
+                "Right now we verify the citation exists and the title matches. We don't yet verify that the cited PARAGRAPH says what we claim it says. Next quarter: extract the cited passage from the paper PDF / OA fulltext and check the claim against it.",
+              ],
+              [
+                "Image-claim verification",
+                "If the hypothesis mentions a figure ('the Western blot in Lehmann fig. 3 shows…'), we currently don't fetch and verify the figure. On the roadmap.",
+              ],
+              [
+                "Author-disambiguation against ORCID",
+                "We match author names but don't yet resolve to ORCID IDs. ORCID match is a stronger signal for papers with common surnames.",
+              ],
+              [
+                "Automated peer-review flag",
+                "Whether a paper has been independently replicated, has corrigenda, or is part of a contested debate. Currently we surface the citation; we don't yet annotate the cohort context.",
+              ],
+            ]}
+          />
+        </Section>
+
+        <div
+          aria-hidden
+          style={{
+            margin: "70px auto 0",
+            width: 64,
+            height: 1,
+            background: "var(--paper-edge)",
+          }}
+        />
+
+        <div style={{ textAlign: "center", marginTop: 44 }}>
+          <Link
+            href="/manifesto"
+            style={{
+              display: "inline-block",
+              fontFamily: "var(--font-display), Georgia, serif",
+              fontStyle: "italic",
+              fontVariationSettings: '"opsz" 96, "SOFT" 80, "WONK" 1',
+              fontSize: "1.1rem",
+              color: "var(--ink-1)",
+              textDecoration: "none",
+              borderBottom: "1px solid var(--rust)",
+              paddingBottom: 2,
+            }}
+          >
+            Read the manifesto &rarr;
+          </Link>
+        </div>
+      </article>
+
+      <Colophon />
+
+      <style>{`
+        .prov-back:hover,
+        .prov-back:focus-visible {
+          color: var(--ink-0);
+          border-bottom-color: var(--rust);
+        }
+      `}</style>
+    </main>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section style={{ marginBottom: 60 }}>
+      <h2
+        style={{
+          fontFamily: "var(--font-display), Georgia, serif",
+          fontWeight: 400,
+          fontVariationSettings: '"opsz" 144, "SOFT" 60, "WONK" 0',
+          fontSize: "clamp(1.6rem, 2.6vw, 2rem)",
+          lineHeight: 1.15,
+          letterSpacing: "-0.015em",
+          color: "var(--ink-0)",
+          margin: "0 0 22px",
+        }}
+      >
+        {title}
+      </h2>
+      <div
+        style={{
+          fontSize: "1.08rem",
+          lineHeight: 1.7,
+          color: "var(--ink-1)",
+        }}
+      >
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function Pseudocode({ title, children }: { title: string; children: string }) {
+  return (
+    <figure style={{ margin: "26px 0", padding: 0 }}>
+      <figcaption
+        style={{
+          fontFamily: "var(--font-mono), monospace",
+          fontSize: "0.58rem",
+          letterSpacing: "0.3em",
+          textTransform: "uppercase",
+          color: "var(--ink-4)",
+          marginBottom: 8,
+        }}
+      >
+        {title}
+      </figcaption>
+      <pre
+        style={{
+          fontFamily: "var(--font-mono), monospace",
+          fontSize: "0.78rem",
+          lineHeight: 1.55,
+          color: "var(--ink-1)",
+          background: "var(--paper-2)",
+          border: "1px solid var(--paper-edge)",
+          borderRadius: 6,
+          padding: "20px 22px",
+          overflowX: "auto",
+          margin: 0,
+          whiteSpace: "pre",
+        }}
+      >
+        {children}
+      </pre>
+    </figure>
+  );
+}
+
+function DefList({ items }: { items: Array<[string, string]> }) {
+  return (
+    <dl
+      style={{
+        margin: "20px 0 0",
+        display: "grid",
+        gridTemplateColumns: "minmax(180px, 28%) 1fr",
+        rowGap: 18,
+        columnGap: 28,
+      }}
+    >
+      {items.map(([k, v]) => (
+        <div key={k} style={{ display: "contents" }}>
+          <dt
+            style={{
+              fontFamily: "var(--font-display), Georgia, serif",
+              fontStyle: "italic",
+              fontVariationSettings: '"opsz" 72, "SOFT" 80, "WONK" 1',
+              fontSize: "1rem",
+              color: "var(--rust)",
+              paddingTop: 1,
+            }}
+          >
+            {k}
+          </dt>
+          <dd
+            style={{
+              margin: 0,
+              fontSize: "1rem",
+              lineHeight: 1.6,
+              color: "var(--ink-1)",
+            }}
+          >
+            {v}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}

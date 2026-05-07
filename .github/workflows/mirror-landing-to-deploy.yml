@@ -95,6 +95,7 @@ jobs:
           echo "Deploy PAT is present (${#PAT} chars)."
 
       - name: Clone destination repo
+        id: clone
         env:
           PAT: ${{ secrets.LANDING_DEPLOY_PAT }}
         run: |
@@ -102,11 +103,78 @@ jobs:
           # `x-access-token` is the canonical username for fine-
           # grained PATs in HTTPS git URLs. The PAT itself is the
           # password.
-          git clone \
-            --branch "${DEST_BRANCH}" \
-            --depth 1 \
-            "https://x-access-token:${PAT}@github.com/${DEST_REPO}.git" \
-            dest
+
+          # Step 1 — probe the repo exists + the PAT can see it.
+          # Surfaces the three most common failure modes with
+          # actionable remediation instead of a cryptic git error.
+          probe_url="https://api.github.com/repos/${DEST_REPO}"
+          http_code=$(curl -s -o /tmp/probe.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$probe_url" || echo "000")
+          case "$http_code" in
+            200)
+              echo "✓ Destination repo reachable: ${DEST_REPO}"
+              default_branch=$(jq -r '.default_branch // "main"' /tmp/probe.json)
+              echo "  default branch: ${default_branch}"
+              echo "default_branch=${default_branch}" >> "$GITHUB_OUTPUT"
+              ;;
+            401|403)
+              echo "::error::PAT cannot access ${DEST_REPO} (HTTP ${http_code})."
+              echo "  Most likely: the fine-grained PAT was created with"
+              echo "  'Repository access' = personal repos only, NOT including"
+              echo "  ${DEST_REPO}. Re-create the PAT and explicitly select"
+              echo "  '${DEST_REPO}' under Repository access. Required scopes:"
+              echo "    Contents: Read and write"
+              echo "    Metadata: Read"
+              cat /tmp/probe.json
+              exit 1
+              ;;
+            404)
+              echo "::error::Repo ${DEST_REPO} does not exist or is invisible to this PAT (HTTP 404)."
+              echo "  Two possibilities:"
+              echo "    (a) The repo doesn't exist — create it on GitHub, init"
+              echo "        with a README, then re-run this workflow."
+              echo "    (b) The PAT was scoped to a DIFFERENT repo and so cannot"
+              echo "        even see this one. Recreate the PAT with the"
+              echo "        '${DEST_REPO}' repo explicitly selected."
+              exit 1
+              ;;
+            *)
+              echo "::error::Unexpected HTTP ${http_code} when probing ${DEST_REPO}."
+              cat /tmp/probe.json
+              exit 1
+              ;;
+          esac
+
+          # Step 2 — clone the default branch (NOT a hard-coded "main").
+          # If the repo is brand-new and empty, the clone of any branch
+          # fails — handle that by initialising a fresh working tree.
+          DEST_BRANCH="${default_branch}"
+          echo "DEST_BRANCH=${DEST_BRANCH}" >> "$GITHUB_ENV"
+
+          if git clone \
+              --branch "${DEST_BRANCH}" \
+              --depth 1 \
+              "https://x-access-token:${PAT}@github.com/${DEST_REPO}.git" \
+              dest 2>/tmp/clone.err; then
+            echo "✓ Cloned ${DEST_REPO}@${DEST_BRANCH}"
+          else
+            if grep -qiE "remote branch.*not found|empty repository" /tmp/clone.err; then
+              echo "ℹ Destination repo is empty or missing branch ${DEST_BRANCH}."
+              echo "  Initialising a fresh working tree on that branch."
+              mkdir dest && cd dest
+              git init -b "${DEST_BRANCH}"
+              git remote add origin \
+                "https://x-access-token:${PAT}@github.com/${DEST_REPO}.git"
+              cd ..
+            else
+              echo "::error::git clone failed unexpectedly:"
+              cat /tmp/clone.err
+              exit 1
+            fi
+          fi
 
       - name: Sync landing/ → destination working tree
         run: |

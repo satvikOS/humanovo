@@ -188,6 +188,10 @@ export default function Colophon() {
             Manifesto
           </Link>
           <span aria-hidden style={{ color: "var(--ink-4)" }}>&middot;</span>
+          <Link href="/provenance" className="colophon-link">
+            Provenance
+          </Link>
+          <span aria-hidden style={{ color: "var(--ink-4)" }}>&middot;</span>
           <a
             href="https://github.com/satvikOS/humanovo"
             target="_blank"
