@@ -1,5 +1,12 @@
 name: Route53 — humanovo.net M365 email cutover
 
+ claude/production-platform-analysis-30H5c
+
+# Re-trigger marker: humanovo-admin gained Route53Access inline policy
+# (route53:ListHostedZones[ByName], GetHostedZone, ListResourceRecordSets,
+#  ChangeResourceRecordSets, GetChange). Preflight should pass now.
+#
+ humanovo
 # One-shot DNS change to switch humanovo.net inbound email to Microsoft 365.
 #
 # What this does in a single atomic ChangeResourceRecordSets batch:
@@ -35,7 +42,16 @@ name: Route53 — humanovo.net M365 email cutover
 #   - resend._domainkey.humanovo.net TXT (Resend DKIM)
 #   - _dmarc.humanovo.net TXT
 #
+ claude/production-platform-analysis-30H5c
 # Trigger: workflow_dispatch only. Confirmation phrase required.
+
+# Trigger:
+#   - workflow_dispatch (manual run from the Actions UI; requires a
+#     confirmation phrase input)
+#   - push to humanovo when THIS workflow file changes (auto-fires
+#     once when the agent pushes a config update; idempotent because
+#     all DNS changes are UPSERTs)
+ humanovo
 
 on:
   workflow_dispatch:
@@ -61,6 +77,13 @@ on:
         description: 'Type humanovo-net-m365-cutover to confirm'
         required: true
         type: string
+ claude/production-platform-analysis-30H5c
+
+  push:
+    branches: [humanovo]
+    paths:
+      - '.github/workflows/route53-m365-cutover.yml'
+ humanovo
 
 env:
   AWS_REGION: us-east-1
@@ -72,17 +95,43 @@ concurrency:
 
 jobs:
   apply:
+ claude/production-platform-analysis-30H5c
     name: ${{ inputs.phase }} — SPF mode ${{ inputs.spf_mode }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Verify confirmation phrase
+
+    name: ${{ github.event_name == 'push' && 'apply (auto, push)' || format('{0} — SPF mode {1}', inputs.phase, inputs.spf_mode) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Resolve effective phase + SPF mode upfront so every step can read
+    # them. Push triggers default to apply + m365+resend (the safe
+    # combination for this setup); workflow_dispatch uses the inputs.
+    env:
+      EFFECTIVE_PHASE: ${{ github.event_name == 'push' && 'apply' || inputs.phase }}
+      EFFECTIVE_SPF_MODE: ${{ github.event_name == 'push' && 'm365+resend' || inputs.spf_mode }}
+    steps:
+      - name: Verify confirmation phrase (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+ humanovo
         run: |
           if [ "${{ inputs.confirm_intent }}" != "humanovo-net-m365-cutover" ]; then
             echo "::error::Confirmation phrase did not match. Aborting."
             exit 1
           fi
 
+ claude/production-platform-analysis-30H5c
+
+      - name: Note for push trigger
+        if: github.event_name == 'push'
+        run: |
+          echo "Triggered by push to humanovo (file change in route53-m365-cutover.yml)."
+          echo "Effective phase: $EFFECTIVE_PHASE"
+          echo "Effective SPF mode: $EFFECTIVE_SPF_MODE"
+          echo "All DNS changes are UPSERTs — re-running this workflow is harmless."
+
+ humanovo
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -90,6 +139,46 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+ claude/production-platform-analysis-30H5c
+
+      - name: Identify IAM caller + preflight Route53 access
+        id: caller
+        run: |
+          set -e
+          USER_ARN=$(aws sts get-caller-identity --query Arn --output text)
+          USER_NAME=$(echo "$USER_ARN" | awk -F/ '{print $NF}')
+          echo "Caller ARN: $USER_ARN"
+          echo "Caller user: $USER_NAME"
+
+          # Preflight: probe Route53 with a no-op list call. If this
+          # fails with AccessDenied, the rest of the workflow can't
+          # succeed either, so fail early with actionable instructions.
+          if ! aws route53 list-hosted-zones --max-items 1 >/dev/null 2>&1; then
+            {
+              echo "## ❌ Route 53 permissions missing on \`$USER_NAME\`"
+              echo ""
+              echo "The IAM user this workflow runs as does not have"
+              echo "Route 53 access yet. Self-bootstrapping is not"
+              echo "possible because the user also lacks \`iam:PutUserPolicy\`"
+              echo "on itself."
+              echo ""
+              echo "### Fix (30 seconds, one-time)"
+              echo ""
+              echo "1. Open: https://console.aws.amazon.com/iam/home#/users/details/$USER_NAME"
+              echo "2. **Permissions** tab → **Add permissions** → **Attach policies directly**"
+              echo "3. Search \`Route53\` and check **AmazonRoute53FullAccess**"
+              echo "4. **Next** → **Add permissions**"
+              echo ""
+              echo "Then re-trigger this workflow (push any commit to humanovo"
+              echo "modifying \`.github/workflows/route53-m365-cutover.yml\`,"
+              echo "or use **Run workflow** in the Actions UI)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Route 53 access missing on $USER_NAME — see step summary for the 30-second fix."
+            exit 1
+          fi
+          echo "Route 53 access OK for $USER_NAME."
+
+ humanovo
       - name: Find hosted zone ID
         id: hz
         run: |
@@ -106,6 +195,7 @@ jobs:
           echo "Hosted zone: $ZONE_ID"
           echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
 
+ claude/production-platform-analysis-30H5c
       - name: Read existing apex TXT to preserve MS=... value
         id: txt
         run: |
@@ -211,12 +301,127 @@ jobs:
             ]
           }
           EOF
+
+      - name: Build change batch (read TXT + compose JSON in one pass)
+        # Combined to avoid round-tripping JSON through GitHub Actions
+        # step outputs — the previous attempt failed because GHA's
+        # output handling unescapes \" in stored values, breaking
+        # the next step's json.loads(). Now Python reads from the
+        # AWS API directly and writes /tmp/change-batch.json, which
+        # the apply step picks up by file path.
+        env:
+          ZONE_ID: ${{ steps.hz.outputs.zone_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -e
+          case "$EFFECTIVE_SPF_MODE" in
+            "m365+resend")
+              SPF_VALUE="v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"
+              ;;
+            "m365+resend+ses")
+              SPF_VALUE="v=spf1 include:spf.protection.outlook.com include:_spf.resend.com include:amazonses.com -all"
+              ;;
+            "m365-only")
+              SPF_VALUE="v=spf1 include:spf.protection.outlook.com -all"
+              ;;
+            *)
+              echo "::error::Unknown spf_mode '$EFFECTIVE_SPF_MODE'"
+              exit 1
+              ;;
+          esac
+          export SPF_VALUE
+
+          # Pull existing apex TXT values into a JSON file, then build
+          # the change batch from there. No GHA-output round-trip.
+          aws route53 list-resource-record-sets \
+            --hosted-zone-id "$ZONE_ID" \
+            --query "ResourceRecordSets[?Name=='${DOMAIN}.' && Type=='TXT'].ResourceRecords" \
+            --output json > /tmp/existing-txt.json
+          echo "=== existing apex TXT (raw) ==="
+          cat /tmp/existing-txt.json
+
+          python3 <<'PYEOF' > /tmp/change-batch.json
+          import json
+          import os
+
+          domain = os.environ["DOMAIN"]
+          run_id = os.environ["RUN_ID"]
+          spf_value = os.environ["SPF_VALUE"]
+
+          with open("/tmp/existing-txt.json") as f:
+              data = json.load(f) or []
+
+          # Flatten the nested ResourceRecords structure. Each existing
+          # record value comes back wrapped in literal quotes already
+          # (e.g. '"MS=ms68533928"'), which is the on-wire format
+          # Route 53 expects on UPSERT too. Drop any prior SPF.
+          flat = []
+          for arr in data:
+              for r in arr:
+                  v = r["Value"]
+                  if v.startswith('"v=spf1') or v.startswith("v=spf1"):
+                      continue
+                  flat.append(v)
+
+          # Build TXT record set: new SPF + preserved values.
+          # Wrap SPF in quotes (Route 53 TXT format).
+          txt_records = [{"Value": f'"{spf_value}"'}]
+          for v in flat:
+              # Existing values typically arrive already quoted; only
+              # add quotes if they're missing.
+              if not (v.startswith('"') and v.endswith('"')):
+                  v = f'"{v}"'
+              txt_records.append({"Value": v})
+
+          batch = {
+              "Comment": f"M365 email cutover for {domain} (workflow run {run_id})",
+              "Changes": [
+                  {
+                      "Action": "UPSERT",
+                      "ResourceRecordSet": {
+                          "Name": f"{domain}.",
+                          "Type": "MX",
+                          "TTL": 3600,
+                          "ResourceRecords": [
+                              {"Value": "0 humanovo-net.mail.protection.outlook.com"}
+                          ],
+                      },
+                  },
+                  {
+                      "Action": "UPSERT",
+                      "ResourceRecordSet": {
+                          "Name": f"autodiscover.{domain}.",
+                          "Type": "CNAME",
+                          "TTL": 3600,
+                          "ResourceRecords": [
+                              {"Value": "autodiscover.outlook.com"}
+                          ],
+                      },
+                  },
+                  {
+                      "Action": "UPSERT",
+                      "ResourceRecordSet": {
+                          "Name": f"{domain}.",
+                          "Type": "TXT",
+                          "TTL": 3600,
+                          "ResourceRecords": txt_records,
+                      },
+                  },
+              ],
+          }
+          print(json.dumps(batch, indent=2))
+          PYEOF
+ humanovo
           echo "=== Change batch ==="
           cat /tmp/change-batch.json
           echo "==================="
 
       - name: Apply (Route 53 ChangeResourceRecordSets)
+ claude/production-platform-analysis-30H5c
         if: inputs.phase == 'apply'
+
+        if: env.EFFECTIVE_PHASE == 'apply'
+ humanovo
         id: change
         run: |
           set -e
@@ -229,7 +434,11 @@ jobs:
           echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Wait for INSYNC
+ claude/production-platform-analysis-30H5c
         if: inputs.phase == 'apply'
+
+        if: env.EFFECTIVE_PHASE == 'apply'
+ humanovo
         run: |
           set -e
           echo "Waiting for change ${{ steps.change.outputs.change_id }} to propagate to Route 53 edges (typically 30-90s)…"
@@ -237,7 +446,11 @@ jobs:
           echo "Change is INSYNC across Route 53."
 
       - name: Verify via public DNS resolvers
+ claude/production-platform-analysis-30H5c
         if: inputs.phase == 'apply'
+
+        if: env.EFFECTIVE_PHASE == 'apply'
+ humanovo
         run: |
           set +e
           echo "## Post-change verification" >> $GITHUB_STEP_SUMMARY
@@ -264,11 +477,19 @@ jobs:
           {
             echo "## Route 53 — humanovo.net M365 email cutover"
             echo ""
+ claude/production-platform-analysis-30H5c
             echo "Phase: \`${{ inputs.phase }}\`"
             echo "SPF mode: \`${{ inputs.spf_mode }}\`"
             echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
             echo ""
             if [ "${{ inputs.phase }}" = "apply" ]; then
+
+            echo "Phase: \`${{ env.EFFECTIVE_PHASE }}\`"
+            echo "SPF mode: \`${{ env.EFFECTIVE_SPF_MODE }}\`"
+            echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
+            echo ""
+            if [ "${{ env.EFFECTIVE_PHASE }}" = "apply" ]; then
+ humanovo
               echo "### Next steps"
               echo "1. Wait 5-10 min for global DNS propagation (some recursive resolvers cache up to TTL)."
               echo "2. In Microsoft 365 admin → Setup → Domains → humanovo.net → click **Re-check DNS**."

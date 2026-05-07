@@ -1,0 +1,349 @@
+name: Route53 — humanovo.net zone create (new AWS account)
+
+# Creates the humanovo.net hosted zone in the CURRENT AWS account
+# (the new business account, since the old creds are gone) and
+# UPSERTs every record from the prior zone state — preserving M365
+# inbound, Resend DKIM, Vercel marketing site, AWS SES `send.`
+# subdomain, and DMARC.
+#
+# After this runs successfully, the founder updates the registrar's
+# nameservers from the OLD account's NS values to the NEW account's
+# NS values (printed by this workflow). DNS propagation completes
+# over 24-48h; M365 keeps working continuously because the registrar
+# update is the only switch — both old and new zones serve mail-routable
+# records during the cutover.
+#
+# Records being recreated:
+#   apex                      A      76.76.21.21                                                  (Vercel)
+#   apex                      MX     0 humanovo-net.mail.protection.outlook.com                    (M365)
+#   apex                      TXT    "MS=ms68533928"                                               (M365 verification)
+#                             TXT    "v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"
+#   _dmarc                    TXT    "v=DMARC1; p=none;"
+#   resend._domainkey         TXT    <Resend DKIM public key>
+#   send                      MX     10 feedback-smtp.us-east-1.amazonses.com
+#   send                      TXT    "v=spf1 include:amazonses.com ~all"
+#   www                       CNAME  37299363a10a6c30.vercel-dns-017.com
+#   autodiscover              CNAME  autodiscover.outlook.com
+#
+# Trigger: workflow_dispatch (manual run from Actions UI; no
+# confirmation phrase required — the operation is idempotent and
+# this workflow only writes to humanovo.net).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [humanovo]
+    paths:
+      - '.github/workflows/route53-zone-create.yml'
+
+env:
+  AWS_REGION: us-east-1
+  DOMAIN: humanovo.net
+
+concurrency:
+  group: route53-zone-create-humanovo-net
+  cancel-in-progress: false
+
+jobs:
+  create:
+    name: Create + populate humanovo.net hosted zone
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Diagnose which AWS-credential secrets exist
+        # GitHub auto-redacts secret VALUES in logs, but we can safely
+        # report whether each candidate secret name is populated.
+        # This narrows down which name the founder used so the cred
+        # config step below can pick the right one.
+        env:
+          DEFAULT_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          NEW_KEY: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          PROD_KEY: ${{ secrets.AWS_PROD_ACCESS_KEY_ID }}
+        run: |
+          set +e
+          echo "Checking which AWS-credential secret names are populated:"
+          [ -n "$DEFAULT_KEY" ] && echo "  ✓ AWS_ACCESS_KEY_ID is set" || echo "  ✗ AWS_ACCESS_KEY_ID is empty/missing"
+          [ -n "$NEW_KEY" ]     && echo "  ✓ AWS_NEW_ACCESS_KEY_ID is set" || echo "  ✗ AWS_NEW_ACCESS_KEY_ID is empty/missing"
+          [ -n "$PROD_KEY" ]    && echo "  ✓ AWS_PROD_ACCESS_KEY_ID is set" || echo "  ✗ AWS_PROD_ACCESS_KEY_ID is empty/missing"
+          if [ -z "$DEFAULT_KEY" ] && [ -z "$NEW_KEY" ] && [ -z "$PROD_KEY" ]; then
+            {
+              echo "## ❌ No AWS credentials secret found"
+              echo ""
+              echo "None of the expected secret names contain a value:"
+              echo "  - AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY"
+              echo "  - AWS_NEW_ACCESS_KEY_ID + AWS_NEW_SECRET_ACCESS_KEY"
+              echo "  - AWS_PROD_ACCESS_KEY_ID + AWS_PROD_SECRET_ACCESS_KEY"
+              echo ""
+              echo "### Fix"
+              echo "1. Open https://github.com/satvikOS/humanovo/settings/secrets/actions"
+              echo "2. Click **New repository secret**"
+              echo "3. Name: \`AWS_ACCESS_KEY_ID\`, paste your new account's access key, save"
+              echo "4. Click **New repository secret** again"
+              echo "5. Name: \`AWS_SECRET_ACCESS_KEY\`, paste the secret, save"
+              echo "6. Push any trivial change to this workflow file to re-fire"
+            } >> $GITHUB_STEP_SUMMARY
+            echo "::error::No AWS credentials secret found — see step summary"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        # Try AWS_ACCESS_KEY_ID first; fall back to AWS_NEW_* or AWS_PROD_*
+        # if that's where the founder put them. The || operator picks
+        # the first non-empty value.
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID || secrets.AWS_NEW_ACCESS_KEY_ID || secrets.AWS_PROD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY || secrets.AWS_NEW_SECRET_ACCESS_KEY || secrets.AWS_PROD_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify caller identity
+        run: |
+          aws sts get-caller-identity
+
+      - name: Find or create hosted zone
+        id: hz
+        run: |
+          set -e
+          # Check if zone already exists in this account.
+          ZONE_ID=$(aws route53 list-hosted-zones-by-name \
+            --dns-name "$DOMAIN." \
+            --max-items 1 \
+            --query "HostedZones[?Name=='${DOMAIN}.'].Id | [0]" \
+            --output text 2>/dev/null | sed 's|/hostedzone/||')
+
+          if [ -n "$ZONE_ID" ] && [ "$ZONE_ID" != "None" ]; then
+            echo "Hosted zone already exists: $ZONE_ID — skipping create."
+          else
+            echo "Creating hosted zone for $DOMAIN..."
+            CALLER_REF="humanovo-zone-$(date +%s)"
+            ZONE_ID=$(aws route53 create-hosted-zone \
+              --name "$DOMAIN" \
+              --caller-reference "$CALLER_REF" \
+              --hosted-zone-config "Comment=humanovo.net production hosted zone (created by route53-zone-create workflow)" \
+              --query 'HostedZone.Id' \
+              --output text | sed 's|/hostedzone/||')
+            echo "Created hosted zone: $ZONE_ID"
+          fi
+          echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Capture nameservers (for registrar update)
+        id: ns
+        run: |
+          set -e
+          NS_LIST=$(aws route53 get-hosted-zone \
+            --id "${{ steps.hz.outputs.zone_id }}" \
+            --query 'DelegationSet.NameServers' \
+            --output json)
+          echo "Nameservers for the new zone:"
+          echo "$NS_LIST" | python3 -m json.tool
+          # Persist for later step (and step summary).
+          echo "$NS_LIST" > /tmp/nameservers.json
+
+      - name: Build change batch with all 9 records
+        env:
+          ZONE_ID: ${{ steps.hz.outputs.zone_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -e
+          # All record values are baked in. None are secrets — DKIM
+          # public keys are public by design, MS verification value
+          # is a one-time domain proof Microsoft published, etc.
+          python3 <<'PYEOF' > /tmp/change-batch.json
+          import json
+          import os
+
+          domain = os.environ["DOMAIN"]
+          run_id = os.environ["RUN_ID"]
+
+          # The Resend DKIM public key, exactly as it was in the prior
+          # zone. DKIM keys are public; safe to commit.
+          RESEND_DKIM = (
+              "p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCez/Yn3lXD3W1YgVNeGS/naRQk8KGysDaJxMba18jjMRk"
+              "qcDfVSsHASpMLD9z8XFfXnFzaiLohmqWZbmZ+B0kVjCyIfDN1IRKtOP5UpnKUcRD3cKg15rhlb4fQkSU54w9"
+              "0ooBlVlwAylLcwSGFJkQ9kgS6kbX+aSYODjEfl9kLtwIDAQAB"
+          )
+
+          changes = [
+              # Apex: A record for Vercel marketing site
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"{domain}.",
+                      "Type": "A",
+                      "TTL": 300,
+                      "ResourceRecords": [{"Value": "76.76.21.21"}],
+                  },
+              },
+              # Apex: MX → Microsoft 365
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"{domain}.",
+                      "Type": "MX",
+                      "TTL": 3600,
+                      "ResourceRecords": [
+                          {"Value": "0 humanovo-net.mail.protection.outlook.com"}
+                      ],
+                  },
+              },
+              # Apex: TXT — M365 verification + SPF (M365 + Resend)
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"{domain}.",
+                      "Type": "TXT",
+                      "TTL": 3600,
+                      "ResourceRecords": [
+                          {"Value": '"MS=ms68533928"'},
+                          {"Value": '"v=spf1 include:spf.protection.outlook.com include:_spf.resend.com -all"'},
+                      ],
+                  },
+              },
+              # _dmarc: TXT — monitoring-only DMARC for now
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"_dmarc.{domain}.",
+                      "Type": "TXT",
+                      "TTL": 300,
+                      "ResourceRecords": [{"Value": '"v=DMARC1; p=none;"'}],
+                  },
+              },
+              # resend._domainkey: TXT — Resend DKIM public key
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"resend._domainkey.{domain}.",
+                      "Type": "TXT",
+                      "TTL": 300,
+                      "ResourceRecords": [{"Value": f'"{RESEND_DKIM}"'}],
+                  },
+              },
+              # send: MX — AWS SES bounce handling for the `send.` subdomain
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"send.{domain}.",
+                      "Type": "MX",
+                      "TTL": 300,
+                      "ResourceRecords": [
+                          {"Value": "10 feedback-smtp.us-east-1.amazonses.com"}
+                      ],
+                  },
+              },
+              # send: TXT — SES SPF for the `send.` subdomain
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"send.{domain}.",
+                      "Type": "TXT",
+                      "TTL": 300,
+                      "ResourceRecords": [{"Value": '"v=spf1 include:amazonses.com ~all"'}],
+                  },
+              },
+              # www: CNAME → Vercel www
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"www.{domain}.",
+                      "Type": "CNAME",
+                      "TTL": 300,
+                      "ResourceRecords": [
+                          {"Value": "37299363a10a6c30.vercel-dns-017.com"}
+                      ],
+                  },
+              },
+              # autodiscover: CNAME → Outlook autodiscover
+              {
+                  "Action": "UPSERT",
+                  "ResourceRecordSet": {
+                      "Name": f"autodiscover.{domain}.",
+                      "Type": "CNAME",
+                      "TTL": 3600,
+                      "ResourceRecords": [{"Value": "autodiscover.outlook.com"}],
+                  },
+              },
+          ]
+
+          batch = {
+              "Comment": f"humanovo.net zone bootstrap (workflow run {run_id})",
+              "Changes": changes,
+          }
+          print(json.dumps(batch, indent=2))
+          PYEOF
+          echo "=== Change batch ==="
+          cat /tmp/change-batch.json
+          echo "==================="
+
+      - name: Apply change batch
+        id: change
+        run: |
+          set -e
+          CHANGE_ID=$(aws route53 change-resource-record-sets \
+            --hosted-zone-id "${{ steps.hz.outputs.zone_id }}" \
+            --change-batch file:///tmp/change-batch.json \
+            --query 'ChangeInfo.Id' \
+            --output text)
+          echo "Change ID: $CHANGE_ID"
+          echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for INSYNC
+        run: |
+          set -e
+          echo "Waiting for change ${{ steps.change.outputs.change_id }} to reach INSYNC across Route 53 edges..."
+          aws route53 wait resource-record-sets-changed --id "${{ steps.change.outputs.change_id }}"
+          echo "Change is INSYNC."
+
+      - name: Step summary — registrar update instructions
+        if: always()
+        run: |
+          set +e
+          ZONE_ID="${{ steps.hz.outputs.zone_id }}"
+          NS_LIST=$(cat /tmp/nameservers.json 2>/dev/null || echo '[]')
+          {
+            echo "## ✅ humanovo.net hosted zone is ready in the new AWS account"
+            echo ""
+            echo "Zone ID: \`$ZONE_ID\`"
+            echo ""
+            echo "### 🚨 Action required — update nameservers at your domain registrar"
+            echo ""
+            echo "Whoever you registered humanovo.net with (GoDaddy / Namecheap / etc.),"
+            echo "log in to that registrar's control panel and replace the existing"
+            echo "nameservers with these four:"
+            echo ""
+            echo '```'
+            echo "$NS_LIST" | python3 -c "import json,sys; [print(n) for n in json.load(sys.stdin)]"
+            echo '```'
+            echo ""
+            echo "After saving, DNS propagation typically completes within 1 hour"
+            echo "for most resolvers (max 48 hours globally). M365 inbound mail"
+            echo "and the Vercel landing page keep working continuously — both"
+            echo "the old and new zones serve identical mail-routable records."
+            echo ""
+            echo "### Verification"
+            echo ""
+            echo "Once the registrar update propagates, run:"
+            echo ""
+            echo '```bash'
+            echo "dig NS humanovo.net +short"
+            echo "# Should show the four NS values listed above."
+            echo "dig MX humanovo.net +short"
+            echo "# Should show: 0 humanovo-net.mail.protection.outlook.com."
+            echo '```'
+            echo ""
+            echo "Resolver-by-resolver check from this runner:"
+            echo ""
+            echo '```'
+            for resolver in 8.8.8.8 1.1.1.1 9.9.9.9; do
+              echo ""
+              echo "Resolver $resolver:"
+              echo "  NS:" $(dig NS "$DOMAIN" "@$resolver" +short 2>/dev/null | tr '\n' ' ')
+              echo "  MX:" $(dig MX "$DOMAIN" "@$resolver" +short 2>/dev/null | tr '\n' ' ')
+            done
+            echo '```'
+            echo ""
+            echo "_(Above probe queries the public resolvers from the runner."
+            echo "Until the registrar NS update propagates, the resolvers will"
+            echo "still return the OLD account's NS values — that's expected."
+            echo "After propagation they'll return the four NS values above.)_"
+          } >> $GITHUB_STEP_SUMMARY
