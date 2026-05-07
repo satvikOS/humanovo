@@ -6,7 +6,7 @@ IRB submissions, data use agreements, consent forms, compliance checklists.
 
 import logging
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -93,7 +93,7 @@ async def create_irb(data: IRBCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/irb-submissions/{irb_id}")
-async def get_irb(irb_id: str, db: AsyncSession = Depends(get_db)):
+async def get_irb(irb_id: UUID, db: AsyncSession = Depends(get_db)):
     submission = await db.get(IRBSubmission, irb_id)
     if not submission:
         raise HTTPException(status_code=404, detail="IRB submission not found")
@@ -101,7 +101,7 @@ async def get_irb(irb_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/irb-submissions/{irb_id}")
-async def delete_irb(irb_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_irb(irb_id: UUID, db: AsyncSession = Depends(get_db)):
     submission = await db.get(IRBSubmission, irb_id)
     if not submission:
         raise HTTPException(status_code=404, detail="IRB submission not found")
@@ -138,7 +138,7 @@ async def create_agreement(data: AgreementCreate, db: AsyncSession = Depends(get
 
 
 @router.delete("/agreements/{agreement_id}")
-async def delete_agreement(agreement_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_agreement(agreement_id: UUID, db: AsyncSession = Depends(get_db)):
     agreement = await db.get(DataUseAgreement, agreement_id)
     if not agreement:
         raise HTTPException(status_code=404, detail="Agreement not found")
@@ -180,7 +180,7 @@ async def create_consent_form(data: ConsentFormCreate, db: AsyncSession = Depend
 
 
 @router.delete("/consent-forms/{form_id}")
-async def delete_consent_form(form_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_consent_form(form_id: UUID, db: AsyncSession = Depends(get_db)):
     form = await db.get(ConsentForm, form_id)
     if not form:
         raise HTTPException(status_code=404, detail="Consent form not found")
@@ -201,7 +201,7 @@ async def list_checklists(db: AsyncSession = Depends(get_db)):
 
 @router.patch("/checklists/{checklist_id}")
 async def update_checklist(
-    checklist_id: str,
+    checklist_id: UUID,
     data: ChecklistUpdate,
     db: AsyncSession = Depends(get_db),
 ):

@@ -21,7 +21,7 @@ import json
 import os
 from datetime import UTC, datetime
 from typing import Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -136,8 +136,8 @@ class PgvectorPurgeSourceRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 async def _run_discovery_pipeline(
-    run_id: str,
-    project_id: str,
+    run_id: UUID,
+    project_id: UUID,
     user_id: str,
     disease: str,
     discovery_type: str,
@@ -381,8 +381,8 @@ async def _run_discovery_pipeline(
 
 
 async def _run_synthesis_pipeline(
-    run_id: str,
-    project_id: str,
+    run_id: UUID,
+    project_id: UUID,
     user_id: str,
     hypothesis: str,
     output_format: str,
@@ -572,7 +572,7 @@ async def _load_discovery_runs_from_db(
 
 @router.get("/projects/{project_id}/discovery-runs")
 async def list_discovery_runs(
-    project_id: str,
+    project_id: UUID,
     status: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -607,7 +607,7 @@ async def list_all_discovery_runs(
 
 @router.post("/projects/{project_id}/discover", status_code=202)
 async def start_discovery(
-    project_id: str,
+    project_id: UUID,
     body: DiscoverRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
@@ -672,7 +672,7 @@ async def start_discovery(
 
 
 @router.get("/discovery-runs/{run_id}")
-async def get_discovery_run(run_id: str) -> dict:
+async def get_discovery_run(run_id: UUID) -> dict:
     """Get status of a discovery run."""
     run = _active_discovery_runs.get(run_id)
     if not run:
@@ -684,7 +684,7 @@ async def get_discovery_run(run_id: str) -> dict:
 
 @router.post("/projects/{project_id}/synthesize", status_code=202)
 async def start_synthesis(
-    project_id: str,
+    project_id: UUID,
     body: SynthesizeRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
@@ -742,7 +742,7 @@ async def start_synthesis(
 
 
 @router.delete("/discovery-runs/{run_id}")
-async def cancel_discovery_run(run_id: str) -> dict:
+async def cancel_discovery_run(run_id: UUID) -> dict:
     """Cancel a running discovery run."""
     run = _active_discovery_runs.get(run_id)
     if not run:
@@ -766,7 +766,7 @@ async def cancel_discovery_run(run_id: str) -> dict:
 
 @router.get("/projects/{project_id}/hypotheses")
 async def list_project_hypotheses(
-    project_id: str,
+    project_id: UUID,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict:
@@ -794,7 +794,7 @@ async def list_project_hypotheses(
 
 
 @router.get("/projects/{project_id}/hypotheses/{hypothesis_id}")
-async def get_project_hypothesis(project_id: str, hypothesis_id: str) -> dict:
+async def get_project_hypothesis(project_id: UUID, hypothesis_id: UUID) -> dict:
     """Get a specific hypothesis by ID."""
     for run_id, hypotheses in _completed_hypotheses.items():
         for h in hypotheses:
@@ -808,7 +808,7 @@ async def get_project_hypothesis(project_id: str, hypothesis_id: str) -> dict:
 
 
 @router.post("/hypotheses/{hypothesis_id}/feedback", status_code=201)
-async def submit_hypothesis_feedback(hypothesis_id: str, body: FeedbackRequest) -> dict:
+async def submit_hypothesis_feedback(hypothesis_id: UUID, body: FeedbackRequest) -> dict:
     """Submit feedback on a hypothesis."""
     feedback_id = str(uuid4())
     # Store feedback (will be persisted to hypothesis_feedback table)
@@ -846,7 +846,7 @@ async def submit_hypothesis_feedback(hypothesis_id: str, body: FeedbackRequest) 
 
 @router.post("/hypotheses/{hypothesis_id}/generate-paper", status_code=202)
 async def generate_hypothesis_paper(
-    hypothesis_id: str, background_tasks: BackgroundTasks
+    hypothesis_id: UUID, background_tasks: BackgroundTasks
 ) -> dict:
     run_id = str(uuid4())
     return {
@@ -865,7 +865,7 @@ async def generate_hypothesis_paper(
 
 @router.get("/projects/{project_id}/synthesis-runs")
 async def list_synthesis_runs(
-    project_id: str,
+    project_id: UUID,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict:
@@ -893,7 +893,7 @@ async def list_synthesis_runs(
 
 
 @router.get("/projects/{project_id}/synthesis-runs/{run_id}")
-async def get_synthesis_run(project_id: str, run_id: str) -> dict:
+async def get_synthesis_run(project_id: UUID, run_id: UUID) -> dict:
     run = _active_synthesis_runs.get(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Synthesis run {run_id} not found")
@@ -912,7 +912,7 @@ async def get_synthesis_run(project_id: str, run_id: str) -> dict:
 
 @router.post("/projects/{project_id}/synthesis-runs/{run_id}/reformat")
 async def reformat_synthesis(
-    project_id: str, run_id: str, body: ReformatRequest
+    project_id: UUID, run_id: UUID, body: ReformatRequest
 ) -> dict:
     run = _active_synthesis_runs.get(run_id)
     if not run or run.get("status") != "completed":
@@ -931,7 +931,7 @@ async def reformat_synthesis(
 
 @router.post("/projects/{project_id}/synthesis-runs/{run_id}/export")
 async def export_synthesis(
-    project_id: str, run_id: str, body: ExportRequest
+    project_id: UUID, run_id: UUID, body: ExportRequest
 ) -> JSONResponse:
     return JSONResponse(
         content={
@@ -951,7 +951,7 @@ async def export_synthesis(
 
 @router.post("/projects/{project_id}/imaging/upload", status_code=201)
 async def upload_imaging(
-    project_id: str, file: UploadFile = File(...)
+    project_id: UUID, file: UploadFile = File(...)
 ) -> dict:
     record_id = str(uuid4())
     # Save file to disk
@@ -976,7 +976,7 @@ async def upload_imaging(
 
 @router.get("/projects/{project_id}/imaging")
 async def list_imaging_records(
-    project_id: str,
+    project_id: UUID,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -1028,7 +1028,7 @@ async def list_imaging_records(
 
 @router.get("/projects/{project_id}/imaging/{record_id}")
 async def get_imaging_record(
-    project_id: str, record_id: str, db: AsyncSession = Depends(get_db)
+    project_id: UUID, record_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> dict:
     """Get a single imaging record by ID from the imaging_records table."""
     result = await db.execute(
@@ -1063,7 +1063,7 @@ async def get_imaging_record(
 
 @router.post("/projects/{project_id}/imaging/{record_id}/link-hypothesis")
 async def link_hypothesis_to_imaging(
-    project_id: str, record_id: str, body: LinkHypothesisRequest,
+    project_id: UUID, record_id: UUID, body: LinkHypothesisRequest,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Link a hypothesis to an imaging record by appending to linked_hypothesis_ids JSONB array."""
@@ -1106,7 +1106,7 @@ async def link_hypothesis_to_imaging(
 
 @router.delete("/projects/{project_id}/imaging/{record_id}")
 async def delete_imaging_record(
-    project_id: str, record_id: str, db: AsyncSession = Depends(get_db)
+    project_id: UUID, record_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> dict:
     """Delete an imaging record from the database."""
     result = await db.execute(
@@ -1627,7 +1627,7 @@ async def create_budget(body: BudgetCreate, db: AsyncSession = Depends(get_db)) 
 
 @router.put("/billing/budgets/{budget_id}")
 async def update_budget(
-    budget_id: str, body: BudgetCreate, db: AsyncSession = Depends(get_db)
+    budget_id: UUID, body: BudgetCreate, db: AsyncSession = Depends(get_db)
 ) -> dict:
     from app.models.platform_entities import BillingBudget
     result = await db.execute(
@@ -1647,7 +1647,7 @@ async def update_budget(
 
 
 @router.delete("/billing/budgets/{budget_id}")
-async def delete_budget(budget_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+async def delete_budget(budget_id: UUID, db: AsyncSession = Depends(get_db)) -> dict:
     from app.models.platform_entities import BillingBudget
     result = await db.execute(
         select(BillingBudget).where(BillingBudget.id == budget_id)
@@ -1680,7 +1680,7 @@ async def list_billing_notifications(
 
 @router.post("/billing/notifications/{notification_id}/read")
 async def mark_notification_read(
-    notification_id: str, db: AsyncSession = Depends(get_db)
+    notification_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> dict:
     from app.models.platform_entities import BillingNotification
     result = await db.execute(

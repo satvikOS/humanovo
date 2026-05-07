@@ -48,7 +48,7 @@ def _get_model():
 
 
 async def _owned_page_or_404(
-    db: AsyncSession, page_id: str, current_user: User,
+    db: AsyncSession, page_id: UUID, current_user: User,
 ):
     """Look up a notebook page and confirm `current_user` owns it.
     Returns the row on success; 404s otherwise."""
@@ -99,7 +99,7 @@ async def list_pages(
 
 @router.get("/pages/{page_id}")
 async def get_page(
-    page_id: str,
+    page_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -132,7 +132,7 @@ async def create_page(
 
 @router.patch("/pages/{page_id}")
 async def update_page(
-    page_id: str,
+    page_id: UUID,
     data: NotebookPageUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -170,7 +170,7 @@ async def update_page(
 
 @router.delete("/pages/{page_id}")
 async def delete_page(
-    page_id: str,
+    page_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -183,7 +183,7 @@ async def delete_page(
 
 @router.get("/pages/{page_id}/versions")
 async def get_versions(
-    page_id: str,
+    page_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -194,7 +194,7 @@ async def get_versions(
 
 @router.post("/pages/{page_id}/versions/{version}/restore")
 async def restore_version(
-    page_id: str,
+    page_id: UUID,
     version: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -230,7 +230,7 @@ async def restore_version(
 
 @router.get("/pages/{page_id}/export")
 async def export_page(
-    page_id: str,
+    page_id: UUID,
     format: str = Query("markdown"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),

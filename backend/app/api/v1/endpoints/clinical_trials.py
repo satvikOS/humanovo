@@ -7,6 +7,7 @@ regulatory documents, and budget tracking.
 
 import logging
 from datetime import UTC, datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -108,7 +109,7 @@ async def create_trial(data: TrialCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{trial_id}")
-async def get_trial(trial_id: str, db: AsyncSession = Depends(get_db)):
+async def get_trial(trial_id: UUID, db: AsyncSession = Depends(get_db)):
     trial = await db.get(ClinicalTrial, trial_id)
     if not trial:
         raise HTTPException(status_code=404, detail="Trial not found")
@@ -116,7 +117,7 @@ async def get_trial(trial_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{trial_id}")
-async def update_trial(trial_id: str, data: TrialUpdate, db: AsyncSession = Depends(get_db)):
+async def update_trial(trial_id: UUID, data: TrialUpdate, db: AsyncSession = Depends(get_db)):
     trial = await db.get(ClinicalTrial, trial_id)
     if not trial:
         raise HTTPException(status_code=404, detail="Trial not found")
@@ -127,7 +128,7 @@ async def update_trial(trial_id: str, data: TrialUpdate, db: AsyncSession = Depe
 
 
 @router.delete("/{trial_id}")
-async def delete_trial(trial_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_trial(trial_id: UUID, db: AsyncSession = Depends(get_db)):
     trial = await db.get(ClinicalTrial, trial_id)
     if not trial:
         raise HTTPException(status_code=404, detail="Trial not found")
@@ -140,7 +141,7 @@ async def delete_trial(trial_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{trial_id}/subjects")
-async def list_subjects(trial_id: str, db: AsyncSession = Depends(get_db)):
+async def list_subjects(trial_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(TrialSubject)
         .where(TrialSubject.trial_id == trial_id)
@@ -151,7 +152,7 @@ async def list_subjects(trial_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{trial_id}/subjects")
-async def enroll_subject(trial_id: str, data: SubjectCreate, db: AsyncSession = Depends(get_db)):
+async def enroll_subject(trial_id: UUID, data: SubjectCreate, db: AsyncSession = Depends(get_db)):
     trial = await db.get(ClinicalTrial, trial_id)
     if not trial:
         raise HTTPException(status_code=404, detail="Trial not found")
@@ -182,8 +183,8 @@ async def enroll_subject(trial_id: str, data: SubjectCreate, db: AsyncSession = 
 
 @router.patch("/{trial_id}/subjects/{subject_id}")
 async def update_subject(
-    trial_id: str,
-    subject_id: str,
+    trial_id: UUID,
+    subject_id: UUID,
     status: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -212,7 +213,7 @@ async def update_subject(
 
 @router.get("/{trial_id}/visits")
 async def list_visits(
-    trial_id: str,
+    trial_id: UUID,
     subject_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -220,7 +221,7 @@ async def list_visits(
 
 
 @router.post("/{trial_id}/visits")
-async def create_visit(trial_id: str, data: VisitCreate, db: AsyncSession = Depends(get_db)):
+async def create_visit(trial_id: UUID, data: VisitCreate, db: AsyncSession = Depends(get_db)):
     raise HTTPException(
         status_code=501,
         detail="Visit storage not yet implemented; no dedicated table exists.",
@@ -231,7 +232,7 @@ async def create_visit(trial_id: str, data: VisitCreate, db: AsyncSession = Depe
 
 
 @router.get("/{trial_id}/documents")
-async def list_documents(trial_id: str, db: AsyncSession = Depends(get_db)):
+async def list_documents(trial_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(TrialDocument).where(TrialDocument.trial_id == trial_id)
     )
@@ -240,7 +241,7 @@ async def list_documents(trial_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{trial_id}/documents")
-async def add_document(trial_id: str, data: DocumentCreate, db: AsyncSession = Depends(get_db)):
+async def add_document(trial_id: UUID, data: DocumentCreate, db: AsyncSession = Depends(get_db)):
     trial = await db.get(ClinicalTrial, trial_id)
     if not trial:
         raise HTTPException(status_code=404, detail="Trial not found")
@@ -261,7 +262,7 @@ async def add_document(trial_id: str, data: DocumentCreate, db: AsyncSession = D
 
 
 @router.get("/{trial_id}/budget")
-async def get_budget(trial_id: str, db: AsyncSession = Depends(get_db)):
+async def get_budget(trial_id: UUID, db: AsyncSession = Depends(get_db)):
     trial = await db.get(ClinicalTrial, trial_id)
     if not trial:
         raise HTTPException(status_code=404, detail="Trial not found")
@@ -269,7 +270,7 @@ async def get_budget(trial_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{trial_id}/budget")
-async def update_budget(trial_id: str, data: BudgetUpdate, db: AsyncSession = Depends(get_db)):
+async def update_budget(trial_id: UUID, data: BudgetUpdate, db: AsyncSession = Depends(get_db)):
     trial = await db.get(ClinicalTrial, trial_id)
     if not trial:
         raise HTTPException(status_code=404, detail="Trial not found")

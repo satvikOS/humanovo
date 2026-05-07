@@ -6,6 +6,7 @@ Model registry, evaluation, prediction, and explainability.
 
 import logging
 import math
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -78,7 +79,7 @@ async def create_model(data: ModelCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{model_id}")
-async def get_model(model_id: str, db: AsyncSession = Depends(get_db)):
+async def get_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
     model = await db.get(MLModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -86,7 +87,7 @@ async def get_model(model_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{model_id}")
-async def update_model(model_id: str, data: ModelUpdate, db: AsyncSession = Depends(get_db)):
+async def update_model(model_id: UUID, data: ModelUpdate, db: AsyncSession = Depends(get_db)):
     model = await db.get(MLModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -103,7 +104,7 @@ async def update_model(model_id: str, data: ModelUpdate, db: AsyncSession = Depe
 
 
 @router.delete("/{model_id}")
-async def delete_model(model_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
     model = await db.get(MLModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -113,7 +114,7 @@ async def delete_model(model_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{model_id}/metrics")
-async def get_metrics(model_id: str, db: AsyncSession = Depends(get_db)):
+async def get_metrics(model_id: UUID, db: AsyncSession = Depends(get_db)):
     model = await db.get(MLModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -209,7 +210,7 @@ def _compute_roc_curve(metrics: dict) -> list[dict] | None:
 
 
 @router.post("/{model_id}/evaluate")
-async def evaluate_model(model_id: str, data: EvaluateRequest, db: AsyncSession = Depends(get_db)):
+async def evaluate_model(model_id: UUID, data: EvaluateRequest, db: AsyncSession = Depends(get_db)):
     model = await db.get(MLModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -253,7 +254,7 @@ async def evaluate_model(model_id: str, data: EvaluateRequest, db: AsyncSession 
 
 
 @router.post("/{model_id}/predict")
-async def predict(model_id: str, data: PredictRequest, db: AsyncSession = Depends(get_db)):
+async def predict(model_id: UUID, data: PredictRequest, db: AsyncSession = Depends(get_db)):
     model = await db.get(MLModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -266,7 +267,7 @@ async def predict(model_id: str, data: PredictRequest, db: AsyncSession = Depend
 
 
 @router.get("/{model_id}/explain")
-async def explain_model(model_id: str, db: AsyncSession = Depends(get_db)):
+async def explain_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
     model = await db.get(MLModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")

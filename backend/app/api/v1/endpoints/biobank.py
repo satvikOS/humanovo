@@ -6,7 +6,7 @@ Sample registry, chain of custody, checkout workflow, storage management.
 
 import logging
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -110,7 +110,7 @@ async def create_sample(data: SampleCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/samples/{sample_id}")
-async def get_sample(sample_id: str, db: AsyncSession = Depends(get_db)):
+async def get_sample(sample_id: UUID, db: AsyncSession = Depends(get_db)):
     sample = await db.get(BiobankSample, sample_id)
     if not sample:
         raise HTTPException(status_code=404, detail="Sample not found")
@@ -118,7 +118,7 @@ async def get_sample(sample_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/samples/{sample_id}")
-async def update_sample(sample_id: str, data: SampleUpdate, db: AsyncSession = Depends(get_db)):
+async def update_sample(sample_id: UUID, data: SampleUpdate, db: AsyncSession = Depends(get_db)):
     sample = await db.get(BiobankSample, sample_id)
     if not sample:
         raise HTTPException(status_code=404, detail="Sample not found")
@@ -135,7 +135,7 @@ async def update_sample(sample_id: str, data: SampleUpdate, db: AsyncSession = D
 
 
 @router.delete("/samples/{sample_id}")
-async def delete_sample(sample_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_sample(sample_id: UUID, db: AsyncSession = Depends(get_db)):
     sample = await db.get(BiobankSample, sample_id)
     if not sample:
         raise HTTPException(status_code=404, detail="Sample not found")
@@ -146,7 +146,7 @@ async def delete_sample(sample_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/samples/{sample_id}/checkout")
 async def checkout_sample(
-    sample_id: str, data: CheckoutRequest, db: AsyncSession = Depends(get_db)
+    sample_id: UUID, data: CheckoutRequest, db: AsyncSession = Depends(get_db)
 ):
     sample = await db.get(BiobankSample, sample_id)
     if not sample:
@@ -173,7 +173,7 @@ async def checkout_sample(
 
 @router.post("/samples/{sample_id}/checkin")
 async def checkin_sample(
-    sample_id: str,
+    sample_id: UUID,
     condition: str = Query("good"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -212,7 +212,7 @@ async def list_storage(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/storage/{location_id}")
-async def get_storage(location_id: str, db: AsyncSession = Depends(get_db)):
+async def get_storage(location_id: UUID, db: AsyncSession = Depends(get_db)):
     location = await db.get(StorageLocation, location_id)
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")

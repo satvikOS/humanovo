@@ -10,7 +10,7 @@ import json
 import logging
 from collections import Counter
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
@@ -85,7 +85,7 @@ def _parse_value(v: str):
     return v
 
 
-async def _get_dataset_or_404(db: AsyncSession, dataset_id: str) -> ResearchDataset:
+async def _get_dataset_or_404(db: AsyncSession, dataset_id: UUID) -> ResearchDataset:
     result = await db.execute(
         select(ResearchDataset).where(ResearchDataset.id == dataset_id)
     )
@@ -143,14 +143,14 @@ async def create_dataset(data: DatasetCreate, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/{dataset_id}")
-async def get_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
+async def get_dataset(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
     ds = await _get_dataset_or_404(db, dataset_id)
     return ds.to_dict()
 
 
 @router.patch("/{dataset_id}")
 async def update_dataset(
-    dataset_id: str, data: DatasetUpdate, db: AsyncSession = Depends(get_db)
+    dataset_id: UUID, data: DatasetUpdate, db: AsyncSession = Depends(get_db)
 ):
     ds = await _get_dataset_or_404(db, dataset_id)
     if data.name is not None:
@@ -165,7 +165,7 @@ async def update_dataset(
 
 
 @router.delete("/{dataset_id}")
-async def delete_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_dataset(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
     ds = await _get_dataset_or_404(db, dataset_id)
     await db.delete(ds)
     await db.flush()
@@ -174,7 +174,7 @@ async def delete_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{dataset_id}/upload")
 async def upload_data(
-    dataset_id: str,
+    dataset_id: UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -213,7 +213,7 @@ async def upload_data(
 
 @router.get("/{dataset_id}/preview")
 async def preview_data(
-    dataset_id: str,
+    dataset_id: UUID,
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
@@ -227,7 +227,7 @@ async def preview_data(
 
 
 @router.get("/{dataset_id}/profile")
-async def profile_data(dataset_id: str, db: AsyncSession = Depends(get_db)):
+async def profile_data(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
     ds = await _get_dataset_or_404(db, dataset_id)
     rows = ds.rows or []
     columns = ds.columns or []
@@ -278,14 +278,14 @@ async def profile_data(dataset_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{dataset_id}/dictionary")
-async def get_dictionary(dataset_id: str, db: AsyncSession = Depends(get_db)):
+async def get_dictionary(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
     ds = await _get_dataset_or_404(db, dataset_id)
     return {"columns": ds.columns or []}
 
 
 @router.patch("/{dataset_id}/dictionary")
 async def update_dictionary(
-    dataset_id: str,
+    dataset_id: UUID,
     columns: list[ColumnUpdate],
     db: AsyncSession = Depends(get_db),
 ):
@@ -306,7 +306,7 @@ async def update_dictionary(
 
 @router.post("/{dataset_id}/export")
 async def export_data(
-    dataset_id: str,
+    dataset_id: UUID,
     format: str = Query("csv"),
     db: AsyncSession = Depends(get_db),
 ):

@@ -5,6 +5,7 @@ Comments, project sharing, notifications, and audit trail.
 """
 
 import logging
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -121,7 +122,7 @@ async def create_comment(data: CommentCreate, db: AsyncSession = Depends(get_db)
 
 
 @router.delete("/comments/{comment_id}")
-async def delete_comment(comment_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_comment(comment_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(CollaborationComment).where(CollaborationComment.id == comment_id)
     )
@@ -194,7 +195,7 @@ async def create_share(data: ShareCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/shares/{share_id}")
-async def delete_share(share_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_share(share_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(ProjectShare).where(ProjectShare.id == share_id)
     )
@@ -248,7 +249,7 @@ async def create_notification(
 
 
 @router.patch("/notifications/{notification_id}/read")
-async def mark_read(notification_id: str, db: AsyncSession = Depends(get_db)):
+async def mark_read(notification_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(CollaborationNotification).where(
             CollaborationNotification.id == notification_id

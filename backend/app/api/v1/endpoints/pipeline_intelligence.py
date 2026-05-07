@@ -9,6 +9,7 @@ Comprehensive REST API with full visualization data for:
 """
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -186,7 +187,7 @@ async def get_cost_summary():
 
 
 @router.get("/costs/run/{run_id}")
-async def get_run_cost_breakdown(run_id: str):
+async def get_run_cost_breakdown(run_id: UUID):
     """Get complete cost breakdown for a discovery run.
 
     Returns costs broken down by provider, model, stage, category, and round.
@@ -304,7 +305,7 @@ async def list_benchmark_test_cases(
 
 
 @router.get("/benchmarks/test-cases/{test_case_id}")
-async def get_benchmark_test_case(test_case_id: str):
+async def get_benchmark_test_case(test_case_id: UUID):
     """Get a benchmark test case with full details."""
     from app.services.benchmark_service import get_benchmark_service
     svc = get_benchmark_service()
@@ -315,7 +316,7 @@ async def get_benchmark_test_case(test_case_id: str):
 
 
 @router.put("/benchmarks/test-cases/{test_case_id}")
-async def update_benchmark_test_case(test_case_id: str, updates: dict):
+async def update_benchmark_test_case(test_case_id: UUID, updates: dict):
     """Update a benchmark test case."""
     from app.services.benchmark_service import get_benchmark_service
     svc = get_benchmark_service()
@@ -326,7 +327,7 @@ async def update_benchmark_test_case(test_case_id: str, updates: dict):
 
 
 @router.delete("/benchmarks/test-cases/{test_case_id}")
-async def delete_benchmark_test_case(test_case_id: str):
+async def delete_benchmark_test_case(test_case_id: UUID):
     """Delete a benchmark test case."""
     from app.services.benchmark_service import get_benchmark_service
     svc = get_benchmark_service()
@@ -367,7 +368,7 @@ async def list_benchmark_runs(limit: int = Query(20, ge=1, le=100)):
 
 
 @router.get("/benchmarks/runs/{run_id}")
-async def get_benchmark_run(run_id: str):
+async def get_benchmark_run(run_id: UUID):
     """Get a benchmark run with all results."""
     from app.services.benchmark_service import get_benchmark_service
     svc = get_benchmark_service()
@@ -430,7 +431,7 @@ async def get_optimization_history(limit: int = Query(50, ge=1, le=200)):
 
 
 @router.post("/optimization/{optimization_id}/revert")
-async def revert_optimization(optimization_id: str, reason: str = ""):
+async def revert_optimization(optimization_id: UUID, reason: str = ""):
     """Revert an applied optimization."""
     from app.services.pipeline_optimizer_service import get_pipeline_optimizer
     opt = get_pipeline_optimizer()

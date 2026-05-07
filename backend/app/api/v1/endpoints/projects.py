@@ -542,7 +542,7 @@ async def get_project_knowledge_graph(
 @router.get("/{project_id}/knowledge-graph/neighbors/{node_id}")
 async def get_project_knowledge_graph_neighbors(
     project_id: UUID,
-    node_id: str,
+    node_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):

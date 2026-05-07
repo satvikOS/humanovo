@@ -1232,8 +1232,11 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
             error_body = ""
             try:
                 error_body = e.read().decode("utf-8", errors="replace")[:500]
-            except Exception:
-                pass
+            except (UnicodeDecodeError, OSError, AttributeError) as read_err:
+                logger.debug(
+                    "agent_orchestrator.error_body_read_failed",
+                    extra={"event": "error_body_read_failed", "error": str(read_err)},
+                )
             if e.code == 429 and attempt < max_retries:
                 wait = min(5 * (3 ** attempt), 60)  # 5s, 15s, 45s, 60s, 60s
                 logger.warning(f"Azure AI 429 for {model_name}, retry {attempt+1}/{max_retries} in {wait}s")
@@ -1353,8 +1356,11 @@ def _extract_claims_from_text(text: str) -> list[str]:
                 val = data.get(key)
                 if val and isinstance(val, str) and len(val) > 20:
                     claims.append(val[:500])
-    except (json.JSONDecodeError, IndexError):
-        pass
+    except (json.JSONDecodeError, IndexError) as e:
+        logger.debug(
+            "agent_orchestrator.claims_json_parse_failed",
+            extra={"event": "claims_json_parse_failed", "error": str(e)},
+        )
 
     if not claims:
         sentences = _re_embed.split(r'[.!?]\s+', text)
@@ -1559,8 +1565,11 @@ def parse_hypothesis_json(text: str) -> dict | None:
                 return None
 
             return data
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as e:
+        logger.debug(
+            "agent_orchestrator.hypothesis_json_parse_failed",
+            extra={"event": "hypothesis_json_parse_failed", "error": str(e)},
+        )
 
     return None
 
@@ -2579,8 +2588,11 @@ Validation: {_safe_join('; ', fb_result.get('validation_steps', []), 3)}"""
                                 "stats": _build_stats(hypotheses, stages_completed, elapsed_now + time_offset, round_num, NUM_ROUNDS),
                             })
                             print(f"[WORKER] Marked as completed due to continuation failure ({len(hypotheses)} hypotheses saved)")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(
+                                "agent_orchestrator.completion_save_failed",
+                                extra={"event": "completion_save_failed", "error": str(e)},
+                            )
                     return
 
             if cancelled:
@@ -3434,10 +3446,20 @@ def generate_paper():
                     if age < 960:  # Less than 16 min — still running
                         print(f"[PAPER] Generation already in progress (age={age:.0f}s), not restarting")
                         return {"status": "generating", "hypothesis_id": ex_hyp}
-                except Exception:
-                    pass
-    except Exception:
-        pass  # Proceed with fresh generation
+                except (ValueError, TypeError) as age_err:
+                    logger.debug(
+                        "agent_orchestrator.paper_age_parse_failed",
+                        extra={
+                            "event": "paper_age_parse_failed",
+                            "raw": ex_updated,
+                            "error": str(age_err),
+                        },
+                    )
+    except Exception as e:
+        logger.debug(
+            "agent_orchestrator.paper_existing_check_failed",
+            extra={"event": "paper_existing_check_failed", "error": str(e)},
+        )
 
     # Store paper task in DynamoDB
     table.put_item(Item={
@@ -3529,8 +3551,11 @@ def get_paper_status():
                             ExpressionAttributeValues={":s": "failed", ":e": error_msg},
                         )
                         print(f"[PAPER] Detected stale generating status (age={age_seconds:.0f}s), marked as failed")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "agent_orchestrator.stale_paper_mark_failed",
+                        extra={"event": "stale_paper_mark_failed", "error": str(e)},
+                    )
         return serialize({
             "status": status,
             "paper_html": item.get("paper_html", ""),
@@ -5002,8 +5027,14 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
                     # Ensure status is set to idle so frontend isn't stuck
                     try:
                         update_discovery_state({"status": "idle"})
-                    except Exception:
-                        pass
+                    except Exception as state_err:
+                        logger.warning(
+                            "agent_orchestrator.idle_status_update_failed",
+                            extra={
+                                "event": "idle_status_update_failed",
+                                "error": str(state_err),
+                            },
+                        )
                     raise
                 return {"status": "completed"}
             elif action == "generate_paper":
@@ -5028,8 +5059,14 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
                             ExpressionAttributeNames={"#s": "status", "#e": "error"},
                             ExpressionAttributeValues={":s": "failed", ":e": str(paper_err)},
                         )
-                    except Exception:
-                        pass
+                    except Exception as mark_err:
+                        logger.warning(
+                            "agent_orchestrator.paper_failed_mark_failed",
+                            extra={
+                                "event": "paper_failed_mark_failed",
+                                "error": str(mark_err),
+                            },
+                        )
                 return {"status": "completed"}
 
         # Normalize rawPath for route matching.

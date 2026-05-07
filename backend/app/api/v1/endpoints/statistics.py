@@ -849,7 +849,7 @@ async def save_analysis(request: SaveAnalysisRequest, db: AsyncSession = Depends
 
 
 @router.get("/saved/{analysis_id}")
-async def get_saved_analysis(analysis_id: str, db: AsyncSession = Depends(get_db)):
+async def get_saved_analysis(analysis_id: UUID, db: AsyncSession = Depends(get_db)):
     """Get a saved analysis."""
     SavedAnalysis = _get_saved_model()
     try:
@@ -863,7 +863,7 @@ async def get_saved_analysis(analysis_id: str, db: AsyncSession = Depends(get_db
 
 
 @router.delete("/saved/{analysis_id}")
-async def delete_saved_analysis(analysis_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_saved_analysis(analysis_id: UUID, db: AsyncSession = Depends(get_db)):
     """Delete a saved analysis."""
     SavedAnalysis = _get_saved_model()
     try:

@@ -23,6 +23,8 @@ Endpoints supporting the product directive on uploaded docs + royalties:
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -79,7 +81,7 @@ class KGOverview(BaseModel):
 @router.put("/documents/{document_id}/permission", response_model=PermissionResponse)
 async def set_document_permission(
     payload: PermissionUpdate,
-    document_id: str = Path(..., min_length=1, max_length=128),
+    document_id: UUID = Path(..., min_length=1, max_length=128),
 ):
     """Set the KG scope for a document. Default is 'private'. Choosing
     'common' makes the document and any facts extracted from it royalty-
@@ -116,8 +118,8 @@ async def set_document_permission(
 
 @router.get("/documents/{document_id}/permission", response_model=PermissionResponse)
 async def get_document_permission(
-    document_id: str = Path(..., min_length=1, max_length=128),
-    user_id: str = Query(..., min_length=1),
+    document_id: UUID = Path(..., min_length=1, max_length=128),
+    user_id: UUID = Query(..., min_length=1),
 ):
     svc = get_kg_first_service()
     perm = await svc.get_document_permission(user_id=user_id, document_id=document_id)
@@ -142,7 +144,7 @@ async def get_document_permission(
 
 @router.get("/user/{user_id}/royalties", response_model=RoyaltyResponse)
 async def get_user_royalties(
-    user_id: str = Path(..., min_length=1, max_length=128),
+    user_id: UUID = Path(..., min_length=1, max_length=128),
     days: int = Query(default=30, ge=1, le=365),
 ):
     svc = get_kg_first_service()
@@ -171,7 +173,7 @@ async def get_user_royalties(
 
 
 @router.get("/user/{user_id}/kg/overview", response_model=KGOverview)
-async def get_user_kg_overview(user_id: str = Path(..., min_length=1, max_length=128)):
+async def get_user_kg_overview(user_id: UUID = Path(..., min_length=1, max_length=128)):
     svc = get_kg_first_service()
     await svc.ensure_schema()
 

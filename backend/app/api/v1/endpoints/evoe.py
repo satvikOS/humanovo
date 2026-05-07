@@ -13,6 +13,7 @@ GET /api/v1/evoe/hypothesis/{hypothesis_id}
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
@@ -76,7 +77,7 @@ async def rank_hypotheses(payload: RankRequest) -> RankResponse:
 
 @router.get("/hypothesis/{hypothesis_id}", response_model=EvoeBreakdownResponse)
 async def evoe_for_hypothesis(
-    hypothesis_id: str = Path(..., min_length=1),
+    hypothesis_id: UUID = Path(..., min_length=1),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> EvoeBreakdownResponse:

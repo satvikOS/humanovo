@@ -235,8 +235,11 @@ def list_projects():
                         Select="COUNT",
                     )
                 project["hypothesis_count"] = hyp_resp.get("Count", 0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "projects.hypothesis_count_failed",
+                    extra={"event": "hypothesis_count_failed", "project_id": pid, "error": str(e)},
+                )
             # Live evidence count
             try:
                 ev_resp = ev_table.scan(
@@ -245,8 +248,11 @@ def list_projects():
                     Select="COUNT",
                 )
                 project["evidence_count"] = ev_resp.get("Count", 0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "projects.evidence_count_failed",
+                    extra={"event": "evidence_count_failed", "project_id": pid, "error": str(e)},
+                )
             # Live simulation count
             try:
                 sim_resp = sim_table.scan(
@@ -255,8 +261,11 @@ def list_projects():
                     Select="COUNT",
                 )
                 project["simulation_count"] = sim_resp.get("Count", 0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "projects.simulation_count_failed",
+                    extra={"event": "simulation_count_failed", "project_id": pid, "error": str(e)},
+                )
             enriched_items.append(project)
 
         return {

@@ -6,6 +6,7 @@ pathways, diseases, drugs) and edges (relationships).
 """
 
 import logging
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -37,7 +38,7 @@ class EdgeCreate(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-async def _get_node_or_404(db: AsyncSession, node_id: str) -> KnowledgeGraphNode:
+async def _get_node_or_404(db: AsyncSession, node_id: UUID) -> KnowledgeGraphNode:
     result = await db.execute(
         select(KnowledgeGraphNode).where(KnowledgeGraphNode.id == node_id)
     )
@@ -86,13 +87,13 @@ async def create_node(data: NodeCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/nodes/{node_id}")
-async def get_node(node_id: str, db: AsyncSession = Depends(get_db)):
+async def get_node(node_id: UUID, db: AsyncSession = Depends(get_db)):
     node = await _get_node_or_404(db, node_id)
     return node.to_dict()
 
 
 @router.delete("/nodes/{node_id}")
-async def delete_node(node_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_node(node_id: UUID, db: AsyncSession = Depends(get_db)):
     node = await _get_node_or_404(db, node_id)
 
     # Count and remove connected edges (CASCADE should handle this, but be explicit)
@@ -145,7 +146,7 @@ async def create_edge(data: EdgeCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/edges/{edge_id}")
-async def delete_edge(edge_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_edge(edge_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(KnowledgeGraphEdge).where(KnowledgeGraphEdge.id == edge_id)
     )
@@ -161,7 +162,7 @@ async def delete_edge(edge_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/subgraph/{node_id}")
 async def get_subgraph(
-    node_id: str,
+    node_id: UUID,
     depth: int = Query(1, ge=1, le=3),
     db: AsyncSession = Depends(get_db),
 ):

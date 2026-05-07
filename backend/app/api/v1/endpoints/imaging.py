@@ -10,7 +10,7 @@ import base64
 import json
 import logging
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -78,7 +78,7 @@ async def create_study(data: StudyCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/studies/{study_id}")
-async def get_study(study_id: str, db: AsyncSession = Depends(get_db)):
+async def get_study(study_id: UUID, db: AsyncSession = Depends(get_db)):
     study = await db.get(ImagingStudy, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
@@ -86,7 +86,7 @@ async def get_study(study_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/studies/{study_id}")
-async def delete_study(study_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_study(study_id: UUID, db: AsyncSession = Depends(get_db)):
     study = await db.get(ImagingStudy, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
@@ -96,7 +96,7 @@ async def delete_study(study_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/studies/{study_id}/annotate")
-async def add_annotation(study_id: str, data: AnnotationCreate, db: AsyncSession = Depends(get_db)):
+async def add_annotation(study_id: UUID, data: AnnotationCreate, db: AsyncSession = Depends(get_db)):
     study = await db.get(ImagingStudy, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
@@ -120,7 +120,7 @@ async def add_annotation(study_id: str, data: AnnotationCreate, db: AsyncSession
 
 
 @router.delete("/studies/{study_id}/annotations/{annotation_id}")
-async def delete_annotation(study_id: str, annotation_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_annotation(study_id: UUID, annotation_id: UUID, db: AsyncSession = Depends(get_db)):
     study = await db.get(ImagingStudy, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
@@ -130,7 +130,7 @@ async def delete_annotation(study_id: str, annotation_id: str, db: AsyncSession 
 
 
 @router.get("/studies/{study_id}/analysis")
-async def get_ai_analysis(study_id: str, db: AsyncSession = Depends(get_db)):
+async def get_ai_analysis(study_id: UUID, db: AsyncSession = Depends(get_db)):
     study = await db.get(ImagingStudy, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")

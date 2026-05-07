@@ -21,6 +21,8 @@ the user asked for today.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
@@ -72,7 +74,7 @@ class ProjectKGResponse(BaseModel):
 
 @router.get("/{project_id}/kg", response_model=ProjectKGResponse)
 async def get_project_kg(
-    project_id: str = Path(..., min_length=1, max_length=128),
+    project_id: UUID = Path(..., min_length=1, max_length=128),
     user_id: str | None = Query(
         default=None,
         description="Optional user_id — required to see project_private nodes owned by that user",

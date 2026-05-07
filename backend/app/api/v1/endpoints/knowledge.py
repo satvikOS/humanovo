@@ -7,6 +7,7 @@ Query and explore the biomedical knowledge graph.
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -146,7 +147,7 @@ async def search_entities(
 
 @router.get("/entities/{entity_id}", response_model=EntityResponse)
 async def get_entity(
-    entity_id: str,
+    entity_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> EntityResponse:
     """Get a specific entity by ID."""
@@ -162,7 +163,7 @@ async def get_entity(
 
 @router.get("/entities/{entity_id}/neighbors", response_model=GraphNeighborhood)
 async def get_entity_neighbors(
-    entity_id: str,
+    entity_id: UUID,
     depth: int = Query(1, ge=1, le=3),
     relation_types: list[RelationType] | None = Query(None),
     limit: int = Query(50, ge=1, le=200),

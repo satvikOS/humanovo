@@ -6,7 +6,7 @@ Manuscript CRUD, co-author management, journal formatting, submission tracking.
 
 import logging
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -91,7 +91,7 @@ async def list_journal_templates():
 
 
 @router.get("/{manuscript_id}")
-async def get_manuscript(manuscript_id: str, db: AsyncSession = Depends(get_db)):
+async def get_manuscript(manuscript_id: UUID, db: AsyncSession = Depends(get_db)):
     ms = await db.get(Manuscript, manuscript_id)
     if not ms:
         raise HTTPException(status_code=404, detail="Manuscript not found")
@@ -99,7 +99,7 @@ async def get_manuscript(manuscript_id: str, db: AsyncSession = Depends(get_db))
 
 
 @router.patch("/{manuscript_id}")
-async def update_manuscript(manuscript_id: str, data: ManuscriptUpdate, db: AsyncSession = Depends(get_db)):
+async def update_manuscript(manuscript_id: UUID, data: ManuscriptUpdate, db: AsyncSession = Depends(get_db)):
     ms = await db.get(Manuscript, manuscript_id)
     if not ms:
         raise HTTPException(status_code=404, detail="Manuscript not found")
@@ -121,7 +121,7 @@ async def update_manuscript(manuscript_id: str, data: ManuscriptUpdate, db: Asyn
 
 
 @router.delete("/{manuscript_id}")
-async def delete_manuscript(manuscript_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_manuscript(manuscript_id: UUID, db: AsyncSession = Depends(get_db)):
     ms = await db.get(Manuscript, manuscript_id)
     if not ms:
         raise HTTPException(status_code=404, detail="Manuscript not found")
@@ -131,7 +131,7 @@ async def delete_manuscript(manuscript_id: str, db: AsyncSession = Depends(get_d
 
 
 @router.get("/{manuscript_id}/authors")
-async def list_authors(manuscript_id: str, db: AsyncSession = Depends(get_db)):
+async def list_authors(manuscript_id: UUID, db: AsyncSession = Depends(get_db)):
     ms = await db.get(Manuscript, manuscript_id)
     if not ms:
         raise HTTPException(status_code=404, detail="Manuscript not found")
@@ -139,7 +139,7 @@ async def list_authors(manuscript_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{manuscript_id}/authors")
-async def add_author(manuscript_id: str, data: AuthorCreate, db: AsyncSession = Depends(get_db)):
+async def add_author(manuscript_id: UUID, data: AuthorCreate, db: AsyncSession = Depends(get_db)):
     ms = await db.get(Manuscript, manuscript_id)
     if not ms:
         raise HTTPException(status_code=404, detail="Manuscript not found")
@@ -159,7 +159,7 @@ async def add_author(manuscript_id: str, data: AuthorCreate, db: AsyncSession = 
 
 
 @router.delete("/{manuscript_id}/authors/{author_id}")
-async def remove_author(manuscript_id: str, author_id: str, db: AsyncSession = Depends(get_db)):
+async def remove_author(manuscript_id: UUID, author_id: UUID, db: AsyncSession = Depends(get_db)):
     ms = await db.get(Manuscript, manuscript_id)
     if not ms:
         raise HTTPException(status_code=404, detail="Manuscript not found")
@@ -172,7 +172,7 @@ async def remove_author(manuscript_id: str, author_id: str, db: AsyncSession = D
 
 
 @router.get("/{manuscript_id}/export")
-async def export_manuscript(manuscript_id: str, format: str = Query("markdown"), db: AsyncSession = Depends(get_db)):
+async def export_manuscript(manuscript_id: UUID, format: str = Query("markdown"), db: AsyncSession = Depends(get_db)):
     ms = await db.get(Manuscript, manuscript_id)
     if not ms:
         raise HTTPException(status_code=404, detail="Manuscript not found")
@@ -195,7 +195,7 @@ async def export_manuscript(manuscript_id: str, format: str = Query("markdown"),
 
 
 @router.post("/{manuscript_id}/submit")
-async def submit_manuscript(manuscript_id: str, data: SubmissionCreate, db: AsyncSession = Depends(get_db)):
+async def submit_manuscript(manuscript_id: UUID, data: SubmissionCreate, db: AsyncSession = Depends(get_db)):
     ms = await db.get(Manuscript, manuscript_id)
     if not ms:
         raise HTTPException(status_code=404, detail="Manuscript not found")

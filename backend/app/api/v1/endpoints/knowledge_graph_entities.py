@@ -9,6 +9,7 @@ into a clean Entity/Relationship abstraction.
 """
 
 import logging
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -117,7 +118,7 @@ class NeighborhoodResult(BaseModel):
 # ─── Helpers ────────────────────────────────────────────────────
 
 async def _get_entity_or_404(
-    db: AsyncSession, entity_id: str,
+    db: AsyncSession, entity_id: UUID,
 ) -> KnowledgeGraphNode:
     result = await db.execute(
         select(KnowledgeGraphNode).where(KnowledgeGraphNode.id == entity_id)
@@ -177,7 +178,7 @@ async def search_entities(
 
 @router.get("/entities/{entity_id}", response_model=Entity)
 async def get_entity(
-    entity_id: str,
+    entity_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single entity by canonical ID."""
@@ -210,7 +211,7 @@ async def get_entities_bulk(
     response_model=list[EntityRelationship],
 )
 async def get_entity_relationships(
-    entity_id: str,
+    entity_id: UUID,
     limit: int = Query(100, ge=1, le=1000),
     min_confidence: float = Query(0.0, ge=0, le=1),
     db: AsyncSession = Depends(get_db),
@@ -241,7 +242,7 @@ async def get_entity_relationships(
     response_model=NeighborhoodResult,
 )
 async def get_neighborhood(
-    entity_id: str,
+    entity_id: UUID,
     depth: int = Query(2, ge=1, le=4),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -399,7 +400,7 @@ async def find_paths(
     response_model=list[Entity],
 )
 async def get_entities_by_disease(
-    disease_id: str,
+    disease_id: UUID,
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):

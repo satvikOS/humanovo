@@ -88,7 +88,7 @@ async def log_activity(
 
 
 async def _owned_activity_or_404(
-    db: AsyncSession, activity_id: str, current_user: User,
+    db: AsyncSession, activity_id: UUID, current_user: User,
 ) -> Activity:
     """Look up an activity row and confirm `current_user` owns it."""
     result = await db.execute(
@@ -168,7 +168,7 @@ async def list_activities(
 
 @router.get("/{activity_id}")
 async def get_activity(
-    activity_id: str,
+    activity_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -179,7 +179,7 @@ async def get_activity(
 
 @router.patch("/{activity_id}")
 async def update_activity(
-    activity_id: str,
+    activity_id: UUID,
     data: ActivityUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -199,7 +199,7 @@ async def update_activity(
 
 @router.delete("/{activity_id}")
 async def delete_activity(
-    activity_id: str,
+    activity_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):

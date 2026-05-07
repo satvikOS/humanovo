@@ -23,15 +23,16 @@ Columns:
                           payment sees the warning before their next
                           discovery run hits the cap-blocked path.
 
-The mapping `stripe_subscription_id → UserTier` is computed in
+The mapping `stripe_subscription_id - UserTier` is computed in
 app.services.stripe_service via the price ID on the subscription's
-first item (env-configured per tier — STRIPE_PRICE_RESEARCHER_MONTHLY,
+first item (env-configured per tier - STRIPE_PRICE_RESEARCHER_MONTHLY,
 STRIPE_PRICE_LAB_MONTHLY, STRIPE_PRICE_INSTITUTION_MONTHLY).
+
+Idempotence: every ALTER uses ADD/DROP COLUMN IF [NOT] EXISTS so the
+migration is safely re-runnable after partial application.
 """
 
 from alembic import op
-import sqlalchemy as sa
-
 
 revision = "017_stripe_customer_subscription"
 down_revision = "016_owner_id_on_notebook_activity_ingestion"
@@ -40,31 +41,45 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "users",
-        sa.Column("stripe_customer_id", sa.String(64), nullable=True, unique=True),
+    op.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id "
+        "VARCHAR(64)"
     )
-    op.add_column(
-        "users",
-        sa.Column("stripe_subscription_id", sa.String(64), nullable=True),
+    op.execute(
+        "DO $$ BEGIN "
+        "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+        "WHERE conname = 'users_stripe_customer_id_key') THEN "
+        "ALTER TABLE users ADD CONSTRAINT users_stripe_customer_id_key "
+        "UNIQUE (stripe_customer_id); "
+        "END IF; END $$"
     )
-    op.add_column(
-        "users",
-        sa.Column("stripe_subscription_status", sa.String(32), nullable=True),
+    op.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id "
+        "VARCHAR(64)"
     )
-    # Lookups by these IDs happen in the webhook handler. The
-    # stripe_customer_id index is implicit via the UNIQUE constraint;
-    # add an explicit one for stripe_subscription_id since
-    # subscription.{updated,deleted} webhooks resolve by it.
-    op.create_index(
-        "ix_users_stripe_subscription_id",
-        "users",
-        ["stripe_subscription_id"],
+    op.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+        "stripe_subscription_status VARCHAR(32)"
+    )
+    # Lookups by stripe_subscription_id happen in the webhook handler;
+    # add an explicit index since subscription.{updated,deleted} webhooks
+    # resolve by it.
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_users_stripe_subscription_id "
+        "ON users (stripe_subscription_id)"
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_users_stripe_subscription_id", "users")
-    op.drop_column("users", "stripe_subscription_status")
-    op.drop_column("users", "stripe_subscription_id")
-    op.drop_column("users", "stripe_customer_id")
+    op.execute("DROP INDEX IF EXISTS ix_users_stripe_subscription_id")
+    op.execute(
+        "ALTER TABLE users DROP COLUMN IF EXISTS stripe_subscription_status"
+    )
+    op.execute(
+        "ALTER TABLE users DROP COLUMN IF EXISTS stripe_subscription_id"
+    )
+    op.execute(
+        "ALTER TABLE users DROP CONSTRAINT IF EXISTS "
+        "users_stripe_customer_id_key"
+    )
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS stripe_customer_id")

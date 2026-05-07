@@ -17,6 +17,7 @@ import asyncio
 import time
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,7 +39,7 @@ class RunStreamManager:
         self._cancel_flags: dict[str, bool] = {}
         self._last_activity: dict[str, float] = {}
 
-    async def connect(self, run_id: str, websocket: WebSocket):
+    async def connect(self, run_id: UUID, websocket: WebSocket):
         """Accept and register a WebSocket connection for a run."""
         await websocket.accept()
         if run_id not in self._connections:
@@ -47,7 +48,7 @@ class RunStreamManager:
         self._last_activity[run_id] = time.time()
         logger.info(f"WebSocket connected for run {run_id} ({len(self._connections[run_id])} clients)")
 
-    def disconnect(self, run_id: str, websocket: WebSocket):
+    def disconnect(self, run_id: UUID, websocket: WebSocket):
         """Remove a WebSocket connection."""
         if run_id in self._connections:
             if websocket in self._connections[run_id]:
@@ -56,7 +57,7 @@ class RunStreamManager:
                 del self._connections[run_id]
         logger.info(f"WebSocket disconnected for run {run_id}")
 
-    async def broadcast(self, run_id: str, event: dict[str, Any]):
+    async def broadcast(self, run_id: UUID, event: dict[str, Any]):
         """Broadcast an event to all clients connected to a run."""
         if run_id not in self._connections:
             return
@@ -73,19 +74,19 @@ class RunStreamManager:
         for ws in dead_connections:
             self._connections[run_id].remove(ws)
 
-    def request_cancel(self, run_id: str):
+    def request_cancel(self, run_id: UUID):
         """Set cancellation flag for a run."""
         self._cancel_flags[run_id] = True
 
-    def is_cancelled(self, run_id: str) -> bool:
+    def is_cancelled(self, run_id: UUID) -> bool:
         """Check if a run has been cancelled via WebSocket."""
         return self._cancel_flags.get(run_id, False)
 
-    def get_client_count(self, run_id: str) -> int:
+    def get_client_count(self, run_id: UUID) -> int:
         """Get number of connected clients for a run."""
         return len(self._connections.get(run_id, []))
 
-    async def handle_client_message(self, run_id: str, data: dict[str, Any], websocket: WebSocket):
+    async def handle_client_message(self, run_id: UUID, data: dict[str, Any], websocket: WebSocket):
         """Handle a message from a client."""
         command = data.get("command", "")
 
@@ -151,7 +152,7 @@ def get_stream_manager() -> RunStreamManager:
 @router.websocket("/discovery/{run_id}")
 async def discovery_ws(
     websocket: WebSocket,
-    run_id: str,
+    run_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """WebSocket endpoint for real-time discovery run updates."""
@@ -187,7 +188,7 @@ async def discovery_ws(
 @router.websocket("/synthesis/{run_id}")
 async def synthesis_ws(
     websocket: WebSocket,
-    run_id: str,
+    run_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """WebSocket endpoint for real-time synthesis run updates."""

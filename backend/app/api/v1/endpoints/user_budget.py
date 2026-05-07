@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Path, Query
 from pydantic import BaseModel, Field
@@ -88,7 +89,7 @@ class UsageBreakdown(BaseModel):
 
 
 @router.get("/{user_id}/budget", response_model=BudgetResponse)
-async def get_user_budget(user_id: str = Path(..., min_length=1, max_length=128)):
+async def get_user_budget(user_id: UUID = Path(..., min_length=1, max_length=128)):
     """Return the user's monthly budget config + current spend state.
 
     Also honors month-rollover: if a new calendar month has started since
@@ -124,7 +125,7 @@ async def get_user_budget(user_id: str = Path(..., min_length=1, max_length=128)
 @router.put("/{user_id}/budget", response_model=BudgetResponse)
 async def update_user_budget(
     payload: BudgetUpdateRequest,
-    user_id: str = Path(..., min_length=1, max_length=128),
+    user_id: UUID = Path(..., min_length=1, max_length=128),
 ):
     """Update the user's monthly cap + threshold + hard-limit flag."""
     svc = get_user_budget_service()
@@ -163,7 +164,7 @@ async def update_user_budget(
 
 @router.get("/{user_id}/budget/usage", response_model=UsageBreakdown)
 async def get_user_budget_usage(
-    user_id: str = Path(..., min_length=1, max_length=128),
+    user_id: UUID = Path(..., min_length=1, max_length=128),
     days: int = Query(default=30, ge=1, le=365),
 ):
     """Return a breakdown of the user's real usage for the last N days."""
