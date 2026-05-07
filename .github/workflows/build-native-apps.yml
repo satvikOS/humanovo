@@ -38,6 +38,9 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/build-native-apps.yml'
+      - 'scripts/configure_tauri_updater.py'
+      - 'scripts/set_tauri_version.py'
+      - 'scripts/generate_placeholder_icon.py'
     tags:
       - 'v*'
   # Manual override — release a specific tag without waiting for a
@@ -271,10 +274,16 @@ jobs:
           releaseBody: |
             humanovo ${{ steps.version.outputs.version }} — auto-built from `${{ github.sha }}`.
 
-            Install the artifact matching your OS:
-              - macOS:    humanovo_${{ steps.version.outputs.version }}_universal.dmg
-              - Windows:  humanovo_${{ steps.version.outputs.version }}_x64-setup.exe (NSIS) or _x64_en-US.msi
-              - Linux:    humanovo_${{ steps.version.outputs.version }}_amd64.deb or _amd64.AppImage
+            **Pick the installer for your OS:**
+
+            | Platform | File |
+            |---|---|
+            | macOS (Apple Silicon + Intel) | `humanovo-macos-universal.dmg` |
+            | Windows 10/11 | `humanovo-windows-x64.exe` (NSIS, recommended) or `humanovo-windows-x64.msi` |
+            | Linux .deb (Ubuntu / Debian) | `humanovo-linux-x64.deb` |
+            | Linux AppImage (any distro) | `humanovo-linux-x64.AppImage` |
+
+            All filenames are stable across releases — `releases/latest/download/<name>` always points at the newest build.
 
             Already installed? The Tauri auto-updater picks this up on next launch.
           # Auto-builds publish straight away — that's the "auto-upgrades
@@ -285,13 +294,13 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Attach stable-name aliases to release
-        # Tauri's bundler emits files like humanovo_0.2.0+abcd1234_universal.dmg
-        # — version embedded. The landing page (humanovo.net/download/...) needs
-        # stable URLs that don't change per release, so we upload a second copy
-        # of each artifact under a flat name. Both names point at the same bytes.
-        # GitHub's `releases/latest/download/<name>` shortcut then resolves
-        # /download/macos -> humanovo_universal.dmg without the landing-page
-        # config needing to know the version. Auto-mode only: tag releases and
+        # Tauri's bundler emits files like humanovo_0.2.0+7_universal.dmg
+        # — version embedded. End users want a stable URL like
+        # `releases/latest/download/humanovo-macos-universal.dmg` that
+        # doesn't change per release. We re-upload each artifact under
+        # a clean OS-arch.format name. Both names point at the same
+        # bytes; the landing page (humanovo.net/download/<os>) 302s to
+        # the stable name.
         # dispatch builds skip this (those have explicit versioned URLs).
         if: steps.version.outputs.mode == 'auto'
         shell: bash
@@ -300,12 +309,14 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           BUNDLE_DIR=frontend/src-tauri/target/release/bundle
+          # Glob → clean stable name. One source artifact per glob,
+          # uniform `humanovo-<os>-<arch>.<ext>` naming throughout.
           declare -A aliases=(
-            ["*.dmg"]="humanovo_universal.dmg"
-            ["*.msi"]="humanovo_x64_en-US.msi"
-            ["*-setup.exe"]="humanovo_x64-setup.exe"
-            ["*.deb"]="humanovo_amd64.deb"
-            ["*.AppImage"]="humanovo_amd64.AppImage"
+            ["*.dmg"]="humanovo-macos-universal.dmg"
+            ["*-setup.exe"]="humanovo-windows-x64.exe"
+            ["*.msi"]="humanovo-windows-x64.msi"
+            ["*.deb"]="humanovo-linux-x64.deb"
+            ["*.AppImage"]="humanovo-linux-x64.AppImage"
           )
           for glob in "${!aliases[@]}"; do
             for src in $(find "$BUNDLE_DIR" -type f -name "$glob" 2>/dev/null); do
