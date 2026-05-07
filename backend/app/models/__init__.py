@@ -36,6 +36,7 @@ from app.models.learning_memory import (
     StagePerformanceAggregate,
 )
 from app.models.notebook import NotebookPage as NotebookPage
+from app.models.project_document import ProjectDocument
 from app.models.saved_research_paper import SavedResearchPaper
 from app.models.platform_entities import (
     AuditLogEntry,

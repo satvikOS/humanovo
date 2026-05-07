@@ -4,20 +4,10 @@
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { persistGet, safeNum, safePct, safeDollars } from '../utils/persistence'
+import { safeNum, safePct, safeDollars } from '../utils/persistence'
 import { apiClient } from '../services'
 import ProjectKG3D from '../components/ProjectKG3D'
-
-interface SavedResearchPaper {
-  id: string
-  hypothesis_id: string
-  hypothesis_title: string
-  project_id: string
-  disease: string
-  generated_at: string
-  filename: string
-  paper_html?: string
-}
+import { useSavedPapers } from '../hooks/useSavedPapers'
 
 interface Project {
   id: string
@@ -92,7 +82,8 @@ export default function ProjectWorkspace() {
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])
   const [synthRuns, setSynthRuns] = useState<SynthesisRun[]>([])
   const [taxonomy, setTaxonomy] = useState<MethodCategory[]>([])
-  const [papers, setPapers] = useState<SavedResearchPaper[]>([])
+  // Saved research papers — backend-backed (Round 4b/4c).
+  const { papers, getPaperHtml: apiGetPaperHtml } = useSavedPapers(projectId)
   const [loading, setLoading] = useState(true)
 
   // Lab profile editor state
@@ -128,9 +119,7 @@ export default function ProjectWorkspace() {
         setLabExcluded(proj.lab_profile.excluded_methods || [])
         setLabFilterMode(proj.lab_profile.filter_mode || 'permissive')
       }
-      // Load research papers from localStorage
-      const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
-      setPapers(allPapers.filter(p => p.project_id === projectId))
+      // Saved papers come from useSavedPapers above; nothing to load here.
       setLoading(false)
     })
   }, [projectId])
@@ -272,20 +261,23 @@ export default function ProjectWorkspace() {
                     <div>
                       <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{p.hypothesis_title || p.filename}</div>
                       <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-                        {p.disease} &middot; Generated {new Date(p.generated_at).toLocaleDateString()}
+                        {p.disease || 'Unknown'} &middot; Generated {new Date(p.created_at).toLocaleDateString()}
                       </div>
                     </div>
-                    {p.paper_html && (
-                      <button
-                        onClick={() => {
+                    <button
+                      onClick={async () => {
+                        try {
+                          const html = await apiGetPaperHtml(p.id)
                           const win = window.open('', '_blank')
-                          if (win) { win.document.write(p.paper_html!); win.document.close() }
-                        }}
-                        className="px-3 py-1 text-xs rounded"
-                        style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)' }}>
-                        View
-                      </button>
-                    )}
+                          if (win) { win.document.write(html); win.document.close() }
+                        } catch (e) {
+                          console.error('Failed to load paper HTML:', e)
+                        }
+                      }}
+                      className="px-3 py-1 text-xs rounded"
+                      style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--color-text)' }}>
+                      View
+                    </button>
                   </div>
                 ))}
               </div>

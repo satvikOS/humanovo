@@ -676,6 +676,40 @@ export interface SavedPaperCreate {
   paper_html: string
 }
 
+// ─── Project documents ────────────────────────────────────────────
+//
+// Backend `ProjectDocument` rows. Listing returns metadata only;
+// /content endpoint streams the raw file bytes with the original
+// Content-Type and a Content-Disposition for save-as flows.
+
+export interface ProjectDocumentSummary {
+  id: string
+  project_id: string
+  title: string
+  doc_type: string
+  authors: string | null
+  document_date: string | null
+  description: string | null
+  tags: string[]
+  filename: string
+  file_size: number
+  mime_type: string
+  knowledge_base: 'private' | 'common' | string
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectDocumentUploadFields {
+  project_id: string
+  title: string
+  doc_type?: string
+  authors?: string
+  document_date?: string
+  description?: string
+  tags?: string[]
+  knowledge_base?: 'private' | 'common'
+}
+
 // ── Discovery Sessions (conversational Discovery persistence) ──
 export interface DiscoveryMessageCard {
   kind: 'hypothesis' | 'evidence' | 'entity' | 'kg_subgraph' | 'citation' | string
@@ -893,6 +927,56 @@ export const api = {
   },
   async deleteSavedPaper(id: string): Promise<void> {
     await apiClient.delete(`/saved-papers/${id}`)
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Project documents — researcher-uploaded artifacts (PDFs, datasets,
+  // IRB approvals, lab notes, manuscripts) attached to a project.
+  // Replaces the localStorage 'project-documents' key + IndexedDB blob
+  // shards. Listing returns metadata only; /content streams raw bytes.
+  //   POST   /v1/project-documents              — multipart upload
+  //   GET    /v1/project-documents              — list (project_id filter)
+  //   GET    /v1/project-documents/{id}         — metadata
+  //   GET    /v1/project-documents/{id}/content — raw file bytes
+  //   DELETE /v1/project-documents/{id}         — remove
+  // ═══════════════════════════════════════════════════════════════════════
+  async listProjectDocuments(params?: {
+    project_id?: string; doc_type?: string; limit?: number; offset?: number;
+  }): Promise<ProjectDocumentSummary[]> {
+    const { data } = await apiClient.get('/project-documents', { params })
+    return data
+  },
+  async uploadProjectDocument(
+    file: File,
+    fields: ProjectDocumentUploadFields,
+  ): Promise<ProjectDocumentSummary> {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('project_id', fields.project_id)
+    fd.append('title', fields.title)
+    fd.append('doc_type', fields.doc_type || 'Other')
+    if (fields.authors) fd.append('authors', fields.authors)
+    if (fields.document_date) fd.append('document_date', fields.document_date)
+    if (fields.description) fd.append('description', fields.description)
+    if (fields.tags && fields.tags.length > 0) fd.append('tags', fields.tags.join(','))
+    fd.append('knowledge_base', fields.knowledge_base || 'private')
+    const { data } = await apiClient.post('/project-documents', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  },
+  async getProjectDocument(id: string): Promise<ProjectDocumentSummary> {
+    const { data } = await apiClient.get(`/project-documents/${id}`)
+    return data
+  },
+  async getProjectDocumentContent(id: string): Promise<Blob> {
+    const resp = await apiClient.get(`/project-documents/${id}/content`, {
+      responseType: 'blob',
+    })
+    return resp.data
+  },
+  async deleteProjectDocument(id: string): Promise<void> {
+    await apiClient.delete(`/project-documents/${id}`)
   },
 
   // ═══════════════════════════════════════════════════════════════════════

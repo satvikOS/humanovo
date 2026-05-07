@@ -12,18 +12,14 @@ import { logActivity, formatDate, usePersistentState, blobPut, blobGet, blobDele
 import HypothesisDocViewer, { type TranslationalRoadmapDoc } from '../components/HypothesisDocViewer'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { useEscapeKey } from '../utils/clickable'
+import { useSavedPapers } from '../hooks/useSavedPapers'
 
 
-interface SavedResearchPaper {
-  id: string
-  hypothesis_id: string
-  hypothesis_title: string
-  project_id: string
-  disease: string
-  generated_at: string
-  filename: string
-  paper_html?: string
-}
+// SavedResearchPaper is now sourced from the backend (SavedPaperSummary +
+// SavedPaperDetail in services/api.ts). The local interface that lived
+// here was a localStorage shape; persistence moved to /api/v1/saved-papers
+// in Round 4b, and the writes path is wired in Round 4c via
+// useSavedPapers(projectId).
 
 interface SavedHypothesis {
   id: string
@@ -317,17 +313,17 @@ export default function ProjectDetail() {
     model_used: h.model_used,
   }))
 
-  // Research papers state — persisted + synced across devices
-  const [allPapers, setAllPapers] = usePersistentState<SavedResearchPaper[]>('research-papers', [])
-  const projectPapers = allPapers.filter(p => p.project_id === projectId)
-  const setProjectPapers = useCallback((updater: SavedResearchPaper[] | ((prev: SavedResearchPaper[]) => SavedResearchPaper[])) => {
-    setAllPapers(prev => {
-      const otherPapers = prev.filter(p => p.project_id !== projectId)
-      const currentProjectPapers = prev.filter(p => p.project_id === projectId)
-      const next = typeof updater === 'function' ? updater(currentProjectPapers) : updater
-      return [...next, ...otherPapers]
-    })
-  }, [projectId, setAllPapers])
+  // Research papers — backend-backed (Round 4b/4c). The hook fetches
+  // /api/v1/saved-papers?project_id={id} on mount and exposes CRUD that
+  // round-trips to the API. Listing rows are summaries (no paper_html);
+  // getPaperHtml lazily fetches the rendered body when the user opens
+  // the paper viewer.
+  const {
+    papers: projectPapers,
+    createPaper: apiCreatePaper,
+    deletePaper: apiDeletePaper,
+    getPaperHtml: apiGetPaperHtml,
+  } = useSavedPapers(projectId)
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -581,34 +577,46 @@ export default function ProjectDetail() {
     }
   }, [project, startPhaseAnimation, stopPhaseAnimation])
 
-  const confirmDeletePaper = () => { if (deletePaperId) { setProjectPapers(prev => prev.filter(p => p.id !== deletePaperId)); setDeletePaperId(null) } }
+  const confirmDeletePaper = useCallback(async () => {
+    if (!deletePaperId) return
+    try {
+      await apiDeletePaper(deletePaperId)
+    } catch (e) {
+      console.error('Failed to delete saved paper:', e)
+    } finally {
+      setDeletePaperId(null)
+    }
+  }, [deletePaperId, apiDeletePaper])
 
-  const _saveResearchPaper = useCallback((hypothesis: SavedHypothesis, html?: string) => {
-    setProjectPapers(prev => {
-      // If paper already exists, update its HTML if we have new HTML
-      const existingIdx = prev.findIndex(p => p.hypothesis_id === hypothesis.id)
-      if (existingIdx >= 0) {
-        if (html) {
-          const updated = [...prev]
-          updated[existingIdx] = { ...updated[existingIdx], paper_html: html }
-          return updated
-        }
-        return prev
+  const _saveResearchPaper = useCallback(async (hypothesis: SavedHypothesis, html?: string) => {
+    // Skip if we have no rendered HTML — saving a row with an empty body
+    // creates an artifact the user can't actually open. The earlier
+    // localStorage version stored html-less stub rows; the backend
+    // `paper_html` column is NOT NULL, so this guard is required.
+    if (!html) return
+    const filename = `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`
+    try {
+      // Upsert semantics — if the user re-runs paper generation for the
+      // same hypothesis, replace the prior row rather than accumulate
+      // duplicates. Until a PATCH /saved-papers/{id} endpoint lands,
+      // delete-then-create is the simplest path.
+      const existing = projectPapers.find(p => p.hypothesis_id === hypothesis.id)
+      if (existing) {
+        await apiDeletePaper(existing.id)
       }
-      const paper: SavedResearchPaper = {
-        id: `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      await apiCreatePaper({
         hypothesis_id: hypothesis.id,
-        hypothesis_title: hypothesis.title,
         project_id: hypothesis.project_id,
+        hypothesis_title: hypothesis.title,
         disease: hypothesis.disease || project?.disease_focus || 'Unknown',
-        generated_at: new Date().toISOString(),
-        filename: `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`,
+        filename,
         paper_html: html,
-      }
-      return [paper, ...prev].slice(0, 200)
-    })
-    logActivity({ type: 'evidence', action: 'created', title: `Research paper: ${hypothesis.title}`, project: project?.name })
-  }, [project])
+      })
+      logActivity({ type: 'evidence', action: 'created', title: `Research paper: ${hypothesis.title}`, project: project?.name })
+    } catch (e) {
+      console.error('Failed to save research paper:', e)
+    }
+  }, [project, projectPapers, apiCreatePaper, apiDeletePaper])
 
   const handleDocUpload = useCallback(async () => {
     if (!docFile || !docForm.title.trim() || !projectId) return
@@ -1186,23 +1194,33 @@ export default function ProjectDetail() {
                           mechanism: '',
                           confidence: 0.5,
                           tags: [],
-                          disease: paper.disease,
+                          disease: paper.disease || 'Unknown',
                           discovery_type: 'treatment',
-                          project_id: paper.project_id,
-                          created_at: paper.generated_at,
+                          project_id: paper.project_id || projectId || '',
+                          created_at: paper.created_at,
                         }
                         setActiveHypothesis(h)
                         setPaperError(null)
                         setGeneratingPaper(false)
                         setPdfBlobUrl(null)
 
-                        const storedHtml = paper.paper_html
-                        if (storedHtml && storedHtml.length > 100) {
-                          setPaperHtml(storedHtml)
-                          setViewMode('hypothesis_paper')
-                          return
+                        // Lazy-fetch the rendered HTML from the backend.
+                        // The list endpoint omits paper_html for response-
+                        // size reasons; getPaperHtml hits the detail
+                        // endpoint and returns the body string.
+                        try {
+                          const html = await apiGetPaperHtml(paper.id)
+                          if (html && html.length > 100) {
+                            setPaperHtml(html)
+                            setViewMode('hypothesis_paper')
+                            return
+                          }
+                        } catch (e) {
+                          console.error('Failed to fetch paper HTML:', e)
                         }
 
+                        // Fallback: an in-flight orchestrator run may still
+                        // have the freshly-rendered HTML in memory.
                         try {
                           const statusRes = await apiClient.get('/orchestrator/paper-status')
                           const data = statusRes.data
@@ -1216,7 +1234,7 @@ export default function ProjectDetail() {
                         } catch { /* Lambda unavailable */ }
 
                         setPaperHtml(null)
-                        setPaperError('This paper was generated in a previous session and the content was not cached. Click "Regenerate" below to generate it again.')
+                        setPaperError('This paper could not be loaded. Click "Regenerate" below to generate it again.')
                         setViewMode('hypothesis_paper')
                       }}
                     >
@@ -1225,7 +1243,7 @@ export default function ProjectDetail() {
                         <div className="min-w-0">
                           <p className="text-white text-sm font-medium truncate">{paper.hypothesis_title}</p>
                           <p className="text-[var(--color-text-muted)] text-xs mt-0.5">
-                            {formatDate(paper.generated_at)} &middot; {paper.disease}
+                            {formatDate(paper.created_at)} &middot; {paper.disease || 'Unknown'}
                           </p>
                         </div>
                       </div>

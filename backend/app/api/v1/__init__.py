@@ -46,6 +46,7 @@ from app.api.v1.endpoints import (
     paper_qa,
     pipeline_intelligence,
     platform_api,
+    project_documents,
     project_kg,
     projects,
     rag,
@@ -165,3 +166,7 @@ router.include_router(billing.router)
 
 # Saved research papers (replaces frontend localStorage 'research-papers' key).
 router.include_router(saved_papers.router)
+
+# Project documents (replaces frontend localStorage 'project-documents'
+# key + IndexedDB blob shards). Multipart upload of file + metadata.
+router.include_router(project_documents.router)

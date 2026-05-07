@@ -89,6 +89,32 @@ function RecentSimulationsWidget() {
   const [simulations, setSimulations] = useState<SimulationSummary[]>([])
   const [loading, setLoading] = useState(true)
 
+  // One-shot drain of pre-Round-4 localStorage collections to the
+  // backend. Idempotent + sentineled; safe to call on every Dashboard
+  // mount — the helper short-circuits when the per-key sentinel is
+  // already set. Failures keep the source key in place for next time.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { drainLegacyLocalStorage } = await import('../utils/localStorageMigration')
+        const result = await drainLegacyLocalStorage()
+        if (cancelled) return
+        const total = result.literature.migrated + result.papers.migrated
+        if (total > 0) {
+          // eslint-disable-next-line no-console
+          console.info(
+            `[migration] drained ${result.literature.migrated} literature ` +
+            `+ ${result.papers.migrated} saved paper(s) to backend`,
+          )
+        }
+      } catch {
+        /* migration failures are non-fatal; legacy keys retry next session */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
   useEffect(() => {
     // Gather all simulation types from localStorage. Each storage shape
     // is loose (different writers across the codebase) so we type each
