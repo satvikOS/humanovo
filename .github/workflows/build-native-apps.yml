@@ -121,37 +121,23 @@ jobs:
         run: npm ci
 
       - name: Generate placeholder icons if missing
-        working-directory: frontend
         shell: bash
         run: |
           # Tauri's bundler refuses to build without these files. We
-          # generate placeholders from a flat-color PNG so the build
-          # always succeeds out of the box; replace src-tauri/icons/
-          # with branded assets via `npm run tauri:icon path/to/src.png`
-          # before public release.
-          mkdir -p src-tauri/icons
-          if [ ! -f src-tauri/icons/icon.png ]; then
-            # 1024x1024 RGBA, humanovo bronze (#C4956A), pure-Python
-            # PNG so we don't depend on imagemagick / pillow / etc.
-            python3 - <<'PY'
-import struct, zlib
-W = H = 1024
-pixel = bytes([0xC4, 0x95, 0x6A, 0xFF])
-row = b'\x00' + pixel * W
-raw = row * H
-def chunk(t, d):
-    return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
-ihdr = struct.pack('>IIBBBBB', W, H, 8, 6, 0, 0, 0)
-with open('src-tauri/icons/icon.png', 'wb') as f:
-    f.write(b'\x89PNG\r\n\x1a\n')
-    f.write(chunk(b'IHDR', ihdr))
-    f.write(chunk(b'IDAT', zlib.compress(raw, 9)))
-    f.write(chunk(b'IEND', b''))
-PY
+          # generate a placeholder from scripts/generate_placeholder_icon.py
+          # (pure-stdlib PNG generator, no Pillow / ImageMagick needed)
+          # so the build always succeeds out of the box. Replace
+          # frontend/src-tauri/icons/* with branded assets later via:
+          #   cd frontend && npm run tauri:icon path/to/source-1024.png
+          mkdir -p frontend/src-tauri/icons
+          if [ ! -f frontend/src-tauri/icons/icon.png ]; then
+            python3 scripts/generate_placeholder_icon.py \
+              frontend/src-tauri/icons/icon.png
           fi
           # Tauri CLI fans the source PNG out into all platform sizes
           # (32x32, 128x128, 128x128@2x, icon.icns, icon.ico). Idempotent
           # — if the targets already exist they're regenerated.
+          cd frontend
           npx --yes -p @tauri-apps/cli@2 tauri icon \
             src-tauri/icons/icon.png \
             --output src-tauri/icons
@@ -195,22 +181,13 @@ PY
           echo "Resolved: tag=${TAG} version=${VERSION} mode=${MODE}"
 
       - name: Sync resolved version into tauri.conf.json
-        working-directory: frontend
         shell: bash
         run: |
           # The `version` in tauri.conf.json is what the updater plugin
           # compares against `latest.json.version` to decide whether to
           # offer an upgrade. Patching it in CI (rather than checking
           # in a constantly-bumping value) keeps the repo clean.
-          VERSION="${{ steps.version.outputs.version }}"
-          python3 - <<PY
-import json, pathlib
-p = pathlib.Path('src-tauri/tauri.conf.json')
-data = json.loads(p.read_text())
-data['version'] = "$VERSION"
-p.write_text(json.dumps(data, indent=2) + "\n")
-print(f"tauri.conf.json version = $VERSION")
-PY
+          python3 scripts/set_tauri_version.py "${{ steps.version.outputs.version }}"
 
       - name: Build native app
         uses: tauri-apps/tauri-action@v0
