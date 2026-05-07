@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 24" fill="none">
+  <g stroke="#8C7E6A" stroke-linecap="round" fill="none" stroke-width="1">
+    <path d="M 0 12 l 40 0" opacity="0.6" />
+    <path d="M 80 12 l 40 0" opacity="0.6" />
+    <!-- Diamond -->
+    <path d="M 60 6 l 6 6 l -6 6 l -6 -6 Z" fill="#B44A2C" stroke="#8E361E" />
+    <!-- Side dots -->
+    <circle cx="46" cy="12" r="1.4" fill="#8C7E6A" />
+    <circle cx="74" cy="12" r="1.4" fill="#8C7E6A" />
+  </g>
+</svg>

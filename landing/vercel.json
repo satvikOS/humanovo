@@ -1,0 +1,35 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/download/macos",
+      "destination": "https://github.com/satvikOS/humanovo/releases/latest/download/humanovo-macos-universal.dmg",
+      "permanent": false
+    },
+    {
+      "source": "/download/windows",
+      "destination": "https://github.com/satvikOS/humanovo/releases/latest/download/humanovo-windows-x64.exe",
+      "permanent": false
+    },
+    {
+      "source": "/download/windows/msi",
+      "destination": "https://github.com/satvikOS/humanovo/releases/latest/download/humanovo-windows-x64.msi",
+      "permanent": false
+    },
+    {
+      "source": "/download/linux/deb",
+      "destination": "https://github.com/satvikOS/humanovo/releases/latest/download/humanovo-linux-x64.deb",
+      "permanent": false
+    },
+    {
+      "source": "/download/linux/appimage",
+      "destination": "https://github.com/satvikOS/humanovo/releases/latest/download/humanovo-linux-x64.AppImage",
+      "permanent": false
+    },
+    {
+      "source": "/download/latest.json",
+      "destination": "https://github.com/satvikOS/humanovo/releases/latest/download/latest.json",
+      "permanent": false
+    }
+  ]
+}

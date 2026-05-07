@@ -1,0 +1,960 @@
+@import "tailwindcss";
+
+/*
+  humanovo — "Editorial Scientific" design system
+  Warm parchment + ink + rust. One serif family + mono for labels.
+  Typography-led, vertical rhythm on a 1.5 base.
+*/
+
+:root {
+  /* ── Paper (warm backgrounds) ─────────────────────────── */
+  --paper-0: #F4ECDC;
+  --paper-1: #EFE5D1;
+  --paper-2: #E7DAC0;
+  --paper-3: #DCCDAF;
+  --paper-edge: #C9B795;
+
+  /* ── Ink (foreground scale) ───────────────────────────── */
+  --ink-0: #1A1613;
+  --ink-1: #2C2620;
+  --ink-2: #55493C;
+  --ink-3: #8C7E6A;
+  --ink-4: #B4A891;
+  --ink-rgb: 26 22 19;
+
+  /* ── Accents ──────────────────────────────────────────── */
+  --rust:   #B44A2C;
+  --rust-2: #8E361E;
+  --ochre:  #C7912E;
+  --ochre-2:#A37518;
+  --sage:   #6E7A4E;
+  --wine:   #6A1E28;
+
+  /* ── Semantic text tokens ─────────────────────────────── */
+  --text-display:   var(--ink-0);
+  --text-heading:   var(--ink-0);
+  --text-body:      var(--ink-1);
+  --text-secondary: var(--ink-2);
+  --text-tertiary:  var(--ink-3);
+  --text-faint:     var(--ink-4);
+  --text-accent:    var(--rust);
+  --text-on-ink:    var(--paper-0);
+
+  /* ── Type scale (1.333 perfect-fourth) ────────────────── */
+  --text-xs:   0.75rem;      /* 12px — legal, fine print */
+  --text-sm:   0.875rem;     /* 14px — labels, secondary */
+  --text-base: 1.0625rem;    /* 17px — body (above 16 for serif comfort) */
+  --text-lg:   1.25rem;      /* 20px — lead / tagline */
+  --text-xl:   1.75rem;      /* 28px — subheading */
+  --text-2xl:  2.5rem;       /* 40px — section heading */
+  --text-3xl:  clamp(2.6rem, 5.5vw, 4.5rem);   /* H2 fluid */
+  --text-4xl:  clamp(3.25rem, 8vw, 5.5rem);    /* large display */
+  --text-5xl:  clamp(5rem, 13.8vw, 11.5rem);   /* hero wordmark */
+
+  /* ── Weight scale ─────────────────────────────────────── */
+  --fw-light:    300;
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+
+  /* ── Leading ──────────────────────────────────────────── */
+  --lh-display:  0.94;
+  --lh-heading:  1.08;
+  --lh-body:     1.55;
+  --lh-caption:  1.4;
+
+  /* ── Rhythm (multiples of body line-height ≈ 26px) ───── */
+  --rhythm: 1.625rem;          /* = 17px × 1.55 ≈ 26.35px */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 2.75rem;
+  --space-8: 3.5rem;
+  --space-9: 5rem;
+  --space-10: 7rem;
+
+  /* ── Shadows (warm, ink-based) ────────────────────────── */
+  --shadow-soft:  0 1px 2px rgba(var(--ink-rgb), 0.06),
+                  0 6px 16px -8px rgba(var(--ink-rgb), 0.18);
+  --shadow-lift:  0 2px 4px rgba(var(--ink-rgb), 0.08),
+                  0 14px 30px -12px rgba(var(--ink-rgb), 0.22);
+  --shadow-deep:  0 3px 6px rgba(var(--ink-rgb), 0.1),
+                  0 28px 60px -18px rgba(var(--ink-rgb), 0.28);
+
+  /* ── Radii ────────────────────────────────────────────── */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* ── Motion — strong cubic-beziers ───────────────────── */
+  --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-inout:  cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-snap:   cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+@theme inline {
+  --color-background: var(--paper-0);
+  --color-foreground: var(--ink-0);
+  --font-display: var(--font-display), "Fraunces", Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-mono), "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  background: var(--paper-0);
+  color: var(--text-body);
+  font-family: var(--font-display), "Fraunces", Georgia, "Times New Roman", serif;
+  font-size: var(--text-base);
+  font-weight: var(--fw-regular);
+  font-variation-settings: "opsz" 14, "SOFT" 50;
+  line-height: var(--lh-body);
+  font-kerning: normal;
+  font-feature-settings: "kern", "liga", "calt";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+  /* Platform-wide: no text selection anywhere on the marketing
+     surface — this is a read-only artefact, not a document to
+     copy out of. Form inputs re-enable selection below. */
+  -webkit-user-select: none;
+  user-select: none;
+  /* Custom humanovo cursor — small black dot, hotspot centred */
+  cursor: url('/cursor.svg') 8 8, default;
+}
+
+/* Pointer-cursor variant for interactive surfaces — same dot with a
+   thin rust ring around it */
+a, button, [role="button"], .nav-item, .btn-ink, .btn-ghost,
+.chrome, .skeuo-dark, label, summary, select, [tabindex]:not([tabindex="-1"]) {
+  cursor: url('/cursor-pointer.svg') 8 8, pointer;
+}
+
+/* Form inputs still need text cursor + selection */
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+html { scroll-behavior: smooth; }
+body { min-height: 100dvh; }
+
+::selection {
+  background: rgba(180, 74, 44, 0.24);
+  color: var(--ink-0);
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(26, 22, 19, 0.14);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(26, 22, 19, 0.28); }
+
+/* ─────────────────────────────────────────────
+   Paper backdrop — warm wash, always fixed
+   ───────────────────────────────────────────── */
+.paper-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 50% at 15% 5%,  rgba(199, 145, 46, 0.11), transparent 60%),
+    radial-gradient(ellipse 60% 45% at 85% 18%, rgba(180, 74, 44, 0.08), transparent 62%),
+    radial-gradient(ellipse 80% 40% at 50% 98%, rgba(106, 30, 40, 0.06), transparent 65%),
+    linear-gradient(180deg, var(--paper-0) 0%, var(--paper-1) 55%, var(--paper-0) 100%);
+}
+.paper-wash {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px) saturate(115%);
+  opacity: 0.45;
+  mix-blend-mode: multiply;
+  will-change: transform;
+}
+.grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.07;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 300 300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.18 0 0 0 0 0.1 0 0 0 0 0.05 0 0 0 0.65 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 300px;
+}
+.rule-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(26,22,19,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26,22,19,0.035) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, #000 30%, transparent 90%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, #000 30%, transparent 90%);
+}
+
+/* ─────────────────────────────────────────────
+   Typography roles
+   ───────────────────────────────────────────── */
+.font-display { font-family: var(--font-display), Georgia, serif; }
+.font-mono    { font-family: var(--font-mono), ui-monospace, monospace; }
+
+/* Display italic (hero, sectional H2) — highest opsz, SOFT on, WONK on */
+.t-display {
+  font-family: var(--font-display), Georgia, serif;
+  font-style: italic;
+  font-weight: var(--fw-light);
+  font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+  letter-spacing: -0.035em;
+  line-height: var(--lh-display);
+  color: var(--text-display);
+}
+
+/* Upright display (for sub-headings, numerals) */
+.t-display-upright {
+  font-family: var(--font-display), Georgia, serif;
+  font-style: normal;
+  font-weight: var(--fw-regular);
+  font-variation-settings: "opsz" 96, "SOFT" 30, "WONK" 0;
+  letter-spacing: -0.02em;
+  line-height: var(--lh-heading);
+  color: var(--text-heading);
+}
+
+/* Section heading */
+.t-h2 {
+  font-family: var(--font-display), Georgia, serif;
+  font-style: italic;
+  font-weight: var(--fw-light);
+  font-variation-settings: "opsz" 120, "SOFT" 80, "WONK" 1;
+  font-size: var(--text-3xl);
+  letter-spacing: -0.03em;
+  line-height: var(--lh-heading);
+  color: var(--text-heading);
+}
+
+.t-h3 {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: var(--fw-regular);
+  font-variation-settings: "opsz" 72, "SOFT" 30;
+  font-size: var(--text-xl);
+  letter-spacing: -0.022em;
+  line-height: var(--lh-heading);
+  color: var(--text-heading);
+}
+
+.t-lead {
+  font-family: var(--font-display), Georgia, serif;
+  font-style: italic;
+  font-weight: var(--fw-light);
+  font-variation-settings: "opsz" 72;
+  font-size: var(--text-lg);
+  line-height: 1.4;
+  color: var(--text-secondary);
+  letter-spacing: -0.005em;
+}
+
+.t-body {
+  font-family: var(--font-display), Georgia, serif;
+  font-style: normal;
+  font-weight: var(--fw-regular);
+  font-variation-settings: "opsz" 14;
+  font-size: var(--text-base);
+  line-height: var(--lh-body);
+  color: var(--text-body);
+}
+
+/* Monospace label / eyebrow */
+.t-eyebrow {
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-xs);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  font-feature-settings: "tnum";
+}
+.t-caption {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  line-height: var(--lh-caption);
+}
+
+/* ─────────────────────────────────────────────
+   Wordmark — text-clip etching reveal on hover.
+   Single element: the Renaissance anatomical etching is set as
+   background and clipped to text shape. By default the text-fill
+   is solid ink, hiding the background. On hover, fill transitions
+   to transparent, revealing the full etching beneath. Background
+   position parallaxes to the cursor so the etching feels alive.
+   ───────────────────────────────────────────── */
+.wordmark {
+  position: relative;
+  display: inline-block;
+  font-family: var(--font-display), Georgia, serif;
+  font-style: italic;
+  font-weight: var(--fw-light);
+  font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+  font-size: var(--text-5xl);
+  line-height: 0.86;
+  letter-spacing: -0.055em;
+  color: var(--ink-0);
+  user-select: none;
+}
+.wordmark::after {
+  content: "";
+  position: absolute;
+  left: 5%; right: 5%;
+  bottom: -0.06em;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--paper-edge) 20%, var(--paper-edge) 80%, transparent);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────
+   Art frames — real Renaissance images from /public/art.
+   Minimal filter: tiny sepia nudge + subtle warm vignette on the
+   frame, so the work reads as printed on the same parchment
+   without losing its detail. Tunable per-frame via --art-filter.
+   ───────────────────────────────────────────── */
+.art-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  /* Frame background matches paper so multiply blend erases light areas */
+  background: var(--paper-0);
+  /* Very faint border + soft shadow so the image reads as drawn-on-paper,
+     not as a framed photo */
+  border: 1px solid rgba(201, 183, 149, 0.45);
+  box-shadow:
+    0 1px 2px rgba(26, 22, 19, 0.04),
+    0 10px 24px -14px rgba(26, 22, 19, 0.18);
+  isolation: isolate;
+}
+.art-frame::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  /* Soft inner vignette so edges feather into paper */
+  box-shadow:
+    inset 0 0 0 1px rgba(26, 22, 19, 0.04),
+    inset 0 0 28px 4px rgba(244, 236, 220, 0.55);
+  z-index: 3;
+}
+/* Warm parchment wash — very subtle now; the heavy lifting is done by
+   the image's own blend mode + contrast */
+.art-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 140% 95% at 50% -25%, rgba(199, 145, 46, 0.08), transparent 65%),
+    radial-gradient(ellipse 140% 95% at 50% 125%, rgba(106, 30, 40, 0.06), transparent 65%);
+  mix-blend-mode: multiply;
+  opacity: 0.7;
+  z-index: 2;
+}
+/*
+  Multiply-on-paper technique: the image is pushed toward grayscale with
+  heavy contrast/brightness so dark strokes survive as ink while light
+  areas lift to paper tone. `mix-blend-mode: multiply` against the
+  paper-coloured frame background means any near-white pixel becomes the
+  paper colour — the drawing looks printed on the same parchment.
+*/
+.art-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: var(--art-filter,
+    grayscale(0.85) contrast(1.32) brightness(1.12) sepia(0.35)
+  );
+  mix-blend-mode: multiply;
+  z-index: 1;
+}
+.art-frame.art-contain img {
+  object-fit: contain;
+  background: var(--paper-0);
+}
+
+/* Placeholder state — shown until real image is dropped in */
+.art-pending {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(26, 22, 19, 0.04) 0,
+      rgba(26, 22, 19, 0.04) 6px,
+      transparent 6px,
+      transparent 12px
+    ),
+    var(--paper-1);
+  color: var(--ink-3);
+  z-index: 0;
+}
+.art-pending .mark {
+  font-family: var(--font-display), Georgia, serif;
+  font-style: italic;
+  font-weight: 300;
+  font-variation-settings: "opsz" 72, "SOFT" 60;
+  font-size: 1.1rem;
+  color: var(--ink-2);
+}
+.art-pending .note {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  max-width: 22ch;
+  line-height: 1.5;
+}
+.art-pending .path {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  color: var(--rust);
+  background: rgba(180, 74, 44, 0.08);
+  border: 1px solid rgba(180, 74, 44, 0.2);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+/* ─────────────────────────────────────────────
+   Rotating tagline slot
+   ───────────────────────────────────────────── */
+.tagline-slot {
+  position: relative;
+  min-height: 2.4em;
+  font-family: var(--font-display), Georgia, serif;
+  font-style: italic;
+  font-weight: var(--fw-light);
+  font-variation-settings: "opsz" 96, "SOFT" 50;
+  font-size: clamp(1.3rem, 2.2vw, 1.75rem);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--text-body);
+  max-width: 32ch;
+}
+
+/* ─────────────────────────────────────────────
+   Buttons — ink + ghost
+   ───────────────────────────────────────────── */
+.btn-ink,
+.btn-ghost {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.68rem;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  text-decoration: none;
+  user-select: none;
+  transition:
+    transform 160ms var(--ease-out),
+    background 220ms var(--ease-out),
+    color 220ms var(--ease-out),
+    border-color 220ms var(--ease-out),
+    box-shadow 220ms var(--ease-out);
+}
+
+.btn-ink {
+  padding: 12px 16px 12px 24px;
+  color: var(--paper-0);
+  background: var(--ink-0);
+  border: 1px solid var(--ink-0);
+  box-shadow: var(--shadow-soft);
+}
+.btn-ink:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+  background: var(--rust);
+  border-color: var(--rust);
+}
+.btn-ink:active { transform: translateY(0) scale(0.97); box-shadow: var(--shadow-soft); }
+
+.btn-ghost {
+  padding: 12px 16px 12px 24px;
+  color: var(--ink-0);
+  background: transparent;
+  border: 1px solid var(--paper-edge);
+}
+.btn-ghost:hover {
+  background: var(--ink-0);
+  color: var(--paper-0);
+  border-color: var(--ink-0);
+}
+.btn-ghost:active { transform: scale(0.97); }
+
+/* Trailing icon-circle inside buttons (button-in-button) */
+.btn-ink .btn-icon,
+.btn-ghost .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(244, 236, 220, 0.12);
+  transition:
+    transform 220ms var(--ease-out),
+    background 220ms var(--ease-out);
+}
+.btn-ghost .btn-icon {
+  background: rgba(26, 22, 19, 0.06);
+}
+.btn-ghost:hover .btn-icon {
+  background: rgba(244, 236, 220, 0.16);
+}
+.btn-ink:hover .btn-icon,
+.btn-ghost:hover .btn-icon {
+  transform: translate(2px, -1px);
+}
+.btn-ink .btn-icon svg,
+.btn-ghost .btn-icon svg { width: 12px; height: 12px; }
+
+/* ─────────────────────────────────────────────
+   Pill / badge — muted paper
+   ───────────────────────────────────────────── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px 7px 11px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: rgba(26, 22, 19, 0.04);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--r-pill);
+  backdrop-filter: blur(6px);
+}
+.pill .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--rust);
+  box-shadow: 0 0 0 3px rgba(180, 74, 44, 0.15);
+  animation: dot-pulse 2.4s var(--ease-inout) infinite;
+}
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(180, 74, 44, 0.10); }
+  50%      { box-shadow: 0 0 0 6px rgba(180, 74, 44, 0.0); }
+}
+
+/* ─────────────────────────────────────────────
+   Plate — editorial card with doppelrand (nested border)
+   ───────────────────────────────────────────── */
+.plate {
+  position: relative;
+  background: var(--paper-0);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--r-xl);
+  padding: 36px 32px;
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+  transition: transform 260ms var(--ease-out),
+              box-shadow 260ms var(--ease-out);
+}
+.plate::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid rgba(26,22,19,0.06);
+  border-radius: calc(var(--r-xl) - 8px);
+  pointer-events: none;
+}
+.plate-tinted {
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -20%, var(--tint, rgba(199,145,46,0.14)), transparent 55%),
+    var(--paper-0);
+}
+
+/* ─────────────────────────────────────────────
+   Section
+   ───────────────────────────────────────────── */
+.section {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+}
+
+/* ─────────────────────────────────────────────
+   Navigation — floating glass pill
+   ───────────────────────────────────────────── */
+.nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 9px 9px 9px 18px;
+  border-radius: var(--r-pill);
+  background: rgba(244, 236, 220, 0.78);
+  border: 1px solid rgba(201, 183, 149, 0.7);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: var(--shadow-soft);
+}
+.nav-item {
+  position: relative;
+  padding: 8px 14px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.64rem;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: color 180ms var(--ease-out);
+}
+.nav-item:hover, .nav-item-active { color: var(--ink-0); }
+.nav-slider {
+  position: absolute;
+  top: 0; left: 0;
+  border-radius: var(--r-pill);
+  background: rgba(26, 22, 19, 0.07);
+  border: 1px solid rgba(26, 22, 19, 0.08);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────
+   Overlay / Modal
+   ───────────────────────────────────────────── */
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(26, 22, 19, 0.42);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.overlay-panel {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  max-height: 92vh;
+  overflow: auto;
+  padding: 46px 42px;
+  border-radius: var(--r-xl);
+  background: var(--paper-0);
+  border: 1px solid var(--paper-edge);
+  box-shadow: var(--shadow-deep);
+}
+.overlay-panel::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid rgba(26,22,19,0.08);
+  border-radius: calc(var(--r-xl) - 8px);
+  pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────
+   Form field
+   ───────────────────────────────────────────── */
+.field-label {
+  display: block;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.6rem;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+.field {
+  width: 100%;
+  padding: 13px 14px;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.02rem;
+  font-weight: var(--fw-regular);
+  font-variation-settings: "opsz" 18;
+  color: var(--ink-0);
+  line-height: 1.45;
+  background: var(--paper-1);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--r-md);
+  outline: none;
+  transition: border-color 220ms var(--ease-out),
+              box-shadow 220ms var(--ease-out),
+              background 220ms var(--ease-out);
+  resize: none;
+}
+.field::placeholder {
+  color: var(--ink-4);
+  font-style: italic;
+}
+.field:focus {
+  border-color: var(--rust);
+  background: var(--paper-0);
+  box-shadow: 0 0 0 3px rgba(180, 74, 44, 0.15);
+}
+
+/* ─────────────────────────────────────────────
+   Stat / figure caption
+   ───────────────────────────────────────────── */
+.stat-num {
+  font-family: var(--font-display), Georgia, serif;
+  font-style: italic;
+  font-weight: var(--fw-light);
+  font-variation-settings: "opsz" 96, "SOFT" 80;
+  font-size: 2.15rem;
+  line-height: 1;
+  letter-spacing: -0.022em;
+  color: var(--ink-0);
+  font-feature-settings: "tnum", "kern";
+}
+.stat-num .unit {
+  color: var(--rust);
+  font-family: var(--font-mono), monospace;
+  font-style: normal;
+  font-size: 0.58rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  margin-left: 6px;
+  vertical-align: 0.55em;
+}
+
+/* Ornamental rule */
+.rule-ornament {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--ink-4);
+}
+.rule-ornament::before,
+.rule-ornament::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--paper-edge), transparent);
+}
+
+/* ─────────────────────────────────────────────
+   Pipeline side navigation
+   ───────────────────────────────────────────── */
+.stage-nav-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(244, 236, 220, 0.82);
+  border: 1px solid rgba(201, 183, 149, 0.7);
+  color: var(--ink-1);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  transition:
+    transform 160ms var(--ease-out),
+    background 220ms var(--ease-out),
+    border-color 220ms var(--ease-out),
+    color 220ms var(--ease-out),
+    opacity 220ms var(--ease-out);
+}
+.stage-nav-btn:hover:not(:disabled) {
+  background: var(--ink-0);
+  border-color: var(--ink-0);
+  color: var(--paper-0);
+  transform: translateY(-1px);
+}
+.stage-nav-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.stage-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.stage-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(26, 22, 19, 0.22);
+  background: rgba(26, 22, 19, 0.08);
+  transition:
+    transform 220ms var(--ease-out),
+    background 220ms var(--ease-out),
+    border-color 220ms var(--ease-out);
+}
+.stage-dot:hover {
+  background: rgba(26, 22, 19, 0.22);
+  transform: scale(1.15);
+}
+.stage-dot.is-active {
+  background: var(--rust);
+  border-color: var(--rust-2);
+  transform: scale(1.3);
+  box-shadow: 0 0 0 3px rgba(180, 74, 44, 0.18);
+}
+
+@media (max-width: 820px) {
+  .stage-nav { display: none; }
+  .pipeline-stack .stage-row {
+    grid-template-columns: 1fr !important;
+    padding: 24px !important;
+    min-height: 0 !important;
+  }
+  .pipeline-stack .stage-row > *:first-child { order: 0 !important; }
+  .pipeline-stack .stage-row > *:last-child  { order: 1 !important; }
+}
+
+/* ─────────────────────────────────────────────
+   Layout primitives — hero body grid
+   ───────────────────────────────────────────── */
+.hero-body-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 64px;
+  align-items: start;
+}
+
+/* ─────────────────────────────────────────────
+   Responsive
+   ───────────────────────────────────────────── */
+@media (max-width: 820px) {
+  :root { --text-base: 1rem; }
+  .overlay-panel { padding: 36px 22px; }
+  .plate { padding: 26px 22px; }
+  .nav-bar { padding: 7px 7px 7px 14px; gap: 10px; }
+  .hero-body-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  .hero-plate { margin-left: 0 !important; max-width: 480px; margin-inline: auto; }
+  .hero-margin-note { display: none; } /* too cramped on mobile */
+}
+
+/* ─────────────────────────────────────────────
+   Reveal utilities
+   ───────────────────────────────────────────── */
+.reveal { opacity: 0; transform: translateY(22px); }
+.reveal-strong { opacity: 0; transform: translateY(46px); filter: blur(6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal, .reveal-strong { opacity: 1; transform: none; filter: none; }
+  .wordmark::before { mask-image: none; -webkit-mask-image: none; }
+}
+
+/* Hover states only on fine pointers */
+@media (hover: none) or (pointer: coarse) {
+  .btn-ink:hover, .btn-ghost:hover, .plate:hover {
+    transform: none;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   Skip-link — invisible until keyboard-focused.
+   First focusable element in the DOM so a tab
+   user lands here and can jump straight past
+   the nav into the content. WCAG 2.4.1.
+   ───────────────────────────────────────────── */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 16px;
+  z-index: 100;
+  padding: 12px 18px;
+  background: var(--ink-0);
+  color: var(--paper-0);
+  border-radius: 8px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: top 0.2s ease;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 16px;
+  outline: 2px solid var(--rust);
+  outline-offset: 2px;
+}
+
+/* ─────────────────────────────────────────────
+   Reduced-motion: GSAP timelines are disabled
+   via JS guards in each component, but anything
+   driven by pure CSS @keyframes / transitions
+   gets squashed here too so the user gets one
+   coherent experience either way.
+   ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  /* Strip GSAP-applied opacity = 0 starts; the
+     timelines are short-circuited in JS so the
+     content needs to be visible in its final state
+     immediately on mount. */
+  .hero-topline,
+  .hero-wordmark-wrap,
+  .hero-rule,
+  .tagline-wrap,
+  .hero-para,
+  .hero-cta,
+  .hero-stats > *,
+  .hero-plate,
+  .hero-figcaption,
+  .pipeline-header > *,
+  .stage-anim,
+  .wedge-anim,
+  .trust-block,
+  .trust-header > *,
+  .dl-header > *,
+  .device-card,
+  .dl-foot > * {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+    visibility: visible !important;
+  }
+}
+
