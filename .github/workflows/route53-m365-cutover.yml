@@ -1,12 +1,10 @@
 name: Route53 — humanovo.net M365 email cutover
 
- claude/production-platform-analysis-30H5c
 
 # Re-trigger marker: humanovo-admin gained Route53Access inline policy
 # (route53:ListHostedZones[ByName], GetHostedZone, ListResourceRecordSets,
 #  ChangeResourceRecordSets, GetChange). Preflight should pass now.
 #
- humanovo
 # One-shot DNS change to switch humanovo.net inbound email to Microsoft 365.
 #
 # What this does in a single atomic ChangeResourceRecordSets batch:
@@ -42,7 +40,6 @@ name: Route53 — humanovo.net M365 email cutover
 #   - resend._domainkey.humanovo.net TXT (Resend DKIM)
 #   - _dmarc.humanovo.net TXT
 #
- claude/production-platform-analysis-30H5c
 # Trigger: workflow_dispatch only. Confirmation phrase required.
 
 # Trigger:
@@ -51,7 +48,6 @@ name: Route53 — humanovo.net M365 email cutover
 #   - push to humanovo when THIS workflow file changes (auto-fires
 #     once when the agent pushes a config update; idempotent because
 #     all DNS changes are UPSERTs)
- humanovo
 
 on:
   workflow_dispatch:
@@ -77,13 +73,11 @@ on:
         description: 'Type humanovo-net-m365-cutover to confirm'
         required: true
         type: string
- claude/production-platform-analysis-30H5c
 
   push:
     branches: [humanovo]
     paths:
       - '.github/workflows/route53-m365-cutover.yml'
- humanovo
 
 env:
   AWS_REGION: us-east-1
@@ -95,7 +89,6 @@ concurrency:
 
 jobs:
   apply:
- claude/production-platform-analysis-30H5c
     name: ${{ inputs.phase }} — SPF mode ${{ inputs.spf_mode }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -114,14 +107,12 @@ jobs:
     steps:
       - name: Verify confirmation phrase (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch'
- humanovo
         run: |
           if [ "${{ inputs.confirm_intent }}" != "humanovo-net-m365-cutover" ]; then
             echo "::error::Confirmation phrase did not match. Aborting."
             exit 1
           fi
 
- claude/production-platform-analysis-30H5c
 
       - name: Note for push trigger
         if: github.event_name == 'push'
@@ -131,7 +122,6 @@ jobs:
           echo "Effective SPF mode: $EFFECTIVE_SPF_MODE"
           echo "All DNS changes are UPSERTs — re-running this workflow is harmless."
 
- humanovo
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -139,7 +129,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
- claude/production-platform-analysis-30H5c
 
       - name: Identify IAM caller + preflight Route53 access
         id: caller
@@ -178,7 +167,6 @@ jobs:
           fi
           echo "Route 53 access OK for $USER_NAME."
 
- humanovo
       - name: Find hosted zone ID
         id: hz
         run: |
@@ -195,7 +183,6 @@ jobs:
           echo "Hosted zone: $ZONE_ID"
           echo "zone_id=$ZONE_ID" >> "$GITHUB_OUTPUT"
 
- claude/production-platform-analysis-30H5c
       - name: Read existing apex TXT to preserve MS=... value
         id: txt
         run: |
@@ -411,17 +398,14 @@ jobs:
           }
           print(json.dumps(batch, indent=2))
           PYEOF
- humanovo
           echo "=== Change batch ==="
           cat /tmp/change-batch.json
           echo "==================="
 
       - name: Apply (Route 53 ChangeResourceRecordSets)
- claude/production-platform-analysis-30H5c
         if: inputs.phase == 'apply'
 
         if: env.EFFECTIVE_PHASE == 'apply'
- humanovo
         id: change
         run: |
           set -e
@@ -434,11 +418,9 @@ jobs:
           echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Wait for INSYNC
- claude/production-platform-analysis-30H5c
         if: inputs.phase == 'apply'
 
         if: env.EFFECTIVE_PHASE == 'apply'
- humanovo
         run: |
           set -e
           echo "Waiting for change ${{ steps.change.outputs.change_id }} to propagate to Route 53 edges (typically 30-90s)…"
@@ -446,11 +428,9 @@ jobs:
           echo "Change is INSYNC across Route 53."
 
       - name: Verify via public DNS resolvers
- claude/production-platform-analysis-30H5c
         if: inputs.phase == 'apply'
 
         if: env.EFFECTIVE_PHASE == 'apply'
- humanovo
         run: |
           set +e
           echo "## Post-change verification" >> $GITHUB_STEP_SUMMARY
@@ -477,7 +457,6 @@ jobs:
           {
             echo "## Route 53 — humanovo.net M365 email cutover"
             echo ""
- claude/production-platform-analysis-30H5c
             echo "Phase: \`${{ inputs.phase }}\`"
             echo "SPF mode: \`${{ inputs.spf_mode }}\`"
             echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
@@ -489,7 +468,6 @@ jobs:
             echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
             echo ""
             if [ "${{ env.EFFECTIVE_PHASE }}" = "apply" ]; then
- humanovo
               echo "### Next steps"
               echo "1. Wait 5-10 min for global DNS propagation (some recursive resolvers cache up to TTL)."
               echo "2. In Microsoft 365 admin → Setup → Domains → humanovo.net → click **Re-check DNS**."
