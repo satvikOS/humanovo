@@ -9,7 +9,6 @@
 
   Structure follows the convention of a 16th-century book back-page:
 
-    set in       — typefaces credited
     plates       — illustration credits
     composed at  — where + when produced
     masthead     — the editorial team
@@ -17,7 +16,7 @@
                    from decoration
 
   Visual register: small mono caps, italic Fraunces flourishes for
-  the typeface names, generous letter-spacing, single-column max-
+  the emphasis spans, generous letter-spacing, single-column max-
   width 540px so the eye reads it as a finished plate, not as a
   footer block.
 */
@@ -51,47 +50,26 @@ export default function Colophon() {
           textAlign: "center",
         }}
       >
-        {/* Printer's mark — a small charcoal disc with a rust dot.
-            The same mark that lives in the nav. Printers' marks
-            were how 16th-century houses signed their work. */}
+        {/* Printer's mark — the humanovo glyph. Same mark that lives
+            in the nav. Printers' marks were how 16th-century houses
+            signed their work; the glyph plays that role here. */}
         <div
           aria-hidden
           style={{
-            width: 28,
-            height: 28,
-            margin: "0 auto 26px",
-            borderRadius: 8,
-            background: "var(--ink-0)",
-            display: "grid",
-            placeItems: "center",
+            width: 32,
+            height: 32,
+            margin: "0 auto 28px",
+            color: "var(--ink-0)",
           }}
         >
-          <span
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: 999,
-              background: "var(--rust)",
-              boxShadow: "0 0 0 2px rgba(180, 74, 44, 0.18)",
-            }}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/glyph.svg"
+            alt=""
+            width={32}
+            height={32}
+            style={{ display: "block" }}
           />
-        </div>
-
-        {/* Set-in — typefaces, with credit lines */}
-        <div className="colophon-block">
-          <span className="colophon-label">Set in</span>
-          <p className="colophon-line">
-            <em className="colophon-emph">Fraunces</em>{" "}
-            <span className="colophon-faint">
-              (Phaedra Charles &amp; David Jonathan Ross, 2017&ndash;)
-            </span>{" "}
-            at the <span className="colophon-mono">opsz</span>,{" "}
-            <span className="colophon-mono">SOFT</span>, and{" "}
-            <span className="colophon-mono">WONK</span> axes, with{" "}
-            <em className="colophon-emph">JetBrains Mono</em>{" "}
-            <span className="colophon-faint">(JetBrains, 2020)</span>{" "}
-            for technical labels.
-          </p>
         </div>
 
         {/* Plates — illustration credits in the same compact register.
@@ -175,27 +153,31 @@ export default function Colophon() {
           style={{
             display: "flex",
             justifyContent: "center",
-            gap: 22,
+            gap: 18,
             flexWrap: "wrap",
             fontFamily: "var(--font-mono), monospace",
             fontSize: "0.62rem",
             letterSpacing: "0.24em",
             textTransform: "uppercase",
             color: "var(--ink-3)",
+            maxWidth: 720,
+            marginInline: "auto",
           }}
         >
-          <Link href="/manifesto" className="colophon-link">
-            Manifesto
-          </Link>
-          <span aria-hidden style={{ color: "var(--ink-4)" }}>&middot;</span>
-          <Link href="/provenance" className="colophon-link">
-            Provenance
-          </Link>
-          <span aria-hidden style={{ color: "var(--ink-4)" }}>&middot;</span>
-          <Link href="/atlas" className="colophon-link">
-            Atlas
-          </Link>
-          <span aria-hidden style={{ color: "var(--ink-4)" }}>&middot;</span>
+          <Link href="/manifesto" className="colophon-link">Manifesto</Link>
+          <span aria-hidden className="colophon-sep">&middot;</span>
+          <Link href="/pricing" className="colophon-link">Pricing</Link>
+          <span aria-hidden className="colophon-sep">&middot;</span>
+          <Link href="/docs" className="colophon-link">Docs</Link>
+          <span aria-hidden className="colophon-sep">&middot;</span>
+          <Link href="/provenance" className="colophon-link">Provenance</Link>
+          <span aria-hidden className="colophon-sep">&middot;</span>
+          <Link href="/atlas" className="colophon-link">Atlas</Link>
+          <span aria-hidden className="colophon-sep">&middot;</span>
+          <Link href="/privacy" className="colophon-link">Privacy</Link>
+          <span aria-hidden className="colophon-sep">&middot;</span>
+          <Link href="/terms" className="colophon-link">Terms</Link>
+          <span aria-hidden className="colophon-sep">&middot;</span>
           <a
             href="https://github.com/satvikOS/humanovo"
             target="_blank"
@@ -204,11 +186,8 @@ export default function Colophon() {
           >
             GitHub
           </a>
-          <span aria-hidden style={{ color: "var(--ink-4)" }}>&middot;</span>
-          <a
-            href="mailto:hello@humanovo.net"
-            className="colophon-link"
-          >
+          <span aria-hidden className="colophon-sep">&middot;</span>
+          <a href="mailto:hello@humanovo.net" className="colophon-link">
             hello@humanovo.net
           </a>
         </nav>
@@ -280,6 +259,9 @@ export default function Colophon() {
         .colophon-link:focus-visible {
           color: var(--ink-0);
           border-color: var(--rust);
+        }
+        .colophon-sep {
+          color: var(--ink-4);
         }
       `}</style>
     </footer>

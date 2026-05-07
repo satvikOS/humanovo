@@ -101,7 +101,7 @@ with the cited paragraph highlighted. Click a target gene, it traces
 through every linked claim in red ink, like a Renaissance scholar
 following a single argument across folios.
 
-This single feature is the entire wedge. No competitor has anything
+This single feature is the entire thesis statement. No competitor has anything
 close. It also doubles as **proof** (the hypothesis is real,
 verifiable, scrollable) and as **demo** (you experience the product
 without signing up). Stripe has nothing this good. Anthropic has
@@ -302,7 +302,7 @@ signal-per-hour:
    The most important line on the site.
 10. **The Atlas** (Big Bet 3 — interactive featured hypothesis as
     a Vesalius plate). 2 weeks of coupled design + engineering.
-    The wedge becomes irrefutable.
+    The thesis statement becomes irrefutable.
 
 ---
 
@@ -316,7 +316,7 @@ A landing page only fails one of three ways:
    create the kind of brand-level affection people share).
 
 The current page handles (1) well — the editorial-luxury aesthetic
-is a strong instant-impression. The Trust + Wedge sections shipped
+is a strong instant-impression. The Trust + Thesis sections shipped
 in the last commit handle (2). What this VISION addresses is (3) —
 **making the site itself an artifact people share, link to, and
 return to**. Not because we asked them, but because the site

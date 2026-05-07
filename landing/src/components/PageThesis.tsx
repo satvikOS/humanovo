@@ -4,7 +4,7 @@ import { useRef } from "react";
 import { gsap, useGSAP } from "@/lib/gsap";
 
 /*
-  Page 1.5 — the "wedge."
+  Page 1.5 — the thesis statement.
 
   No artwork. Pure typography. The hero is heavy with the Vitruvian
   plate, the pipeline section is heavy with four Renaissance plates;
@@ -35,7 +35,7 @@ const CONTRASTS: Array<{ them: string; us: string }> = [
   },
 ];
 
-export default function PageWedge() {
+export default function PageThesis() {
   const root = useRef<HTMLElement>(null);
 
   useGSAP(
@@ -57,7 +57,7 @@ export default function PageWedge() {
       // or whose JS hydration is slow, would see this section as
       // empty until the scroll-trigger fired. The slide-up alone
       // is enough cinematic; opacity stays at 1 throughout.
-      gsap.from(".wedge-anim", {
+      gsap.from(".thesis-anim", {
         y: 22,
         duration: 0.85,
         stagger: 0.08,
@@ -75,9 +75,9 @@ export default function PageWedge() {
   return (
     <section
       ref={root}
-      id="section-wedge"
+      id="section-thesis"
       className="section"
-      aria-labelledby="wedge-headline"
+      aria-labelledby="thesis-headline"
       style={{
         // Quieter background than the hero — let typography do the work.
         // Vertical rhythm: 120px top / bottom mirrors Page 2 header.
@@ -90,14 +90,14 @@ export default function PageWedge() {
         className="relative z-10 w-full mx-auto px-6 md:px-12"
         style={{ maxWidth: 980, textAlign: "center" }}
       >
-        <span className="pill wedge-anim">
+        <span className="pill thesis-anim">
           <span className="dot" />
-          The wedge
+          What humanovo is
         </span>
 
         <h2
-          id="wedge-headline"
-          className="t-h2 wedge-anim"
+          id="thesis-headline"
+          className="t-h2 thesis-anim"
           style={{
             marginTop: 26,
             // Larger than Page 2's h2 — this is the page's most-quoted line.
@@ -121,7 +121,7 @@ export default function PageWedge() {
         </h2>
 
         <p
-          className="t-lead wedge-anim"
+          className="t-lead thesis-anim"
           style={{
             marginTop: 24,
             maxWidth: 640,
@@ -137,7 +137,7 @@ export default function PageWedge() {
             on top, italic US line on the bottom in rust. Reads like a
             marginalia gloss in a 17th-century commonplace book. */}
         <div
-          className="wedge-anim"
+          className="thesis-anim"
           style={{
             marginTop: 70,
             display: "grid",

@@ -29,19 +29,19 @@ The foundation is genuinely above-average for a pre-launch AI startup:
 
 ## What was missing (shipped this round)
 
-### 1. The "wedge" — answering *why this, why now, why not ChatGPT*
+### 1. The "thesis statement" — answering *why this, why now, why not ChatGPT*
 
 The original page goes Hero → Pipeline → Download. It says **what
 humanovo does** but never **why a researcher should switch from
 Elicit, Consensus, ChatGPT, or their existing workflow**. That's the
 single largest conversion-killer on AI-tool landing pages.
 
-**Shipped:** `PageWedge.tsx` between hero and pipeline. Pure typography
+**Shipped:** `PageThesis.tsx` between hero and pipeline. Pure typography
 (no art, deliberately, to reset the eye after the heavy hero plate).
 A single italic Fraunces statement: *"ChatGPT doesn't know what your
 lab read yesterday. humanovo does."* Followed by three precise
 contrasts (humanovo vs literature search, vs notebook apps, vs LLM
-chat). One wedge, three angles.
+chat). One thesis statement, three angles.
 
 ### 2. The "trust" surface — founders, privacy, methodology
 
@@ -180,9 +180,9 @@ where noted).
   declarative and stable: *"humanovo reads everything, so you can
   think about what's next."* Lock it as the meta-description and the
   default rotating-tagline first frame.
-- **Wedge expansion.** The wedge ships with three contrasts. As we
+- **Thesis expansion.** The thesis ships with three contrasts. As we
   hear from beta users, refine to the contrast that converts best.
-  The wedge slot is designed to be edited monthly.
+  The thesis slot is designed to be edited monthly.
 - **Pricing teaser.** Once tier pricing stabilises, add a 4th
   section ("Pricing") between Trust and Download. Trial / Researcher
   / Lab / Institution. Keep editorial register (no SaaS-style "MOST
@@ -227,6 +227,6 @@ where noted).
 - Favicon refresh — current is a generic SVG; should be the rust-dot-
   on-charcoal mark from the nav logo
 - Apple touch icon
-- A 60-second product video, embedded above the wedge
+- A 60-second product video, embedded above the thesis statement
 - Press kit page (`/press`) with logos, screenshots, founder bios
 - A `/manifesto` page with the full editorial statement

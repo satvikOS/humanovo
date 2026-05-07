@@ -33,7 +33,7 @@ Navigation           · sticky pill nav with morphing slider
 ContactOverlay       · "Request access" form (POSTs to /api/contact via Resend)
 ─────────────────────────────────────────────
 1. Page1Hero         · wordmark, rotating tagline, Vitruvian, proof-stats
-2. PageWedge         · "Why humanovo" — typographic, no art, reset the eye
+2. PageThesis         · "Why humanovo" — typographic, no art, reset the eye
 3. Page2Pipeline     · 4-stage adversarial pipeline with side-nav
 4. PageTrust         · founders + privacy commitment + methodology
 5. PageDownload      · Win / Mac / Linux native installers

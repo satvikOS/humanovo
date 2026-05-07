@@ -6,7 +6,7 @@ import Navigation, {
 } from "@/components/Navigation";
 import AuroraBackdrop from "@/components/AuroraBackdrop";
 import Page1Hero from "@/components/Page1Hero";
-import PageWedge from "@/components/PageWedge";
+import PageThesis from "@/components/PageThesis";
 import Page2Pipeline from "@/components/Page2Pipeline";
 import PageTrust from "@/components/PageTrust";
 import PageDownload from "@/components/PageDownload";
@@ -17,7 +17,7 @@ import Colophon from "@/components/Colophon";
   Page composition — narrative rhythm:
 
     Hero       (heavy art — Vitruvian)
-    Wedge      (pure typography — reset)
+    Thesis     (pure typography — what humanovo is)
     Pipeline   (heavy art — four Renaissance plates)
     Trust      (editorial — three colophon-style blocks)
     Download   (functional — three platform plates)
@@ -44,7 +44,7 @@ export default function Home() {
       <ContactOverlay />
       <main id="main" style={{ position: "relative", zIndex: 1 }}>
         <Page1Hero />
-        <PageWedge />
+        <PageThesis />
         <Page2Pipeline />
         <PageTrust />
         <PageDownload />

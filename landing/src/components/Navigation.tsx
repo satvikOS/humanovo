@@ -30,7 +30,7 @@ export function useOverlay() {
 }
 
 /* ─── Navigation ─── */
-// Five sections — the wedge + trust panels added in this design pass
+// Five sections — the thesis statement + trust panels added in this design pass
 // don't get their own labels in the nav (would clutter at four+
 // items on mobile) but the IntersectionObserver still tracks them
 // so the Platform pill stays "active" while reading through them.
@@ -192,23 +192,27 @@ export default function Navigation() {
           <span
             aria-hidden
             style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
-              background: "#1A1613",
+              width: 26,
+              height: 26,
               display: "grid",
               placeItems: "center",
-              position: "relative",
+              color: "var(--ink-0)",
             }}
           >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 999,
-                background: "#B44A2C",
-                boxShadow: "0 0 0 2px rgba(180,74,44,0.2)",
-              }}
+            {/* Inline the glyph as an <img> rather than an external
+                <svg use>; the glyph file lives at /public/glyph.svg
+                and inherits `currentColor` via the parent `color`
+                token, so dark-mode inversion is a one-line change.
+                Decorative — the wordmark beside it carries the
+                accessible name. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/glyph.svg"
+              alt=""
+              width={26}
+              height={26}
+              draggable={false}
+              style={{ display: "block", pointerEvents: "none" }}
             />
           </span>
           <span
