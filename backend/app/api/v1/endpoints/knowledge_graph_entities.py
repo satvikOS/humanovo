@@ -9,18 +9,17 @@ into a clean Entity/Relationship abstraction.
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.auth import AUTH_REQUIRED
+from app.core.database import get_db
 from app.models.platform_entities import (
-    KnowledgeGraphNode,
     KnowledgeGraphEdge,
+    KnowledgeGraphNode,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,8 +32,8 @@ class Entity(BaseModel):
     name: str
     synonyms: list[str] = []
     category: str
-    subcategory: Optional[str] = None
-    description: Optional[str] = None
+    subcategory: str | None = None
+    description: str | None = None
     external_ids: dict[str, str] = {}
     source: str = "internal"
     evidence_count: int = 0
@@ -135,9 +134,9 @@ async def _get_entity_or_404(
 
 @router.get("/entities", response_model=EntitySearchResult)
 async def search_entities(
-    query: Optional[str] = None,
-    category: Optional[str] = None,
-    source: Optional[str] = None,
+    query: str | None = None,
+    category: str | None = None,
+    source: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),

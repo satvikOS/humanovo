@@ -13,15 +13,16 @@ from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.ownership import (
     assert_owns_project,
     fetch_owned_or_global_or_404,
     filter_by_owned_or_global_project,
 )
-from app.models.evidence import Evidence, EvidenceSource as EvidenceSourceModel
+from app.models.evidence import Evidence
+from app.models.evidence import EvidenceSource as EvidenceSourceModel
 from app.models.user import User
 
 logger = get_logger(__name__)

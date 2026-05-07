@@ -4,7 +4,7 @@ Ingestion Job Model
 Tracks data ingestion jobs from various scientific sources.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum as PyEnum
 from typing import Any
 
@@ -154,13 +154,13 @@ class IngestionJob(BaseModel):
     def queue(self) -> None:
         """Mark job as queued."""
         self.status = IngestionJobStatus.QUEUED
-        self.queued_at = datetime.now(timezone.utc)
+        self.queued_at = datetime.now(UTC)
 
     def start_fetching(self, worker_id: str | None = None) -> None:
         """Mark job as fetching data."""
         self.status = IngestionJobStatus.FETCHING
         self.worker_id = worker_id
-        self.started_at = datetime.now(timezone.utc)
+        self.started_at = datetime.now(UTC)
 
     def start_processing(self) -> None:
         """Mark job as processing data."""
@@ -172,7 +172,7 @@ class IngestionJob(BaseModel):
 
     def complete(self) -> None:
         """Mark job as completed."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Determine final status based on failures
         if self.items_failed > 0 and self.items_indexed > 0:
@@ -193,7 +193,7 @@ class IngestionJob(BaseModel):
     def fail(self, error_message: str, error_details: dict | None = None) -> None:
         """Mark job as failed."""
         self.status = IngestionJobStatus.FAILED
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = datetime.now(UTC)
         self.error_message = error_message
         self.error_details = error_details
         self.last_run_at = self.completed_at
@@ -205,7 +205,7 @@ class IngestionJob(BaseModel):
     def cancel(self) -> None:
         """Mark job as cancelled."""
         self.status = IngestionJobStatus.CANCELLED
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = datetime.now(UTC)
 
     def update_progress(
         self,
@@ -243,7 +243,7 @@ class IngestionJob(BaseModel):
             {
                 "item_id": item_id,
                 "reason": reason,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
         self.items_failed = (self.items_failed or 0) + 1

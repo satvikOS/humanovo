@@ -15,7 +15,7 @@ Public catalogue of error codes is documented in CLIENT_API.md (TBA).
 from __future__ import annotations
 
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -69,9 +69,9 @@ def safe_error(
     exc: BaseException,
     *,
     code: str = ErrorCode.INTERNAL,
-    status_code: Optional[int] = None,
-    user_message: Optional[str] = None,
-    log_context: Optional[dict[str, Any]] = None,
+    status_code: int | None = None,
+    user_message: str | None = None,
+    log_context: dict[str, Any] | None = None,
 ) -> HTTPException:
     """Convert an exception into a sanitized FastAPI HTTPException.
 

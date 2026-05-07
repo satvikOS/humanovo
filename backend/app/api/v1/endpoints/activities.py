@@ -10,16 +10,15 @@ etc.) can attribute activities to the right user.
 """
 
 import logging
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db, async_session_factory
 from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.database import async_session_factory, get_db
 from app.models.activity import Activity
 from app.models.user import User
 
@@ -28,8 +27,8 @@ router = APIRouter(dependencies=AUTH_REQUIRED)
 # ── Schemas ──────────────────────────────────────────────────────
 
 class ActivityUpdate(BaseModel):
-    annotation: Optional[str] = None
-    description: Optional[str] = None
+    annotation: str | None = None
+    description: str | None = None
 
 
 # ── Helper ───────────────────────────────────────────────────────
@@ -110,10 +109,10 @@ async def _owned_activity_or_404(
 async def list_activities(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
-    type: Optional[str] = None,
-    action: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+    type: str | None = None,
+    action: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -126,6 +125,7 @@ async def list_activities(
     while the root bug is triaged upstream.
     """
     import json
+
     from fastapi.responses import JSONResponse
     query = select(Activity).where(Activity.owner_id == current_user.id)
     count_query = select(func.count(Activity.id)).where(

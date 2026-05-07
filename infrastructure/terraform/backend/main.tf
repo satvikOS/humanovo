@@ -836,9 +836,31 @@ resource "aws_apigatewayv2_api" "main" {
     allow_credentials = true
     allow_origins     = local.cors_origins
     allow_methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    allow_headers     = ["*"]
-    expose_headers    = ["*"]
-    max_age           = 3600
+    # Explicit allowlist — `["*"]` is incompatible with allow_credentials=true
+    # in modern browsers anyway and signals "we don't know what we accept" to
+    # security scanners. Add new headers here as the API surface grows.
+    allow_headers = [
+      "Accept",
+      "Accept-Language",
+      "Authorization",
+      "Cache-Control",
+      "Content-Language",
+      "Content-Type",
+      "Idempotency-Key",
+      "Origin",
+      "Stripe-Signature",
+      "X-Admin-Secret",
+      "X-Request-Id",
+      "X-Requested-With",
+    ]
+    expose_headers = [
+      "X-Request-Id",
+      "X-RateLimit-Limit",
+      "X-RateLimit-Remaining",
+      "X-RateLimit-Reset",
+      "Retry-After",
+    ]
+    max_age = 3600
   }
 }
 

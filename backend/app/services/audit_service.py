@@ -19,11 +19,12 @@ import hashlib
 import json
 import time
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, AsyncIterator, Optional
+from typing import Any
 
 from sqlalchemy import Column, DateTime, Float, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
@@ -51,7 +52,7 @@ class AuditRecord(Base):
     timestamp = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     event_type = Column(String(64), nullable=False)
     severity = Column(String(16), nullable=False, default="info")
@@ -140,10 +141,10 @@ def _compute_record_hash(
     sequence: int,
     timestamp: datetime,
     event_type: str,
-    user_id: Optional[str],
+    user_id: str | None,
     action: str,
-    details: Optional[dict],
-    previous_hash: Optional[str],
+    details: dict | None,
+    previous_hash: str | None,
 ) -> str:
     """Compute SHA-256 hash of record fields + previous hash."""
     payload = {
@@ -164,19 +165,19 @@ def _compute_record_hash(
 @dataclass
 class AuditContext:
     """Context for a logical operation that may emit multiple audit records."""
-    user_id: Optional[str] = None
-    project_id: Optional[str] = None
-    execution_id: Optional[str] = None
-    session_id: Optional[str] = None
-    ip_address: Optional[str] = None
-    user_agent: Optional[str] = None
+    user_id: str | None = None
+    project_id: str | None = None
+    execution_id: str | None = None
+    session_id: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
 
 
 class AuditService:
     """Service for recording audit events."""
 
     def __init__(self):
-        self._previous_hash: Optional[str] = None
+        self._previous_hash: str | None = None
         self._sequence: int = 0
         self._loaded = False
 
@@ -184,7 +185,7 @@ class AuditService:
         """Load the latest sequence and hash from the DB on first use."""
         if self._loaded:
             return
-        from sqlalchemy import select, desc
+        from sqlalchemy import desc, select
         result = await db.execute(
             select(AuditRecord)
             .order_by(desc(AuditRecord.sequence))
@@ -201,22 +202,22 @@ class AuditService:
         db: AsyncSession,
         event_type: AuditEventType,
         action: str,
-        context: Optional[AuditContext] = None,
+        context: AuditContext | None = None,
         severity: AuditSeverity = AuditSeverity.INFO,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
-        details: Optional[dict[str, Any]] = None,
-        duration_ms: Optional[int] = None,
-        cost_usd: Optional[float] = None,
-        tokens_input: Optional[int] = None,
-        tokens_output: Optional[int] = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        details: dict[str, Any] | None = None,
+        duration_ms: int | None = None,
+        cost_usd: float | None = None,
+        tokens_input: int | None = None,
+        tokens_output: int | None = None,
     ) -> AuditRecord:
         """Append a record to the audit log."""
         await self._ensure_loaded(db)
 
         ctx = context or AuditContext()
         self._sequence += 1
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         record_hash = _compute_record_hash(
             sequence=self._sequence,
@@ -266,8 +267,8 @@ class AuditService:
         start_event: AuditEventType,
         complete_event: AuditEventType,
         error_event: AuditEventType,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Context manager that records start, complete (or error) events
@@ -321,7 +322,7 @@ class AuditService:
         self,
         db: AsyncSession,
         start_sequence: int = 1,
-        end_sequence: Optional[int] = None,
+        end_sequence: int | None = None,
     ) -> dict[str, Any]:
         """
         Verify the hash chain integrity over a range of records.
@@ -340,7 +341,7 @@ class AuditService:
         result = await db.execute(stmt)
         records = result.scalars().all()
 
-        prev_hash: Optional[str] = None
+        prev_hash: str | None = None
         issues: list[dict[str, Any]] = []
         verified_count = 0
 
@@ -394,15 +395,15 @@ class AuditService:
         self,
         db: AsyncSession,
         format: str = "json",
-        user_id: Optional[str] = None,
-        project_id: Optional[str] = None,
-        execution_id: Optional[str] = None,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        event_types: Optional[list[str]] = None,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        execution_id: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        event_types: list[str] | None = None,
     ) -> str:
         """Export audit records to JSON or CSV."""
-        from sqlalchemy import select, and_
+        from sqlalchemy import and_, select
 
         stmt = select(AuditRecord)
         conditions = []
@@ -447,8 +448,8 @@ class AuditService:
             } for r in records], indent=2, default=str)
 
         elif format == "csv":
-            import io
             import csv
+            import io
             buffer = io.StringIO()
             writer = csv.writer(buffer)
             writer.writerow([
@@ -477,7 +478,7 @@ class AuditService:
 
 # ─── Singleton ──────────────────────────────────────────────────
 
-_audit_service: Optional[AuditService] = None
+_audit_service: AuditService | None = None
 
 
 def get_audit_service() -> AuditService:

@@ -17,7 +17,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 # ─── BibTeX field mappings ──────────────────────────────────────
 # Mendeley / Zotero canonical set. `entry type → citation.type` is
 # a best-effort categorization.

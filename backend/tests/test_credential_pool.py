@@ -9,7 +9,6 @@ import pytest
 
 from app.core.credential_pool import (
     CredentialPool,
-    KeySpec,
     MockCredentialBackend,
     PoolExhausted,
     UnknownPool,

@@ -5,7 +5,6 @@ We hit the classification logic directly — network methods are tested
 through integration tests where we can stand up a mock HTTPX server.
 """
 
-import pytest
 
 from app.agents.verification.citation_verifier import (
     VerificationVerdict,

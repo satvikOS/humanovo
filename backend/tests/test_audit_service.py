@@ -23,6 +23,7 @@ import csv
 import io
 import json
 import uuid
+from datetime import UTC
 
 import pytest
 from sqlalchemy import delete
@@ -376,8 +377,8 @@ async def test_export_unsupported_format_raises() -> None:
 
 
 def test_compute_record_hash_is_deterministic() -> None:
-    from datetime import datetime, timezone
-    ts = datetime(2026, 5, 5, 12, 0, 0, tzinfo=timezone.utc)
+    from datetime import datetime
+    ts = datetime(2026, 5, 5, 12, 0, 0, tzinfo=UTC)
     h1 = _compute_record_hash(
         sequence=1, timestamp=ts, event_type="data.read",
         user_id="u1", action="read", details={"k": "v"},
@@ -392,8 +393,8 @@ def test_compute_record_hash_is_deterministic() -> None:
 
 
 def test_compute_record_hash_changes_with_any_field() -> None:
-    from datetime import datetime, timezone
-    ts = datetime(2026, 5, 5, 12, 0, 0, tzinfo=timezone.utc)
+    from datetime import datetime
+    ts = datetime(2026, 5, 5, 12, 0, 0, tzinfo=UTC)
     base = dict(
         sequence=1, timestamp=ts, event_type="data.read",
         user_id="u1", action="read", details={"k": "v"},

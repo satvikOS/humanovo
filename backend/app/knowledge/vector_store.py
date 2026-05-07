@@ -12,6 +12,7 @@ same public API surface.
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
+from pgvector.sqlalchemy import Vector
 from pydantic import BaseModel, Field
 from sqlalchemy import (
     Column,
@@ -19,18 +20,18 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    delete,
     func,
     select,
     text,
-    delete,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
-from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
-from app.core.database import async_session_factory, engine
-from app.models.base import Base
 from app.core.config import settings
+from app.core.database import async_session_factory, engine
 from app.core.logging import LoggerMixin, get_logger
+from app.models.base import Base
 
 logger = get_logger(__name__)
 

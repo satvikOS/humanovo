@@ -4,8 +4,12 @@ humanovo SQLAlchemy ORM Models
 Complete database models for persistent storage.
 """
 
+from app.models.activity import Activity as Activity
 from app.models.agent_task import AgentTask, AgentTaskStatus, AgentTaskType
 from app.models.base import Base, TimestampMixin
+from app.models.citation import Citation, CitationFolder, CitationHighlight
+from app.models.discovery_session import DiscoverySession
+
 # AuditRecord lives in app.services.audit_service (co-located with behavior).
 # We re-export it here so Alembic's Base.metadata is complete, but we import
 # LAZILY via module-level __getattr__ to avoid a circular import: anything
@@ -18,8 +22,6 @@ from app.models.base import Base, TimestampMixin
 from app.models.evidence import Evidence, EvidenceSource
 from app.models.hypothesis import EvidenceReference, Hypothesis, HypothesisStatus
 from app.models.ingestion_job import IngestionJob, IngestionJobStatus, IngestionSource
-from app.models.project import Project
-from app.models.simulation import Simulation, SimulationStatus, SimulationType
 from app.models.learning_memory import (
     APICostRecord,
     BenchmarkResult,
@@ -33,11 +35,7 @@ from app.models.learning_memory import (
     StageExecution,
     StagePerformanceAggregate,
 )
-from app.models.user import User, UserRole
-from app.models.discovery_session import DiscoverySession
-from app.models.citation import Citation, CitationFolder, CitationHighlight
-from app.models.activity import Activity
-from app.models.notebook import NotebookPage
+from app.models.notebook import NotebookPage as NotebookPage
 from app.models.platform_entities import (
     AuditLogEntry,
     BillingBudget,
@@ -49,12 +47,12 @@ from app.models.platform_entities import (
     ComplianceChecklist,
     ConsentForm,
     DataUseAgreement,
-    IRBSubmission,
     ImagingStudy,
+    IRBSubmission,
     KnowledgeGraphEdge,
     KnowledgeGraphNode,
-    MLModel,
     Manuscript,
+    MLModel,
     ProjectShare,
     ResearchDataset,
     SavedAnalysis,
@@ -62,6 +60,10 @@ from app.models.platform_entities import (
     TrialDocument,
     TrialSubject,
 )
+from app.models.project import Project
+from app.models.simulation import Simulation, SimulationStatus, SimulationType
+from app.models.user import User, UserRole
+
 
 def __getattr__(name: str):
     """Lazy attribute access for names that live in other subpackages to

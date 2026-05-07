@@ -20,13 +20,13 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
 from app.compute.types import (
     ComputeDomain,
     ComputeRequest,
     DataFormat,
 )
+from app.core.auth import AUTH_REQUIRED
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/compute-engine", tags=["compute-engine"], dependencies=AUTH_REQUIRED)

@@ -16,9 +16,9 @@ by an agent stage. The contract:
 
 from app.agents.verification.citation_verifier import (
     CitationVerifier,
-    VerifiedCitation,
-    VerificationVerdict,
     VerificationFailure,
+    VerificationVerdict,
+    VerifiedCitation,
     get_citation_verifier,
 )
 from app.agents.verification.rewind_coordinator import (

@@ -13,7 +13,7 @@ Grant-aware formatting: nih_r01, nih_r21, nsf, dod, private_foundation
 
 import json
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 from uuid import uuid4
 
 import httpx
@@ -275,7 +275,7 @@ class SynthesisPipeline:
         grant_type: str | None = None,
         citation_style: str = "numbered",
         field_scope: str | None = None,
-        on_stage_complete: Optional[Callable] = None,
+        on_stage_complete: Callable | None = None,
     ) -> SynthesisResult:
         """Run the full 5-stage synthesis pipeline."""
         from app.agents.discovery_orchestrator import ModelType

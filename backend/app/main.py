@@ -11,6 +11,7 @@ middleware, and event handlers for the Humanovo platform.
 # fastapi 0.136 with certain response shapes). Filter is set once at
 # process start rather than per-request.
 import warnings as _warnings
+
 _warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 from collections.abc import AsyncGenerator

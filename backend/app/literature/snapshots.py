@@ -13,7 +13,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +159,7 @@ class SnapshotManager:
         Returns:
             Created DataSnapshot
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Generate snapshot ID
         content = json.dumps([r.record_id for r in records], sort_keys=True)

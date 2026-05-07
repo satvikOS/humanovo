@@ -12,13 +12,13 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from app.core.logging import LoggerMixin, get_logger
 from app.compute.types import (
     ComputeDomain,
     ComputeRequest,
     ComputeResult,
     ComputeStatus,
 )
+from app.core.logging import LoggerMixin, get_logger
 
 logger = get_logger(__name__)
 
@@ -42,13 +42,13 @@ class ComputeEngine(LoggerMixin):
     def _register_processors(self) -> None:
         """Lazily register all domain processors."""
         # Lazy imports to avoid circular dependencies and speed up startup
-        from app.compute.imaging import ImagingProcessor
-        from app.compute.signals import SignalProcessor
-        from app.compute.genomics import GenomicsProcessor
         from app.compute.biomechanics import BiomechanicsProcessor
-        from app.compute.pharmacokinetics import PharmacokineticsProcessor
-        from app.compute.statistics import StatisticsProcessor
         from app.compute.clinical import ClinicalProcessor
+        from app.compute.genomics import GenomicsProcessor
+        from app.compute.imaging import ImagingProcessor
+        from app.compute.pharmacokinetics import PharmacokineticsProcessor
+        from app.compute.signals import SignalProcessor
+        from app.compute.statistics import StatisticsProcessor
 
         self._processors = {
             ComputeDomain.IMAGING: ImagingProcessor(),

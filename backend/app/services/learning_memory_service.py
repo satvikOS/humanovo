@@ -14,10 +14,10 @@ Key capabilities:
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import Integer, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
@@ -57,9 +57,9 @@ class StageOptimizationRecommendation:
     stage_number: int
     stage_name: str
     current_model: str
-    recommended_model: Optional[str]
-    recommended_temperature: Optional[float]
-    recommended_max_tokens: Optional[int]
+    recommended_model: str | None
+    recommended_temperature: float | None
+    recommended_max_tokens: int | None
     reasoning: str
     expected_improvement: float
     confidence: float
@@ -78,7 +78,7 @@ class PersistentLearningMemory:
 
     def __init__(self, session_factory=None):
         self._session_factory = session_factory or async_session_factory
-        self._cache: Optional[LearningMemoryState] = None
+        self._cache: LearningMemoryState | None = None
         self._cache_lock = asyncio.Lock()
         self._model_profiles_cache: dict[str, ModelPerformanceProfile] = {}
 
@@ -212,7 +212,7 @@ class PersistentLearningMemory:
                     external_factors=external_factors or [],
                     focus_entities=focus_entities or [],
                     config_snapshot=config_snapshot or {},
-                    started_at=datetime.now(timezone.utc),
+                    started_at=datetime.now(UTC),
                     status="running",
                 )
                 session.add(run)
@@ -242,7 +242,7 @@ class PersistentLearningMemory:
                     run.stages_total = stages_total
                     run.stages_succeeded = stages_succeeded
                     run.stages_failed = stages_failed
-                    run.completed_at = datetime.now(timezone.utc)
+                    run.completed_at = datetime.now(UTC)
                     run.status = "completed"
 
                     # Compute cost totals from APICostRecords
@@ -492,7 +492,7 @@ class PersistentLearningMemory:
                     agg.avg_confidence_delta = float(row.avg_delta) if row.avg_delta else None
                     agg.avg_output_quality = float(row.avg_quality) if row.avg_quality else None
                     agg.avg_evidence_sources = float(row.avg_evidence) if row.avg_evidence else None
-                    agg.last_aggregated_at = datetime.now(timezone.utc)
+                    agg.last_aggregated_at = datetime.now(UTC)
 
     # ============== Feedback ==============
 
@@ -722,7 +722,7 @@ class PersistentLearningMemory:
 
 # ============== Singleton ==============
 
-_learning_memory: Optional[PersistentLearningMemory] = None
+_learning_memory: PersistentLearningMemory | None = None
 
 
 def get_learning_memory() -> PersistentLearningMemory:

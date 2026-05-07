@@ -4,8 +4,10 @@ Activity Model
 Tracks user activities across the platform for timeline display.
 """
 
-from sqlalchemy import Column, ForeignKey, String, Text, Enum as SAEnum
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy import Column, ForeignKey, String, Text
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from app.models.base import BaseModel
 

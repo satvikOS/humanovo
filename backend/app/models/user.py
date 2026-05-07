@@ -4,7 +4,7 @@ User Model
 User authentication and authorization model.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum as PyEnum
 from uuid import UUID
 
@@ -107,7 +107,7 @@ class User(BaseModel):
         """Check if account is locked."""
         if self.locked_until is None:
             return False
-        return datetime.now(timezone.utc) < self.locked_until
+        return datetime.now(UTC) < self.locked_until
 
     def can_access_project(self, project_id: UUID) -> bool:
         """Check if user can access a project."""

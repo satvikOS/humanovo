@@ -9,18 +9,17 @@ import io
 import json
 import logging
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.auth import AUTH_REQUIRED
+from app.core.database import get_db
 from app.models.platform_entities import ResearchDataset
 
 logger = logging.getLogger(__name__)
@@ -35,15 +34,15 @@ class DatasetCreate(BaseModel):
 
 
 class DatasetUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    tags: Optional[list[str]] = None
+    name: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
 
 
 class ColumnUpdate(BaseModel):
     name: str
-    description: Optional[str] = None
-    type: Optional[str] = None
+    description: str | None = None
+    type: str | None = None
 
 
 class CohortFilter(BaseModel):
@@ -381,5 +380,5 @@ async def build_cohort(request: CohortRequest, db: AsyncSession = Depends(get_db
         "row_count": len(filtered),
         "source_row_count": ds.row_count,
         "rows": filtered[:100],
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }

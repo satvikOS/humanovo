@@ -4,11 +4,8 @@ conftest.py for integration tests.
 Configures Python path and provides common fixtures.
 """
 
-import os
 import sys
 from pathlib import Path
-
-import pytest
 
 # Ensure the backend directory is on the Python path
 # so that `from app.agents...` imports work.

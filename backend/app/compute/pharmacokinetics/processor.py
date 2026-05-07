@@ -19,7 +19,8 @@ import math
 from collections.abc import Callable
 
 import numpy as np
-from scipy import integrate, optimize, stats as sp_stats
+from scipy import integrate, optimize
+from scipy import stats as sp_stats
 
 from app.compute.types import (
     ComputeDomain,

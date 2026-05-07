@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from app.core.http_allowlist import make_httpx_client
 
 from app.agents.ingestion.base import (
     IngestionAgent,
@@ -18,6 +17,7 @@ from app.agents.ingestion.base import (
     IngestionRecord,
     SourceType,
 )
+from app.core.http_allowlist import make_httpx_client
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

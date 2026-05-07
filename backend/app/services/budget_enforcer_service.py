@@ -38,9 +38,9 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import text
 
@@ -111,7 +111,7 @@ class BudgetNotification:
     degradation_level: str
     run_id: str | None = None
     user_id: str | None = None
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 @dataclass
@@ -435,7 +435,7 @@ class RunBudgetEnforcer:
         user_id: str | None,
         kind: RunKind,
         cap_cents: int | None = None,
-        on_notification: Optional[callable] = None,
+        on_notification: callable | None = None,
     ):
         self.state = RunBudgetState(
             run_id=run_id,
@@ -607,7 +607,7 @@ async def start_run(
     user_id: str | None,
     kind: RunKind,
     cap_cents: int | None = None,
-    on_notification: Optional[callable] = None,
+    on_notification: callable | None = None,
 ) -> RunBudgetEnforcer:
     """Check user's monthly budget, then create a RunBudgetEnforcer.
 

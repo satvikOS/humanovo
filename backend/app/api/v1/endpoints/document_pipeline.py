@@ -11,15 +11,15 @@ content-assembly → AI-generation → PDF-rendering pipeline.
 """
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.core.logging import get_logger
 from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.logging import get_logger
 from app.core.ownership import (
     assert_owns_project,
     fetch_owned_or_404,
@@ -32,10 +32,10 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"], dependencies=AUTH_REQUIRED)
 # Async generation state
 _doc_status: str = "idle"  # idle | generating | done | failed
-_doc_result: Optional[bytes] = None
-_doc_filename: Optional[str] = None
-_doc_error: Optional[str] = None
-_doc_task: Optional[asyncio.Task] = None
+_doc_result: bytes | None = None
+_doc_filename: str | None = None
+_doc_error: str | None = None
+_doc_task: asyncio.Task | None = None
 
 
 class GeneratePaperRequest(BaseModel):
@@ -190,7 +190,7 @@ async def generate_project_paper_async(
 async def generate_hypothesis_paper(
     hypothesis_id: UUID,
     use_ai: bool = Query(True),
-    body: Optional[GenerateHypothesisPaperRequest] = None,
+    body: GenerateHypothesisPaperRequest | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """Generate a research paper PDF for one of the caller's hypotheses.
@@ -268,7 +268,7 @@ async def generate_hypothesis_paper(
 @router.post("/hypothesis/{hypothesis_id}/html")
 async def generate_hypothesis_paper_html(
     hypothesis_id: UUID,
-    body: Optional[GenerateHypothesisPaperRequest] = None,
+    body: GenerateHypothesisPaperRequest | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """Generate a self-contained HTML paper for one of the caller's
@@ -528,9 +528,10 @@ async def _get_project_data(project_id: UUID, user: User) -> dict[str, Any]:
     """Retrieve a caller-owned project + its hypotheses. Raises 404 on
     a non-owned project (no leak about other users' IDs)."""
     try:
+        from sqlalchemy import select
+
         from app.core.database import get_db
         from app.models.hypothesis import Hypothesis
-        from sqlalchemy import select
 
         async for db in get_db():
             project = await assert_owns_project(db, project_id, user)
@@ -616,10 +617,11 @@ async def _get_hypothesis_data(hypothesis_id: UUID, user: User) -> dict[str, Any
 
     # Try database — ownership-scoped lookup.
     try:
+        from sqlalchemy import select
+
         from app.core.database import get_db
         from app.models.hypothesis import Hypothesis
         from app.models.project import Project
-        from sqlalchemy import select
 
         async for db in get_db():
             h = await fetch_owned_or_404(db, Hypothesis, hypothesis_id, user)

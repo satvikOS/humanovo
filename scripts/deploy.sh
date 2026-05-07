@@ -179,8 +179,12 @@ deploy_lambdas() {
         if [ -f "backend/lambda/handlers/${handler}.py" ]; then
             cp "backend/lambda/handlers/${handler}.py" "$func_dir/"
         else
-            # Create placeholder handler if not exists
-            cat > "$func_dir/${handler}.py" << 'HANDLER_EOF'
+            # Create placeholder handler if not exists. The heredoc tag is
+            # UNQUOTED so `${handler}` interpolates at heredoc-write time,
+            # baking the function name into the placeholder response (the
+            # earlier 'HANDLER_EOF' single-quoted form left the literal
+            # string "${handler}" in the deployed code).
+            cat > "$func_dir/${handler}.py" << HANDLER_EOF
 import json
 from aws_lambda_powertools import Logger
 logger = Logger()

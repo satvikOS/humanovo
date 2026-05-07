@@ -13,8 +13,9 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from scipy import ndimage, optimize, sparse
 from scipy import signal as sp_signal
-from scipy import ndimage, optimize, sparse, stats as sp_stats
+from scipy import stats as sp_stats
 
 from app.compute.types import (
     ComputeDomain,

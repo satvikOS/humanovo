@@ -54,17 +54,18 @@ import asyncio
 import json
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel
 
+from app.agents.prompts import get_agent_prompt
 from app.core.config import settings
 from app.core.logging import LoggerMixin, get_logger
-from app.agents.prompts import get_agent_prompt
 
 logger = get_logger(__name__)
 
@@ -657,7 +658,7 @@ class MultiModelLLM:
         self._azure_ai_available = False
         self._initialized = False
         self._token_pool = token_pool
-        self._mcp: Optional[ParallelMCP] = None
+        self._mcp: ParallelMCP | None = None
 
     async def initialize(self) -> None:
         if self._initialized:
@@ -921,7 +922,7 @@ class MultiModelLLM:
         max_tokens: int = 4000,
         temperature: float = 0.3,
         # Cost tracking context (optional, for per-call recording)
-        _cost_ctx: Optional[dict] = None,
+        _cost_ctx: dict | None = None,
     ) -> str:
         """Generate response from specified model via Azure AI, Bedrock, or Azure OpenAI.
 
@@ -983,7 +984,7 @@ class MultiModelLLM:
         model_type: ModelType,
         usage: dict,
         start_ms: int,
-        cost_ctx: Optional[dict],
+        cost_ctx: dict | None,
         is_retry: bool,
     ) -> None:
         """Record API call cost to PostgreSQL if cost tracking is active."""
@@ -1663,7 +1664,9 @@ class SequentialHypothesisPipeline:
         """
         try:
             from app.integrations.tool_dispatch import (
-                enrich_disease, enrich_target, enrich_variant,
+                enrich_disease,
+                enrich_target,
+                enrich_variant,
                 literature_for_claim,
             )
         except Exception as e:
@@ -1897,8 +1900,8 @@ class SequentialHypothesisPipeline:
         hypothesis_index: int,
         previous_hypotheses: list[dict[str, Any]] = None,
         refine_hypothesis: dict[str, Any] = None,
-        on_stage_complete: Optional[Callable] = None,
-        lab_profile: Optional[dict[str, Any]] = None,
+        on_stage_complete: Callable | None = None,
+        lab_profile: dict[str, Any] | None = None,
     ) -> HypothesisPipelineResult:
         """
         Run the full 12-stage pipeline for a single hypothesis.
@@ -2690,7 +2693,7 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
         accumulated_context: dict[str, Any],
         round_number: int,
         hypothesis_index: int,
-        lab_profile: Optional[dict[str, Any]] = None,
+        lab_profile: dict[str, Any] | None = None,
     ) -> str:
         """Build the user prompt for a specific pipeline stage."""
         # Build lab capability context if provided
@@ -3057,7 +3060,7 @@ Include the translational roadmap from Stage 11."""
             'very', 'only', 'own', 'same', 'here', 'there', 'once', 'our', 'their', 'your',
             'however', 'thus', 'therefore', 'although', 'while', 'since', 'because', 'given',
             'based', 'using', 'used', 'including', 'resulting', 'leading', 'well', 'known',
-            'may', 'suggest', 'suggests', 'suggest', 'show', 'shows', 'shown', 'found',
+            'suggest', 'suggests', 'show', 'shows', 'shown', 'found',
             'indicate', 'indicates', 'demonstrated', 'reported', 'observed', 'associated',
             'potential', 'novel', 'new', 'recent', 'studies', 'study', 'research', 'data',
             'results', 'analysis', 'approach', 'method', 'role', 'effect', 'effects',
@@ -3495,7 +3498,7 @@ class DiscoveryAgent:
             return []
 
         self.state.current_task = f"Exploring from {start_entity}"
-        self.state.last_activity = datetime.now(timezone.utc)
+        self.state.last_activity = datetime.now(UTC)
         hypotheses = []
 
         neighbors = graph_data.get("neighbors", {}).get(start_entity, [])
@@ -3571,7 +3574,7 @@ Return as JSON with keys: has_hypothesis, title, description, mechanism, confide
     def _parse_hypothesis(
         self, response: str, disease: str, path: RelationPath,
         external_factors: list[dict[str, Any]] = None,
-    ) -> Optional[DiscoveryHypothesis]:
+    ) -> DiscoveryHypothesis | None:
         try:
             response = response.strip()
             if response.startswith("```"):
@@ -3658,18 +3661,18 @@ class DiscoveryOrchestrator(LoggerMixin):
         self._agents: dict[str, DiscoveryAgent] = {}
         self._hypotheses: list[DiscoveryHypothesis] = []
         self._best_confidence = 0.0
-        self._start_time: Optional[float] = None
+        self._start_time: float | None = None
         self._pause_event = asyncio.Event()
         self._pause_event.set()
         self._stop_requested = False
-        self._disease: Optional[str] = None
+        self._disease: str | None = None
         self._discovery_type: str = "treatment"
         self._external_factors: list[dict[str, Any]] = []
 
         self.state = OrchestratorState.IDLE
 
-        self._on_hypothesis: Optional[Callable] = None
-        self._on_stats_update: Optional[Callable] = None
+        self._on_hypothesis: Callable | None = None
+        self._on_stats_update: Callable | None = None
 
         self._graph_store = None
         self._rag_service = None
@@ -3711,8 +3714,8 @@ class DiscoveryOrchestrator(LoggerMixin):
 
     def set_callbacks(
         self,
-        on_hypothesis: Optional[Callable] = None,
-        on_stats_update: Optional[Callable] = None,
+        on_hypothesis: Callable | None = None,
+        on_stats_update: Callable | None = None,
     ) -> None:
         self._on_hypothesis = on_hypothesis
         self._on_stats_update = on_stats_update
@@ -4240,7 +4243,7 @@ class DiscoveryOrchestrator(LoggerMixin):
 
 
 # Global orchestrator instance
-_orchestrator: Optional[DiscoveryOrchestrator] = None
+_orchestrator: DiscoveryOrchestrator | None = None
 
 
 async def get_orchestrator() -> DiscoveryOrchestrator:

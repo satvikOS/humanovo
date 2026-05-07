@@ -12,7 +12,7 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -178,7 +178,7 @@ class CanonicalIDManager:
             Generated CanonicalID
         """
         namespace = namespace or self.default_namespace
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Generate unique identifier
         if namespace == IDNamespace.GENUP:
@@ -246,7 +246,7 @@ class CanonicalIDManager:
             canonical_id=canonical_id,
             confidence=confidence,
             mapping_source=source,
-            mapping_date=datetime.now(timezone.utc).isoformat(),
+            mapping_date=datetime.now(UTC).isoformat(),
         )
 
         # Store mapping
@@ -339,7 +339,7 @@ class CanonicalIDManager:
         # Update source ID
         source_id.status = "merged"
         source_id.merged_into = target_curie
-        source_id.updated_at = datetime.now(timezone.utc).isoformat()
+        source_id.updated_at = datetime.now(UTC).isoformat()
         source_id.metadata["merge_reason"] = reason
 
         # Transfer cross-references
@@ -374,7 +374,7 @@ class CanonicalIDManager:
             reason: Reason for deprecation
         """
         canonical_id.status = "deprecated"
-        canonical_id.updated_at = datetime.now(timezone.utc).isoformat()
+        canonical_id.updated_at = datetime.now(UTC).isoformat()
         canonical_id.metadata["deprecation_reason"] = reason
 
     def get_external_url(self, namespace: IDNamespace, identifier: str) -> str | None:

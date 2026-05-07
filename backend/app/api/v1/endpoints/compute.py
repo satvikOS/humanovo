@@ -17,13 +17,12 @@ import asyncio
 import math
 import os
 import tempfile
-from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.core.logging import get_logger
 from app.core.auth import AUTH_REQUIRED
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/compute", tags=["compute"], dependencies=AUTH_REQUIRED)
@@ -34,7 +33,7 @@ MAX_OUTPUT_LENGTH = 50_000
 class ExecuteRequest(BaseModel):
     code: str
     environment: str = "python"  # python, r, julia
-    timeout: Optional[int] = None
+    timeout: int | None = None
 
 
 class ExecuteResponse(BaseModel):
@@ -122,7 +121,7 @@ async def execute_code(request: ExecuteRequest) -> ExecuteResponse:
             timed_out=result.get("timed_out", False),
             environment=env,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return ExecuteResponse(
             output="",
             stderr=f"Execution timed out after {timeout} seconds",
@@ -161,7 +160,7 @@ async def _run_python(code: str, timeout: int) -> dict:
             "stderr": stderr.decode("utf-8", errors="replace"),
             "exit_code": proc.returncode or 0,
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return {"stdout": "", "stderr": f"Timed out after {timeout}s", "exit_code": 124, "timed_out": True}
     finally:
@@ -187,7 +186,7 @@ async def _run_r(code: str, timeout: int) -> dict:
             "stderr": stderr.decode("utf-8", errors="replace"),
             "exit_code": proc.returncode or 0,
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return {"stdout": "", "stderr": f"Timed out after {timeout}s", "exit_code": 124, "timed_out": True}
     except FileNotFoundError:
@@ -215,7 +214,7 @@ async def _run_julia(code: str, timeout: int) -> dict:
             "stderr": stderr.decode("utf-8", errors="replace"),
             "exit_code": proc.returncode or 0,
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         return {"stdout": "", "stderr": f"Timed out after {timeout}s", "exit_code": 124, "timed_out": True}
     except FileNotFoundError:
@@ -235,8 +234,8 @@ async def _run_julia(code: str, timeout: int) -> dict:
 
 
 class RegressionRequest(BaseModel):
-    x: List[float] = Field(..., description="Predictor values")
-    y: List[float] = Field(..., description="Response values")
+    x: list[float] = Field(..., description="Predictor values")
+    y: list[float] = Field(..., description="Response values")
 
 
 class RegressionResponse(BaseModel):
@@ -249,12 +248,12 @@ class RegressionResponse(BaseModel):
     se_intercept: float
     t_stat: float
     p_value: float
-    ci_slope: List[float]      # [lower, upper] @ 95%
-    ci_intercept: List[float]  # [lower, upper] @ 95%
-    fitted: List[float]
-    residuals: List[float]
-    leverages: List[float]
-    cooks_d: List[float]
+    ci_slope: list[float]      # [lower, upper] @ 95%
+    ci_intercept: list[float]  # [lower, upper] @ 95%
+    fitted: list[float]
+    residuals: list[float]
+    leverages: list[float]
+    cooks_d: list[float]
     cook_threshold: float      # 4 / n
 
 
@@ -368,7 +367,7 @@ async def regression(req: RegressionRequest) -> RegressionResponse:
     leverages = [1.0 / n + (xi - x_mean) ** 2 / sxx for xi in req.x]
     # Cook's distance: D_i = (r_i² / (p · σ²)) · (h_ii / (1-h_ii)²)
     p_params = 2  # slope + intercept
-    cooks_d: List[float] = []
+    cooks_d: list[float] = []
     for r, h in zip(residuals, leverages):
         denom = p_params * sigma2 * (1.0 - h) ** 2
         cooks_d.append((r * r * h) / denom if denom > 0 else 0.0)

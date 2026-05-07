@@ -29,14 +29,14 @@ from app.visualization.figures import (
     RenderedFigure,
     generate_figure,
 )
+from app.visualization.flowchart import (
+    CausalFlowchart,
+    render_causal_flowchart,
+)
 from app.visualization.mermaid import (
     MermaidDiagram,
     MermaidKind,
     render_mermaid,
-)
-from app.visualization.flowchart import (
-    CausalFlowchart,
-    render_causal_flowchart,
 )
 
 __all__ = [

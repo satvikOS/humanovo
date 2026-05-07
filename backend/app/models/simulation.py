@@ -4,6 +4,7 @@ Simulation Model
 Monte Carlo simulation runs and results.
 """
 
+from datetime import UTC
 from enum import Enum as PyEnum
 from typing import Any
 
@@ -123,14 +124,14 @@ class Simulation(BaseModel):
         from datetime import datetime
 
         self.status = SimulationStatus.RUNNING
-        self.started_at = datetime.now(timezone.utc)
+        self.started_at = datetime.now(UTC)
 
     def complete(self, outcomes: dict[str, Any]) -> None:
         """Mark simulation as completed with outcomes."""
         from datetime import datetime
 
         self.status = SimulationStatus.COMPLETED
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = datetime.now(UTC)
         self.outcomes = outcomes
         self.progress = 1.0
         self.iterations_completed = self.iterations
@@ -144,7 +145,7 @@ class Simulation(BaseModel):
         from datetime import datetime
 
         self.status = SimulationStatus.FAILED
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = datetime.now(UTC)
         self.error_message = error_message
 
         if self.started_at:
@@ -153,10 +154,10 @@ class Simulation(BaseModel):
 
     def cancel(self) -> None:
         """Mark simulation as cancelled."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         self.status = SimulationStatus.CANCELLED
-        self.completed_at = datetime.now(timezone.utc)
+        self.completed_at = datetime.now(UTC)
 
     def update_progress(self, completed: int) -> None:
         """Update progress based on completed iterations."""

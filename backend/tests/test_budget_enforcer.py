@@ -8,11 +8,11 @@ Postgres; those are covered by integration tests.
 import pytest
 
 from app.services.budget_enforcer_service import (
+    DEFAULT_CAPS_CENTS,
     BudgetExceeded,
     DegradationLevel,
     RunBudgetEnforcer,
     RunKind,
-    DEFAULT_CAPS_CENTS,
 )
 
 

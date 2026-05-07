@@ -14,12 +14,8 @@ No API calls are made (except optional model ping tests).
 """
 
 import asyncio
-import json
-import os
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 # Ensure app is importable
 backend_dir = Path(__file__).resolve().parent.parent.parent

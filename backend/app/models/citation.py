@@ -27,7 +27,8 @@ Design notes:
   list doesn't drag full annotation payloads across the wire.
 """
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from app.models.base import BaseModel
 

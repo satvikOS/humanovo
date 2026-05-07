@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import text
 
@@ -311,7 +311,7 @@ def get_age_graph_store(graph_name: str = "humanovo_kg") -> AGEGraphStore:
     return _age_singleton
 
 
-async def get_graph_store(backend: Optional[str] = None):
+async def get_graph_store(backend: str | None = None):
     """Return the configured graph store — Apache AGE or Neo4j — based on
     settings.KG_GRAPH_BACKEND (default: auto-detect, preferring AGE when
     the extension is installed, else falling back to Neo4j).

@@ -261,7 +261,7 @@ class DiversityEnforcer:
         worst_shared_axes: list[str] = []
         worst_match_id: str | None = None
 
-        modality_usage = {m: 0 for m in set().union(*[f.modality for f in self._accepted])}
+        modality_usage = dict.fromkeys(set().union(*[f.modality for f in self._accepted]), 0)
         for f in self._accepted:
             cos_l = _cosine(fingerprint.seed_embedding_large, f.seed_embedding_large)
             cos_s = _cosine(fingerprint.seed_embedding_small, f.seed_embedding_small)

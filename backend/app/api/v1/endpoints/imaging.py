@@ -9,8 +9,7 @@ import asyncio
 import base64
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import boto3
@@ -20,9 +19,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.auth import AUTH_REQUIRED
 from app.models.platform_entities import ImagingStudy
 
 logger = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ class AnnotationCreate(BaseModel):
 
 
 @router.get("/studies")
-async def list_studies(modality: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+async def list_studies(modality: str | None = None, db: AsyncSession = Depends(get_db)):
     stmt = select(ImagingStudy).order_by(ImagingStudy.created_at.desc())
     if modality:
         stmt = stmt.where(ImagingStudy.modality == modality)
@@ -111,7 +110,7 @@ async def add_annotation(study_id: str, data: AnnotationCreate, db: AsyncSession
         "label": data.label,
         "color": data.color,
         "notes": data.notes,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     current = list(study.annotations or [])
     current.append(annotation)

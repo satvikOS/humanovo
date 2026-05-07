@@ -20,7 +20,7 @@ routes don't expose a uniform Depends() surface.
 from __future__ import annotations
 
 import inspect
-from typing import Iterable
+from collections.abc import Iterable
 
 # Allowlist: HTTP routes we accept as intentionally unauthenticated.
 # Format: (METHOD, EXACT_PATH). Any route not matching either an auth
@@ -116,7 +116,7 @@ def test_every_v1_http_route_is_gated_or_allowlisted() -> None:
         "PUBLIC_ALLOWLIST. Either add `dependencies=AUTH_REQUIRED` (or "
         "ADMIN_REQUIRED) at router or route level, or — if intentionally "
         "public — add the (method, path) tuple to PUBLIC_ALLOWLIST in this "
-        f"test file with a comment explaining why.\n\nOffenders:\n  "
+        "test file with a comment explaining why.\n\nOffenders:\n  "
         + "\n  ".join(f"{m} {p}" for m, p in sorted(offenders))
     )
 

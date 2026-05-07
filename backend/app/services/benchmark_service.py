@@ -14,8 +14,8 @@ Key capabilities:
 
 import asyncio
 import time
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import and_, desc, select
 
@@ -283,7 +283,7 @@ class BenchmarkService:
                 for tc in cases
             ]
 
-    async def get_test_case(self, test_case_id: str) -> Optional[dict[str, Any]]:
+    async def get_test_case(self, test_case_id: str) -> dict[str, Any] | None:
         """Get a single test case with full details."""
         async with self._session_factory() as session:
             tc = await session.get(BenchmarkTestCase, test_case_id)
@@ -378,7 +378,7 @@ class BenchmarkService:
             async with session.begin():
                 from app.core.config import settings
                 run = BenchmarkRun(
-                    name=name or f"Benchmark Run {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
+                    name=name or f"Benchmark Run {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}",
                     description=description,
                     config_snapshot={
                         "pipeline_stages": 10,
@@ -388,7 +388,7 @@ class BenchmarkService:
                     pipeline_version=settings.VERSION,
                     total_test_cases=len(test_cases),
                     status=BenchmarkRunStatus.RUNNING,
-                    started_at=datetime.now(timezone.utc),
+                    started_at=datetime.now(UTC),
                 )
                 session.add(run)
                 await session.flush()
@@ -543,7 +543,7 @@ class BenchmarkService:
                     run.total_cost_usd = total_cost
                     run.total_duration_seconds = total_duration
                     run.status = BenchmarkRunStatus.COMPLETED
-                    run.completed_at = datetime.now(timezone.utc)
+                    run.completed_at = datetime.now(UTC)
 
         logger.info(
             f"Benchmark run {run_id} completed: {len(scores)} cases, "
@@ -552,7 +552,7 @@ class BenchmarkService:
 
     # ============== Query Methods ==============
 
-    async def get_benchmark_run(self, run_id: str) -> Optional[dict[str, Any]]:
+    async def get_benchmark_run(self, run_id: str) -> dict[str, Any] | None:
         """Get benchmark run with all results."""
         async with self._session_factory() as session:
             run = await session.get(BenchmarkRun, run_id)
@@ -660,7 +660,7 @@ class BenchmarkService:
 
 # ============== Singleton ==============
 
-_benchmark_service: Optional[BenchmarkService] = None
+_benchmark_service: BenchmarkService | None = None
 
 
 def get_benchmark_service() -> BenchmarkService:

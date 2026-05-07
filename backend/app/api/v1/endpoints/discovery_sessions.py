@@ -18,7 +18,7 @@ Endpoints:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -27,9 +27,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.ownership import assert_owns_project
 from app.models.discovery_session import DiscoverySession
 from app.models.user import User
@@ -78,7 +78,7 @@ class Message(BaseModel):
     role: str  # "user" | "assistant" | "system" | "tool"
     content: str
     cards: list[MessageCard] = Field(default_factory=list)
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     finish_reason: str | None = None
     tokens: dict[str, int] | None = None
     # Optional tool-call trace (only set when role == "tool").

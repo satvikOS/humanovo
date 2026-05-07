@@ -13,11 +13,9 @@ from __future__ import annotations
 import base64
 
 import numpy as np
-import pytest
 
 from app.compute.types import FigureFormat
 from app.compute.visualization.plots import PlotGenerator
-
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 

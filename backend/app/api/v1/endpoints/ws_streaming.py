@@ -15,7 +15,7 @@ Client -> Server commands:
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -93,14 +93,14 @@ class RunStreamManager:
             await websocket.send_json({
                 "event": "pong",
                 "run_id": run_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
         elif command == "cancel":
             self.request_cancel(run_id)
             await self.broadcast(run_id, {
                 "event": "run_cancelling",
                 "run_id": run_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
             # Also cancel via the Platform API run tracker
             try:
@@ -160,13 +160,13 @@ async def discovery_ws(
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=300)
                 await manager.handle_client_message(run_id, data, websocket)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Send keepalive ping
                 try:
                     await websocket.send_json({
                         "event": "keepalive",
                         "run_id": run_id,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
                 except Exception:
                     break
@@ -196,12 +196,12 @@ async def synthesis_ws(
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=300)
                 await manager.handle_client_message(run_id, data, websocket)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 try:
                     await websocket.send_json({
                         "event": "keepalive",
                         "run_id": run_id,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
                 except Exception:
                     break

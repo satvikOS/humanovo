@@ -18,9 +18,9 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.ownership import fetch_owned_or_404
 from app.models.hypothesis import Hypothesis
 from app.models.user import User

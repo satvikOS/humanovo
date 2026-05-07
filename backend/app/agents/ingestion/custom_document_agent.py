@@ -15,12 +15,11 @@ allowlist (per INTEGRATION_INVENTORY.md) instead of widening here.
 import hashlib
 import io
 import mimetypes
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
 import httpx
-from app.core.http_allowlist import make_httpx_client
 
 from app.agents.ingestion.base import (
     IngestionAgent,
@@ -28,6 +27,7 @@ from app.agents.ingestion.base import (
     IngestionRecord,
     SourceType,
 )
+from app.core.http_allowlist import make_httpx_client
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -620,7 +620,7 @@ class CustomDocumentIngestionAgent(IngestionAgent):
             abstract=parsed.get("text", "")[:1000],  # First 1000 chars as abstract
             full_text=parsed.get("text"),
             authors=authors,
-            publication_date=datetime.now(timezone.utc),  # Use upload time
+            publication_date=datetime.now(UTC),  # Use upload time
             url=url,
             keywords=keywords,
             metadata={

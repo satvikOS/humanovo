@@ -30,7 +30,7 @@ This ensures ZERO hallucinations by construction:
 import asyncio
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -98,8 +98,9 @@ class DualEmbeddingGrounder:
             return
 
         from app.rag.embeddings import (
-            EmbeddingModel, EmbeddingConfig,
             AzureOpenAIEmbedder,
+            EmbeddingConfig,
+            EmbeddingModel,
         )
 
         # Primary: Azure text-embedding-3-large (1536d, highest MTEB score)
@@ -513,7 +514,7 @@ class DualEmbeddingGrounder:
 
 
 # Singleton
-_grounding_engine: Optional[DualEmbeddingGrounder] = None
+_grounding_engine: DualEmbeddingGrounder | None = None
 
 
 def get_grounding_engine() -> DualEmbeddingGrounder:

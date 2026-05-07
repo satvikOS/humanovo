@@ -27,10 +27,10 @@ from app.compute.types import (
     ComputeRequest,
     ComputeResult,
     ComputeStatus,
+    ConfidenceInterval,
     DescriptiveStats,
     GeneratedFigure,
     StatisticalTest,
-    ConfidenceInterval,
 )
 
 
@@ -360,7 +360,7 @@ class StatisticsProcessor:
                 },
             )
         else:
-            from sklearn.linear_model import Ridge, Lasso
+            from sklearn.linear_model import Lasso, Ridge
             alpha_reg = params.get("alpha_reg", 1.0)
             cls = Ridge if model == "ridge" else Lasso
             reg = cls(alpha=alpha_reg).fit(X, y)

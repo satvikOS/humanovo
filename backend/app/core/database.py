@@ -55,8 +55,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     """Initialize database tables."""
     # Import all models so their Base.metadata knows about every table
-    from app.models.base import Base as ModelsBase
     import app.models  # noqa: F401
+    from app.models.base import Base as ModelsBase
 
     # Mask password in URL for safe logging
     db_url = settings.DATABASE_URL

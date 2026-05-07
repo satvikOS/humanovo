@@ -19,7 +19,7 @@ polite pool (10 rps sustained).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.config import settings
@@ -110,7 +110,7 @@ class OpenAlexClient(IntegrationClient):
     async def recent_biomedical_works(
         self, days: int = 14, per_page: int = 25,
     ) -> list[dict[str, Any]]:
-        since = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+        since = (datetime.now(UTC) - timedelta(days=days)).date().isoformat()
         data = await self.fetch_json(
             "/works",
             params=self._polite({

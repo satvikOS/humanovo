@@ -4,8 +4,10 @@ Notebook Page Model
 Stores researcher notebook pages with versioning support.
 """
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, Enum as SAEnum
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
+from sqlalchemy import Column, ForeignKey, Integer, String, Text
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from app.models.base import BaseModel
 

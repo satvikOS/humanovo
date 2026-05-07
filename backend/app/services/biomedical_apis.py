@@ -20,7 +20,7 @@ Rate limits respected:
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -479,7 +479,7 @@ class ChEBIService:
             logger.warning(f"ChEBI search failed: {e}")
             return []
 
-    async def get_entity(self, chebi_id: str) -> Optional[ChEBIEntity]:
+    async def get_entity(self, chebi_id: str) -> ChEBIEntity | None:
         """Get detailed ChEBI entity by ID."""
         session = await self._get_session()
 
@@ -614,7 +614,7 @@ class HCAService:
             logger.warning(f"HCA search failed: {e}")
             return []
 
-    async def get_project_detail(self, project_id: str) -> Optional[dict[str, Any]]:
+    async def get_project_detail(self, project_id: str) -> dict[str, Any] | None:
         """Get detailed project information."""
         session = await self._get_session()
 
@@ -725,7 +725,7 @@ class CellOntologyService:
             logger.warning(f"Cell Ontology search failed: {e}")
             return []
 
-    async def get_cell_type(self, cl_id: str) -> Optional[CellType]:
+    async def get_cell_type(self, cl_id: str) -> CellType | None:
         """Get a specific cell type by CL ID."""
         session = await self._get_session()
 
@@ -1679,7 +1679,7 @@ class ExtendedGroundingService:
 
 
 # Singleton
-_extended_grounding: Optional[ExtendedGroundingService] = None
+_extended_grounding: ExtendedGroundingService | None = None
 
 
 def get_extended_grounding_service() -> ExtendedGroundingService:

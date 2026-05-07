@@ -16,7 +16,6 @@ import pytest
 
 from app.compute.ingestion.parsers import DataIngestionEngine
 
-
 # ── Format detection ───────────────────────────────────────────────────
 
 

@@ -5,7 +5,6 @@ Login, registration, and user management.
 """
 
 from datetime import timedelta
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
@@ -35,7 +34,7 @@ class RegisterRequest(BaseModel):
     """Registration request schema."""
     email: EmailStr
     password: str
-    full_name: Optional[str] = None
+    full_name: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -52,8 +51,8 @@ class PasswordChangeRequest(BaseModel):
 
 class UserUpdateRequest(BaseModel):
     """User update request."""
-    full_name: Optional[str] = None
-    email: Optional[EmailStr] = None
+    full_name: str | None = None
+    email: EmailStr | None = None
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)

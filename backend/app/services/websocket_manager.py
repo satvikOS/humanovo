@@ -5,7 +5,7 @@ Manages WebSocket connections for discovery and synthesis runs.
 Handles client connect/disconnect/reconnect with event replay.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import WebSocket
 
@@ -42,7 +42,7 @@ class DiscoveryConnectionManager:
 
     async def send_event(self, run_id: str, event: dict):
         """Send an event to the connected client and log it for replay."""
-        event["timestamp"] = datetime.now(timezone.utc).isoformat()
+        event["timestamp"] = datetime.now(UTC).isoformat()
         # Always log for replay
         if run_id not in self._event_logs:
             self._event_logs[run_id] = []
@@ -112,7 +112,7 @@ class DiscoveryConnectionManager:
             ws = self._connections.get(run_id)
             if ws:
                 try:
-                    await ws.send_json({"event": "pong", "timestamp": datetime.now(timezone.utc).isoformat()})
+                    await ws.send_json({"event": "pong", "timestamp": datetime.now(UTC).isoformat()})
                 except Exception:
                     pass
         return None

@@ -379,8 +379,8 @@ def _render_violin(ax, spec: FigureSpec) -> None:
 def _render_box_strip(ax, spec: FigureSpec) -> None:
     """data = {'groups': {'name': [...], ...}}"""
     try:
-        import seaborn as sns
         import pandas as pd
+        import seaborn as sns
     except ImportError:
         return _render_violin(ax, spec)
     groups = spec.data.get("groups", {})
@@ -400,8 +400,8 @@ def _render_box_strip(ax, spec: FigureSpec) -> None:
 def _render_heatmap(ax, spec: FigureSpec) -> None:
     """data = {'matrix': [[...]], 'row_labels': [...], 'col_labels': [...]}"""
     try:
-        import seaborn as sns
         import numpy as np
+        import seaborn as sns
     except ImportError:
         return
     matrix = spec.data.get("matrix")

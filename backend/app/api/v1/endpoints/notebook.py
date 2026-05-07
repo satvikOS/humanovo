@@ -11,8 +11,7 @@ return 404, never 403, so callers can't probe for foreign IDs.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,8 +20,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.database import get_db
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -37,10 +36,10 @@ class NotebookPageCreate(BaseModel):
 
 
 class NotebookPageUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    content_type: Optional[str] = None
-    tags: Optional[list[str]] = None
+    title: str | None = None
+    content: str | None = None
+    content_type: str | None = None
+    tags: list[str] | None = None
 
 
 def _get_model():
@@ -149,7 +148,7 @@ async def update_page(
             "version": page.version,
             "content": page.content,
             "title": page.title,
-            "created_at": page.updated_at.isoformat() if page.updated_at else datetime.now(timezone.utc).isoformat(),
+            "created_at": page.updated_at.isoformat() if page.updated_at else datetime.now(UTC).isoformat(),
         })
         if len(versions) > 50:
             versions = versions[-50:]
@@ -218,7 +217,7 @@ async def restore_version(
         "version": page.version,
         "content": page.content,
         "title": page.title,
-        "created_at": page.updated_at.isoformat() if page.updated_at else datetime.now(timezone.utc).isoformat(),
+        "created_at": page.updated_at.isoformat() if page.updated_at else datetime.now(UTC).isoformat(),
     })
     page.versions = versions
     page.version = (page.version or 1) + 1

@@ -15,9 +15,13 @@ Output formats: PDF (reportlab) and DOCX (python-docx).
 
 import io
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
+from docx import Document as DocxDocument
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt, RGBColor
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
 from reportlab.lib.pagesizes import letter
@@ -35,11 +39,6 @@ from reportlab.platypus import (
     TableStyle,
 )
 from reportlab.platypus.tableofcontents import TableOfContents
-
-from docx import Document as DocxDocument
-from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
 
 from app.core.logging import get_logger
 
@@ -105,7 +104,7 @@ def _pdf_header_footer(canvas, doc):
     page_num_text = f"Page {doc.page}"
     canvas.drawCentredString(doc.pagesize[0] / 2, 0.4 * inch, page_num_text)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d")
     canvas.drawRightString(
         doc.pagesize[0] - doc.rightMargin, 0.4 * inch, f"Generated {timestamp}"
     )
@@ -303,7 +302,7 @@ class DocumentExportService:
         )
         title = title or f"Novel Therapeutic Hypotheses for {disease or 'Target Disease'}"
         authors = authors or ["Humanovo AI Discovery Platform"]
-        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+        date_str = datetime.now(UTC).strftime("%B %d, %Y")
         context = self._summarise_disease_context(disease, hypotheses)
         analysis = self._synthesise_discussion(hypotheses, evidence)
         citations = self._extract_citations(evidence)
@@ -333,7 +332,7 @@ class DocumentExportService:
         h_title = hypothesis.get("title", hypothesis.get("name", "Untitled Hypothesis"))
         logger.info("Generating hypothesis report", hypothesis=h_title, format=format)
 
-        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+        date_str = datetime.now(UTC).strftime("%B %d, %Y")
         confidence = hypothesis.get("confidence_score", hypothesis.get("confidence", "N/A"))
         mechanism = hypothesis.get("mechanism", hypothesis.get("description", ""))
         rationale = hypothesis.get("rationale", "")
@@ -384,7 +383,7 @@ class DocumentExportService:
         disease = discovery_run.get("disease", "Unknown Disease")
         run_id = discovery_run.get("id", discovery_run.get("run_id", "N/A"))
         hypotheses = discovery_run.get("hypotheses", [])
-        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+        date_str = datetime.now(UTC).strftime("%B %d, %Y")
 
         logger.info(
             "Generating discovery summary",
@@ -463,7 +462,7 @@ class DocumentExportService:
         """Compile all evidence from various sources into a structured document."""
         logger.info("Generating evidence compilation", num_evidence=len(evidence), format=format)
 
-        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+        date_str = datetime.now(UTC).strftime("%B %d, %Y")
 
         sections: list[DocumentSection] = [
             self._build_title_page(
@@ -542,7 +541,7 @@ class DocumentExportService:
         h_title = hypothesis.get("title", hypothesis.get("name", "Untitled Hypothesis"))
         logger.info("Generating translational roadmap", hypothesis=h_title, format=format)
 
-        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+        date_str = datetime.now(UTC).strftime("%B %d, %Y")
 
         phases = [
             (
@@ -1207,8 +1206,8 @@ class DocumentExportService:
 
     def _docx_insert_toc(self, doc: DocxDocument) -> None:
         """Insert a Table of Contents field that updates when the DOCX is opened in Word."""
-        from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
 
         paragraph = doc.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -1256,8 +1255,8 @@ class DocumentExportService:
                 run.font.size = Pt(9)
                 run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
                 # Shade header cells
-                from docx.oxml.ns import qn as _qn
                 from docx.oxml import OxmlElement as _Elem
+                from docx.oxml.ns import qn as _qn
                 shading = _Elem("w:shd")
                 shading.set(_qn("w:fill"), "1A3C6E")
                 shading.set(_qn("w:val"), "clear")
@@ -1294,8 +1293,8 @@ class DocumentExportService:
 
     def _docx_add_page_numbers(self, doc: DocxDocument) -> None:
         """Add page numbers to the DOCX footer."""
-        from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
 
         for doc_section in doc.sections:
             footer = doc_section.footer

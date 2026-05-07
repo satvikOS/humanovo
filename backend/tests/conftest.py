@@ -32,9 +32,9 @@ def _ensure_schema() -> None:
     # Import lazily: the tests module gets collected before app is
     # fully importable in some branches, and we don't want module-
     # level imports here to affect non-DB tests.
+    import app.models  # noqa: F401  — loads every model into Base.metadata
     from app.core.database import engine
     from app.models.base import Base
-    import app.models  # noqa: F401  — loads every model into Base.metadata
 
     async def _setup() -> None:
         async with engine.begin() as conn:

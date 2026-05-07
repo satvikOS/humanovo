@@ -13,7 +13,7 @@ Features:
 
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -291,7 +291,7 @@ class KnowledgeEngine:
         self._stats["total_records"] += 1
         self._stats["records_by_source"][source.value] = \
             self._stats["records_by_source"].get(source.value, 0) + 1
-        self._stats["last_ingestion"] = datetime.now(timezone.utc).isoformat()
+        self._stats["last_ingestion"] = datetime.now(UTC).isoformat()
 
         logger.debug(
             "Record ingested",
@@ -364,7 +364,7 @@ class KnowledgeEngine:
             source=source,
             query=query,
             priority=priority,
-            scheduled_at=run_at or datetime.now(timezone.utc),
+            scheduled_at=run_at or datetime.now(UTC),
         )
 
         self._job_queue.append(job)
@@ -382,7 +382,7 @@ class KnowledgeEngine:
     async def run_scheduled_jobs(self) -> list[dict[str, Any]]:
         """Run all scheduled jobs that are due."""
         results = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Get jobs that are due
         due_jobs = [j for j in self._job_queue if j.scheduled_at <= now]
@@ -404,15 +404,15 @@ class KnowledgeEngine:
     async def _execute_job(self, job: IngestionJob) -> dict[str, Any]:
         """Execute a single ingestion job."""
         job.status = "running"
-        job.started_at = datetime.now(timezone.utc)
+        job.started_at = datetime.now(UTC)
         self._running_jobs[job.id] = job
 
         logger.info("Starting ingestion job", job_id=job.id, source=job.source.value)
 
         try:
             # Get the appropriate ingestion agent
-            from app.agents.ingestion.orchestrator import IngestionOrchestrator
             from app.agents.ingestion.base import SourceType
+            from app.agents.ingestion.orchestrator import IngestionOrchestrator
 
             # Map our source to orchestrator source type
             source_map = {
@@ -440,7 +440,7 @@ class KnowledgeEngine:
             job.records_fetched = result["metrics"]["total_records_fetched"]
             job.records_indexed = result["metrics"]["total_records_indexed"]
             job.status = "completed"
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.now(UTC)
 
             return {
                 "job_id": job.id,
@@ -591,7 +591,7 @@ async def schedule_continuous_ingestion(
 
     This builds up the Holy Bible of Healthcare over time.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for i, query_config in enumerate(SCHEDULED_QUERIES):
         # Stagger jobs over the interval

@@ -31,8 +31,8 @@ All content is real-time AI generated. Zero hardcoded templates.
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from app.core.config import settings
@@ -61,7 +61,7 @@ class ResearchPaper:
         self.hypotheses = hypotheses
         self.stats = stats
         self.external_factors = external_factors or []
-        self.created_at = datetime.now(timezone.utc)
+        self.created_at = datetime.now(UTC)
         self.sections: dict[str, str] = {}
         self.references: list[dict[str, str]] = []
         self.tables: list[dict[str, Any]] = []
@@ -240,7 +240,8 @@ class PaperGenerationService:
     def _get_formatter(self, style: str = "humanovo"):
         if self._formatter is None:
             from app.services.paper_formatter_service import (
-                JournalStyle, PaperFormatter,
+                JournalStyle,
+                PaperFormatter,
             )
             try:
                 js = JournalStyle(style)
@@ -258,8 +259,12 @@ class PaperGenerationService:
         if self._visualization_builder is None:
             try:
                 from app.visualization import (
-                    FigureSpec, FigureType, generate_figure,
-                    render_causal_flowchart, build_flowchart, build_gantt,
+                    FigureSpec,
+                    FigureType,
+                    build_flowchart,
+                    build_gantt,
+                    generate_figure,
+                    render_causal_flowchart,
                     render_mermaid,
                 )
                 self._visualization_builder = {
@@ -312,7 +317,7 @@ class PaperGenerationService:
                 self._generate_all_sections(paper),
                 timeout=PAPER_GENERATION_TIMEOUT_SECONDS,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             elapsed = time.time() - start_time
             raise RuntimeError(
                 f"Paper generation exceeded 30-minute timeout ({elapsed:.0f}s elapsed). "
@@ -2683,7 +2688,7 @@ pre.diagram {{
 
 
 # Singleton
-_paper_service: Optional[PaperGenerationService] = None
+_paper_service: PaperGenerationService | None = None
 
 
 def get_paper_service() -> PaperGenerationService:

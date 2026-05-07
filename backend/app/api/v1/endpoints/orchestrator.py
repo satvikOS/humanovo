@@ -8,30 +8,30 @@ simulation, and research paper generation.
 
 import asyncio
 import json
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
-from app.core.database import get_db
-from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, authenticate_websocket
 from app.agents.discovery_orchestrator import (
     DiscoveryOrchestrator,
     DiscoveryOrchestratorStats,
     OrchestratorState,
 )
+from app.core.auth import AUTH_REQUIRED, authenticate_websocket
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/orchestrator", tags=["orchestrator"], dependencies=AUTH_REQUIRED)
 # Async paper generation state
 _paper_status: str = "idle"  # idle | generating | done | failed
-_paper_result: Optional[str] = None
-_paper_error: Optional[str] = None
-_paper_task: Optional[asyncio.Task] = None
+_paper_result: str | None = None
+_paper_error: str | None = None
+_paper_task: asyncio.Task | None = None
 
 
 # WebSocket connection manager for real-time updates
@@ -61,7 +61,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Global orchestrator reference
-_current_orchestrator: Optional[DiscoveryOrchestrator] = None
+_current_orchestrator: DiscoveryOrchestrator | None = None
 
 
 class ExternalFactor(BaseModel):
@@ -84,17 +84,17 @@ class StartDiscoveryRequest(BaseModel):
 class DiscoveryStatusResponse(BaseModel):
     """Response with discovery status."""
     state: str
-    disease: Optional[str] = None
-    discovery_type: Optional[str] = None
-    project_id: Optional[str] = None
-    project_name: Optional[str] = None
-    stats: Optional[DiscoveryOrchestratorStats] = None
+    disease: str | None = None
+    discovery_type: str | None = None
+    project_id: str | None = None
+    project_name: str | None = None
+    stats: DiscoveryOrchestratorStats | None = None
     top_hypotheses: list[dict] = []
 
 
 # Track auto-created project per discovery run
-_auto_project_id: Optional[str] = None
-_auto_project_name: Optional[str] = None
+_auto_project_id: str | None = None
+_auto_project_name: str | None = None
 
 
 @router.post("/start")
@@ -160,9 +160,11 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
             # Auto-save hypothesis to database
             if _auto_project_id:
                 try:
-                    from app.core.database import async_session_factory
-                    from app.models.hypothesis import Hypothesis as HypModel, HypothesisStatus as HypStatus
                     from uuid import UUID as _UUID
+
+                    from app.core.database import async_session_factory
+                    from app.models.hypothesis import Hypothesis as HypModel
+                    from app.models.hypothesis import HypothesisStatus as HypStatus
 
                     async with async_session_factory() as db:
                         db_hyp = HypModel(
@@ -185,8 +187,10 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
                         )
                         db.add(db_hyp)
                         # Update project hypothesis count
+                        from sqlalchemy import func as sa_func
+                        from sqlalchemy import select as sa_select
+
                         from app.models.project import Project
-                        from sqlalchemy import select as sa_select, func as sa_func
                         count_result = await db.execute(
                             sa_select(sa_func.count()).select_from(HypModel).where(
                                 HypModel.project_id == _UUID(_auto_project_id)
@@ -691,8 +695,8 @@ async def save_discovery_to_project(project_name: str = None):
 
     # Save to database
     from app.core.database import get_db
-    from app.models.project import Project, ProjectStatus
     from app.models.hypothesis import Hypothesis, HypothesisStatus
+    from app.models.project import Project, ProjectStatus
 
     async for db in get_db():
         db_project = Project(
@@ -885,7 +889,7 @@ async def websocket_endpoint(
                             "data": stats.model_dump(),
                         })
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await websocket.send_json({"type": "ping"})
 
     except WebSocketDisconnect:

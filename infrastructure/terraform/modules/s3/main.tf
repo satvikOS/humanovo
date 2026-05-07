@@ -18,6 +18,18 @@ variable "kms_key_arn" {
   default = ""
 }
 
+variable "cors_allowed_origins" {
+  type        = list(string)
+  description = "Origins allowed to GET/HEAD bucket assets via browser. Default = production CloudFront + Tauri custom protocol; override per-environment for staging/preview."
+  default = [
+    "https://www.humanovo.net",
+    "https://humanovo.net",
+    "https://d1l1516144ax30.cloudfront.net",
+    "tauri://localhost",
+    "https://tauri.localhost",
+  ]
+}
+
 # ==================== Single Frontend Bucket ====================
 
 resource "aws_s3_bucket" "main" {
@@ -62,10 +74,22 @@ resource "aws_s3_bucket_cors_configuration" "main" {
   bucket = aws_s3_bucket.main.id
 
   cors_rule {
-    allowed_headers = ["*"]
+    # GET/HEAD only — these buckets serve frontend static assets / signed
+    # download URLs. Any mutating method (POST/PUT) goes through the API.
     allowed_methods = ["GET", "HEAD"]
-    allowed_origins = ["*"]
-    expose_headers  = ["ETag"]
+    # Origins must be explicitly listed by the caller. Defaults to the prod
+    # CloudFront + Tauri custom-protocol origins; overridable per-bucket
+    # via var.cors_allowed_origins for staging/preview environments.
+    allowed_origins = var.cors_allowed_origins
+    allowed_headers = [
+      "Accept",
+      "Accept-Language",
+      "Authorization",
+      "Range",
+      "If-None-Match",
+      "If-Modified-Since",
+    ]
+    expose_headers  = ["ETag", "Content-Length", "Content-Type", "Last-Modified"]
     max_age_seconds = 3600
   }
 }

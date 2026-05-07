@@ -15,7 +15,7 @@ import html
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 from xml.etree import ElementTree
 
 from app.core.config import settings
@@ -1027,8 +1027,8 @@ class ScientificGroundingService:
 
 
 # Singletons
-_pubmed_service: Optional[PubMedService] = None
-_grounding_service: Optional[ScientificGroundingService] = None
+_pubmed_service: PubMedService | None = None
+_grounding_service: ScientificGroundingService | None = None
 
 
 def get_pubmed_service() -> PubMedService:

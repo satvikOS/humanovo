@@ -14,9 +14,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.ownership import (
     assert_owns_project,
     fetch_owned_or_404,
@@ -24,7 +24,11 @@ from app.core.ownership import (
 )
 from app.models.agent_task import (
     AgentTask,
+)
+from app.models.agent_task import (
     AgentTaskStatus as AgentTaskStatusModel,
+)
+from app.models.agent_task import (
     AgentTaskType as AgentTaskTypeModel,
 )
 from app.models.user import User

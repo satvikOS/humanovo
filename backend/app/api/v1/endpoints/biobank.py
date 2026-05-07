@@ -5,8 +5,7 @@ Sample registry, chain of custody, checkout workflow, storage management.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,10 +13,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.api.v1.endpoints._bulk import attach_bulk_archive, attach_bulk_delete
 from app.core.auth import AUTH_REQUIRED
+from app.core.database import get_db
 from app.models.platform_entities import BiobankSample, StorageLocation
-from app.api.v1.endpoints._bulk import attach_bulk_delete, attach_bulk_archive
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -31,20 +30,20 @@ class SampleCreate(BaseModel):
     project: str = ""
     patient_id: str = ""
     quantity: str = ""
-    storage_location: Optional[str] = None
+    storage_location: str | None = None
 
 
 class SampleUpdate(BaseModel):
-    status: Optional[str] = None
-    project: Optional[str] = None
-    storage_location: Optional[str] = None
-    quality_score: Optional[float] = None
+    status: str | None = None
+    project: str | None = None
+    storage_location: str | None = None
+    quality_score: float | None = None
 
 
 class CheckoutRequest(BaseModel):
     researcher: str
     purpose: str = ""
-    expected_return: Optional[str] = None
+    expected_return: str | None = None
 
 
 # ── Samples ─────────────────────────────────────────────────────
@@ -54,10 +53,10 @@ class CheckoutRequest(BaseModel):
 @router.get("/")
 @router.get("/samples")
 async def list_samples(
-    sample_type: Optional[str] = None,
-    status: Optional[str] = None,
-    project: Optional[str] = None,
-    search: Optional[str] = None,
+    sample_type: str | None = None,
+    status: str | None = None,
+    project: str | None = None,
+    search: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     query = select(BiobankSample)
@@ -83,7 +82,7 @@ async def list_samples(
 @router.post("/samples")
 async def create_sample(data: SampleCreate, db: AsyncSession = Depends(get_db)):
     barcode = data.barcode or f"BIO-{str(uuid4())[:6].upper()}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sample = BiobankSample(
         barcode=barcode,
         sample_type=data.sample_type,
@@ -162,7 +161,7 @@ async def checkout_sample(
         {
             "action": "checked_out",
             "by": data.researcher,
-            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "notes": f"Purpose: {data.purpose}"
             + (f", Expected return: {data.expected_return}" if data.expected_return else ""),
         }
@@ -191,7 +190,7 @@ async def checkin_sample(
         {
             "action": "returned",
             "by": "Current User",
-            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "notes": f"Condition: {condition}",
         }
     )

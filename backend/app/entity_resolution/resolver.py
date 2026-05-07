@@ -16,7 +16,7 @@ Provides end-to-end entity resolution with:
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .canonical_ids import CanonicalID, CanonicalIDManager, IDNamespace
@@ -265,7 +265,7 @@ class EntityResolver:
             steps.append(f"Generated ID (no match): {result.canonical_id.get_curie()}")
 
         result.resolution_steps = steps
-        result.metadata["resolution_timestamp"] = datetime.now(timezone.utc).isoformat()
+        result.metadata["resolution_timestamp"] = datetime.now(UTC).isoformat()
 
         return result
 
@@ -293,7 +293,7 @@ class EntityResolver:
         contexts = contexts or [None] * len(mentions)
         entity_types = entity_types or [None] * len(mentions)
 
-        result = ResolutionResult(timestamp=datetime.now(timezone.utc).isoformat())
+        result = ResolutionResult(timestamp=datetime.now(UTC).isoformat())
 
         resolved_count = 0
         unresolved_count = 0

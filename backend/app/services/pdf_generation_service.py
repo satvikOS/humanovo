@@ -18,7 +18,7 @@ All code execution happens in-process (sandboxed via restricted builtins).
 
 import io
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -49,7 +49,7 @@ class CodeInterpreterPDFGenerator:
         disease: str,
         discovery_type: str,
         hypotheses: list[dict[str, Any]],
-        paper_html: Optional[str] = None,
+        paper_html: str | None = None,
         num_agents: int = 1000,
         target_confidence: float = 0.95,
     ) -> bytes:
@@ -82,21 +82,27 @@ class CodeInterpreterPDFGenerator:
         disease: str,
         discovery_type: str,
         hypotheses: list[dict[str, Any]],
-        paper_html: Optional[str],
+        paper_html: str | None,
         num_agents: int,
         target_confidence: float,
     ) -> bytes:
         """Generate a professional PDF using reportlab templates with LLM-generated content."""
         try:
             from reportlab.lib import colors
+            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
             from reportlab.lib.pagesizes import letter
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
             from reportlab.lib.units import inch
             from reportlab.platypus import (
-                SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-                PageBreak, Image, HRFlowable,
+                HRFlowable,
+                Image,
+                PageBreak,
+                Paragraph,
+                SimpleDocTemplate,
+                Spacer,
+                Table,
+                TableStyle,
             )
-            from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
         except ImportError:
             logger.error("reportlab not installed — cannot generate PDF")
             raise RuntimeError(
@@ -558,7 +564,7 @@ class CodeInterpreterPDFGenerator:
 
 
 # Singleton
-_pdf_service: Optional[CodeInterpreterPDFGenerator] = None
+_pdf_service: CodeInterpreterPDFGenerator | None = None
 
 
 def get_pdf_service() -> CodeInterpreterPDFGenerator:

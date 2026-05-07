@@ -2,7 +2,6 @@
 Tests for the PHI/PII guardrail — the single active content safety layer.
 """
 
-import pytest
 
 from app.agents.guardrails.phi_pii_detector import (
     PHICategory,

@@ -6,15 +6,14 @@ Model registry, evaluation, prediction, and explainability.
 
 import logging
 import math
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.auth import AUTH_REQUIRED
+from app.core.database import get_db
 from app.models.platform_entities import MLModel
 
 logger = logging.getLogger(__name__)
@@ -32,10 +31,10 @@ class ModelCreate(BaseModel):
 
 
 class ModelUpdate(BaseModel):
-    name: Optional[str] = None
-    status: Optional[str] = None
-    description: Optional[str] = None
-    version: Optional[str] = None
+    name: str | None = None
+    status: str | None = None
+    description: str | None = None
+    version: str | None = None
 
 
 class PredictRequest(BaseModel):

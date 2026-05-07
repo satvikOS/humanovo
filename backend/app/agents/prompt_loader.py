@@ -13,7 +13,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from threading import RLock
 from time import monotonic
-from typing import Optional
 
 from app.core.logging import get_logger
 
@@ -65,7 +64,7 @@ class PromptBackend(ABC):
 class MockBackend(PromptBackend):
     """In-memory backend for tests and local dev."""
 
-    def __init__(self, prompts: Optional[dict[tuple[str, str], str]] = None):
+    def __init__(self, prompts: dict[tuple[str, str], str] | None = None):
         # key = (prompt_id, version), value = prompt text
         self._store: dict[tuple[str, str], str] = dict(prompts or {})
 
@@ -130,7 +129,7 @@ class PromptLoader:
         self._cache: dict[tuple[str, str], _CacheEntry] = {}
         self._lock = RLock()
 
-    def get(self, prompt_id: str, version: Optional[str] = None) -> str:
+    def get(self, prompt_id: str, version: str | None = None) -> str:
         if prompt_id not in PROMPT_IDS:
             raise ValueError(f"unknown prompt_id: {prompt_id}")
         v = version or self._default_version
@@ -161,7 +160,7 @@ class PromptLoader:
             self._cache[key] = _CacheEntry(text=text, expires_at=now + self._ttl)
         return text
 
-    def invalidate(self, prompt_id: Optional[str] = None) -> None:
+    def invalidate(self, prompt_id: str | None = None) -> None:
         """Drop cache entries for a single prompt or all if None."""
         with self._lock:
             if prompt_id is None:

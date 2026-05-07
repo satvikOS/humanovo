@@ -5,7 +5,7 @@ RESTful API for RAG (Retrieval-Augmented Generation) queries,
 hybrid search, and context retrieval.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -14,9 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -193,7 +193,7 @@ async def rag_query(
         top_k=request.top_k,
     )
 
-    start_time = datetime.now(timezone.utc)
+    start_time = datetime.now(UTC)
     query_id = uuid4()
 
     try:
@@ -269,7 +269,7 @@ async def rag_query(
                 for r in results.relations
             ]
 
-        processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+        processing_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
         logger.info(
             "RAG query completed",
@@ -470,7 +470,7 @@ async def rag_health_check() -> dict[str, Any]:
     health = {
         "status": "healthy",
         "components": {},
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     try:

@@ -82,7 +82,10 @@ jobs:
 
       - name: Mypy (type check)
         continue-on-error: true
-        run: mypy app || true
+        # `|| true` was redundant with continue-on-error and masked stderr
+        # ordering inside the GH Actions log buffer; removed so mypy's
+        # actual exit + diagnostics surface cleanly.
+        run: mypy app
 
       - name: Pytest (unit)
         id: pytest

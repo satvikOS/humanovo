@@ -2,7 +2,6 @@
 Tests for the hypothesis diversity enforcer.
 """
 
-import pytest
 
 from app.agents.diversity.diversity_enforcer import (
     DiversityEnforcer,

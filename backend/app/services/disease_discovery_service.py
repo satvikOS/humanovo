@@ -14,9 +14,9 @@ import asyncio
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -73,7 +73,7 @@ class DiscoveryEvidence:
     source: str
     source_type: str  # pubmed, clinical_trial, patent, etc.
     relevance_score: float
-    publication_date: Optional[str] = None
+    publication_date: str | None = None
     citations: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -209,10 +209,10 @@ class DiscoveryResult(BaseModel):
     validation_experiments: list[str] = []
 
     # Translational roadmap (T0-T5 bench-to-bedside)
-    translational_roadmap: Optional[TranslationalRoadmap] = None
+    translational_roadmap: TranslationalRoadmap | None = None
 
     # Metadata
-    created_at: datetime = datetime.now(timezone.utc)
+    created_at: datetime = datetime.now(UTC)
     llm_provider: str = ""
     model_used: str = ""
     processing_time_ms: float = 0.0
@@ -1353,7 +1353,7 @@ Return as structured JSON with keys: ranking, differentiators, combinations, res
 
 
 # Global service instance
-_discovery_service: Optional[DiseaseDiscoveryService] = None
+_discovery_service: DiseaseDiscoveryService | None = None
 
 
 async def init_discovery_service(provider: LLMProvider = None) -> None:

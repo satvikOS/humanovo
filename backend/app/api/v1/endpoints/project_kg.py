@@ -24,8 +24,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
-from app.core.logging import get_logger
 from app.core.auth import AUTH_REQUIRED
+from app.core.logging import get_logger
 from app.services.kg_first_service import get_kg_first_service
 
 logger = get_logger(__name__)

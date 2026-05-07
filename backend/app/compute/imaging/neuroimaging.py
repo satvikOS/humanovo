@@ -18,13 +18,16 @@ import math
 from collections.abc import Callable
 
 import numpy as np
-from scipy import ndimage, signal, stats as sp_stats
+from scipy import ndimage, signal
+from scipy import stats as sp_stats
 
 from app.compute.types import (
-    ComputeDomain, ComputeRequest, ComputeResult, ComputeStatus,
+    ComputeDomain,
+    ComputeRequest,
+    ComputeResult,
+    ComputeStatus,
     GeneratedFigure,
 )
-
 
 # ── Atlas Definitions ──────────────────────────────────────────────
 
@@ -99,15 +102,15 @@ def spm_hrf(TR: float, peak_delay: float = 6.0, undershoot_delay: float = 16.0,
     Returns the HRF sampled at TR intervals from 0 to duration.
     """
     from scipy.stats import gamma as gamma_dist
-    
+
     t = np.arange(0, duration, TR) - onset
     t = np.maximum(t, 0)
-    
+
     # Peak gamma
     peak = gamma_dist.pdf(t, peak_delay / peak_disp, scale=peak_disp)
     # Undershoot gamma
     undershoot = gamma_dist.pdf(t, undershoot_delay / undershoot_disp, scale=undershoot_disp)
-    
+
     hrf = peak - undershoot / p_u_ratio
     hrf = hrf / np.max(np.abs(hrf) + 1e-15)  # Normalize to unit peak
     return hrf
@@ -862,7 +865,7 @@ class NeuroimagingProcessor:
             # Estimate via explained variance > 95%
             n_components = min(n_tp - 1, 20)
 
-        from sklearn.decomposition import FastICA, PCA
+        from sklearn.decomposition import PCA, FastICA
 
         # PCA first
         pca = PCA(n_components=n_components, random_state=42)

@@ -12,8 +12,8 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from app.core.logging import get_logger
 from app.core.auth import AUTH_REQUIRED
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 

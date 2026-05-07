@@ -10,7 +10,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from sqlalchemy import text
 
@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 # Pricing loader — reads config/model_pricing.json once, caches in memory
 # ═══════════════════════════════════════════════════════════════════════
 
-_pricing: Optional[dict] = None
+_pricing: dict | None = None
 
 
 def _load_pricing() -> dict:
@@ -103,8 +103,8 @@ class UsageSummary:
     total_cached_tokens: int = 0
     total_requests: int = 0
     total_errors: int = 0
-    period_start: Optional[str] = None
-    period_end: Optional[str] = None
+    period_start: str | None = None
+    period_end: str | None = None
     by_provider: list[dict[str, Any]] = field(default_factory=list)
     by_model: list[dict[str, Any]] = field(default_factory=list)
 
@@ -130,17 +130,17 @@ class CostTracker:
         input_tokens: int,
         output_tokens: int,
         cached_tokens: int = 0,
-        latency_ms: Optional[int] = None,
-        project_id: Optional[str] = None,
-        discovery_run_id: Optional[str] = None,
-        synthesis_run_id: Optional[str] = None,
-        stage_execution_id: Optional[str] = None,
-        stage_number: Optional[int] = None,
-        stage_name: Optional[str] = None,
-        hypothesis_id: Optional[str] = None,
-        round_number: Optional[int] = None,
+        latency_ms: int | None = None,
+        project_id: str | None = None,
+        discovery_run_id: str | None = None,
+        synthesis_run_id: str | None = None,
+        stage_execution_id: str | None = None,
+        stage_number: int | None = None,
+        stage_name: str | None = None,
+        hypothesis_id: str | None = None,
+        round_number: int | None = None,
         is_retry: bool = False,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> str:
         """Insert a single LLM call into usage_events with computed cost."""
         cost = compute_cost_cents(model_name, input_tokens, output_tokens, cached_tokens)
@@ -203,13 +203,13 @@ class CostTracker:
         provider: str,
         model_name: str,
         token_count: int,
-        latency_ms: Optional[int] = None,
-        project_id: Optional[str] = None,
-        discovery_run_id: Optional[str] = None,
-        stage_number: Optional[int] = None,
-        stage_name: Optional[str] = None,
-        hypothesis_id: Optional[str] = None,
-        error_message: Optional[str] = None,
+        latency_ms: int | None = None,
+        project_id: str | None = None,
+        discovery_run_id: str | None = None,
+        stage_number: int | None = None,
+        stage_name: str | None = None,
+        hypothesis_id: str | None = None,
+        error_message: str | None = None,
     ) -> str:
         """Record an embedding API call (input_tokens = token_count, output = 0)."""
         cost = compute_cost_cents(model_name, token_count, 0)
@@ -264,13 +264,13 @@ class CostTracker:
         self,
         provider: str,
         source_name: str,
-        latency_ms: Optional[int] = None,
-        project_id: Optional[str] = None,
-        discovery_run_id: Optional[str] = None,
-        stage_number: Optional[int] = None,
-        stage_name: Optional[str] = None,
-        hypothesis_id: Optional[str] = None,
-        error_message: Optional[str] = None,
+        latency_ms: int | None = None,
+        project_id: str | None = None,
+        discovery_run_id: str | None = None,
+        stage_number: int | None = None,
+        stage_name: str | None = None,
+        hypothesis_id: str | None = None,
+        error_message: str | None = None,
     ) -> str:
         """Record a data source / search API call (e.g. PubMed, ClinicalTrials).
 
@@ -324,9 +324,9 @@ class CostTracker:
 
     async def get_summary(
         self,
-        project_id: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        project_id: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> UsageSummary:
         """Monthly (or custom range) usage summary with provider/model breakdowns."""
         if start_date is None:
@@ -434,7 +434,7 @@ class CostTracker:
         self,
         start_date: date,
         end_date: date,
-        project_id: Optional[str] = None,
+        project_id: str | None = None,
         group_by: str = "provider",
     ) -> list[dict[str, Any]]:
         """Daily cost breakdown grouped by provider or model."""
@@ -494,7 +494,7 @@ class CostTracker:
     async def get_model_breakdown(
         self,
         period: str = "30d",
-        project_id: Optional[str] = None,
+        project_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Cost breakdown by model over a time period (e.g. '7d', '30d', '90d')."""
         days = int(period.rstrip("d")) if period.endswith("d") else 30
@@ -596,7 +596,7 @@ class CostTracker:
 
     async def check_budget(
         self,
-        project_id: Optional[str] = None,
+        project_id: str | None = None,
     ) -> BudgetStatus:
         """Check whether the project (or global) budget allows further spending."""
         async with self._session_factory() as session:
@@ -755,7 +755,7 @@ class CostTracker:
 # Module-level singleton
 # ═══════════════════════════════════════════════════════════════════════
 
-_cost_tracker: Optional[CostTracker] = None
+_cost_tracker: CostTracker | None = None
 
 
 def get_cost_tracker() -> CostTracker:

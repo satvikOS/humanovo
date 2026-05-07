@@ -6,18 +6,17 @@ regulatory documents, and budget tracking.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.api.v1.endpoints._bulk import attach_bulk_archive, attach_bulk_delete
 from app.core.auth import AUTH_REQUIRED
-from app.models.platform_entities import ClinicalTrial, TrialSubject, TrialDocument
-from app.api.v1.endpoints._bulk import attach_bulk_delete, attach_bulk_archive
+from app.core.database import get_db
+from app.models.platform_entities import ClinicalTrial, TrialDocument, TrialSubject
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -32,23 +31,23 @@ class TrialCreate(BaseModel):
     pi: str = ""
     sponsor: str = ""
     target_enrollment: int = 0
-    start_date: Optional[str] = None
-    estimated_end: Optional[str] = None
+    start_date: str | None = None
+    estimated_end: str | None = None
 
 
 class TrialUpdate(BaseModel):
-    title: Optional[str] = None
-    status: Optional[str] = None
-    description: Optional[str] = None
-    target_enrollment: Optional[int] = None
+    title: str | None = None
+    status: str | None = None
+    description: str | None = None
+    target_enrollment: int | None = None
 
 
 class SubjectCreate(BaseModel):
     trial_id: str
     subject_number: str
     display_name: str = ""
-    age: Optional[int] = None
-    sex: Optional[str] = None
+    age: int | None = None
+    sex: str | None = None
     arm: str = ""
 
 
@@ -164,7 +163,7 @@ async def enroll_subject(trial_id: str, data: SubjectCreate, db: AsyncSession = 
         sex=data.sex,
         arm=data.arm,
         status="active",
-        enrolled_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        enrolled_date=datetime.now(UTC).strftime("%Y-%m-%d"),
     )
     db.add(subject)
     await db.flush()
@@ -214,7 +213,7 @@ async def update_subject(
 @router.get("/{trial_id}/visits")
 async def list_visits(
     trial_id: str,
-    subject_id: Optional[str] = None,
+    subject_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     return {"items": [], "total": 0}

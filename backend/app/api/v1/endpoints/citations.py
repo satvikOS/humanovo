@@ -25,21 +25,21 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
-from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
-from app.core.ownership import assert_owns_project
-from app.models.citation import Citation, CitationFolder, CitationHighlight
-from app.models.user import User
 from app.citations_io import (
     parse_bibtex,
-    parse_endnote,
     parse_csl_json,
+    parse_endnote,
     parse_ris,
     serialize_bibtex,
     serialize_csl_json,
     serialize_ris,
 )
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.database import get_db
+from app.core.logging import get_logger
+from app.core.ownership import assert_owns_project
+from app.models.citation import Citation, CitationFolder, CitationHighlight
+from app.models.user import User
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["citations"], dependencies=AUTH_REQUIRED)

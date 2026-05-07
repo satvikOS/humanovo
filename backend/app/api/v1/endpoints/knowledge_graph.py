@@ -6,16 +6,15 @@ pathways, diseases, drugs) and edges (relationships).
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.auth import AUTH_REQUIRED
-from app.models.platform_entities import KnowledgeGraphNode, KnowledgeGraphEdge
+from app.core.database import get_db
+from app.models.platform_entities import KnowledgeGraphEdge, KnowledgeGraphNode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -52,8 +51,8 @@ async def _get_node_or_404(db: AsyncSession, node_id: str) -> KnowledgeGraphNode
 
 @router.get("/nodes")
 async def list_nodes(
-    type: Optional[str] = None,
-    search: Optional[str] = None,
+    type: str | None = None,
+    search: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     query = select(KnowledgeGraphNode)

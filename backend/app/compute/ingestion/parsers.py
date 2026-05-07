@@ -19,7 +19,6 @@ from typing import Any
 
 import numpy as np
 
-
 # ── Extension → format mapping ───────────────────────────────────
 
 _EXT_MAP: dict[str, str] = {

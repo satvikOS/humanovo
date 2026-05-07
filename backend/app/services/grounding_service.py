@@ -9,7 +9,7 @@ Layer 3: Cross-source corroboration (cluster claims, count unique DOIs)
 import asyncio
 import re
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -81,7 +81,7 @@ class GroundingBatchResult(BaseModel):
     claims: list[str]
     results: list[GroundingResult]
     grounding_ratio: float = 0.0
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 # ---------------------------------------------------------------------------

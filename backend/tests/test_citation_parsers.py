@@ -6,8 +6,6 @@ catch parser regressions without the Postgres setup cost.
 """
 from __future__ import annotations
 
-import pytest
-
 from app.citations_io import (
     parse_bibtex,
     parse_csl_json,
@@ -17,7 +15,6 @@ from app.citations_io import (
     serialize_csl_json,
     serialize_ris,
 )
-
 
 # ─── BibTeX ──────────────────────────────────────────────────────
 

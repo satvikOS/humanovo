@@ -14,7 +14,7 @@ import time
 import urllib.parse
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 
@@ -37,7 +37,7 @@ class DataSourceResult:
     total_results: int = 0
     results: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    error: str | None = None
     elapsed_seconds: float = 0.0
     cached: bool = False
 
@@ -95,7 +95,7 @@ class DataSourceBase(ABC):
 
     def __init__(self) -> None:
         self.rate_limiter = RateLimiter(calls_per_second=self._rate_limit())
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     def _rate_limit(self) -> float:
         """Override to set source-specific rate limit."""
@@ -2927,7 +2927,7 @@ PHASE_4_SOURCES = [k for k, v in ALL_SOURCE_CLASSES.items() if v.phase == 4]
 class DataSourceOrchestrator:
     """Coordinates queries across multiple biomedical data sources."""
 
-    def __init__(self, source_names: Optional[list[str]] = None) -> None:
+    def __init__(self, source_names: list[str] | None = None) -> None:
         """Initialize with optional list of source names. Defaults to Phase 1."""
         if source_names is None:
             source_names = PHASE_1_SOURCES

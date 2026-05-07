@@ -18,10 +18,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import ADMIN_REQUIRED
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.auth import ADMIN_REQUIRED
-from app.models.platform_entities import KnowledgeGraphNode, KnowledgeGraphEdge
+from app.models.platform_entities import KnowledgeGraphEdge, KnowledgeGraphNode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=ADMIN_REQUIRED)

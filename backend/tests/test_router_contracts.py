@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 # Frontend placeholder names (${id}) don't match backend param names
 # ({project_id}), so we normalize both sides to {X} before comparison.
 _PLACEHOLDER = re.compile(r"\{[^}]+\}")

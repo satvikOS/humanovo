@@ -19,11 +19,16 @@ import math
 from collections.abc import Callable
 
 import numpy as np
-from scipy import stats as sp_stats, optimize, signal
+from scipy import optimize, signal
+from scipy import stats as sp_stats
 
 from app.compute.types import (
-    ComputeDomain, ComputeRequest, ComputeResult, ComputeStatus,
-    GeneratedFigure, StatisticalTest,
+    ComputeDomain,
+    ComputeRequest,
+    ComputeResult,
+    ComputeStatus,
+    GeneratedFigure,
+    StatisticalTest,
 )
 
 
@@ -149,7 +154,7 @@ class ClinicalProcessor:
         VinvX = np.linalg.solve(V, X)
         XtVinvX = X.T @ VinvX
         beta = np.linalg.solve(XtVinvX, VinvX.T @ y)
-        
+
         # Standard errors
         try:
             var_beta = np.linalg.inv(XtVinvX)
@@ -240,7 +245,7 @@ class ClinicalProcessor:
             elif total <= 18: severity = "Moderate depression"
             elif total <= 22: severity = "Severe depression"
             else: severity = "Very severe depression"
-            
+
             result = {
                 "scale": "HAM-D-17", "total": total, "severity": severity,
                 "subscales": {"core": core, "sleep": sleep, "anxiety": anxiety, "somatic": somatic},
@@ -274,7 +279,7 @@ class ClinicalProcessor:
             # Andreasen et al. (2005) 8-item remission: P1,P2,P3,N1,N4,N6,G5,G9 all <= 3
             panss8_items = [items[i] for i in [0, 1, 2, 7, 10, 12, 18, 22]]
             remission = all(item <= 3 for item in panss8_items)
-            
+
             result = {
                 "scale": "PANSS", "total": total, "positive": positive, "negative": negative, "general": general,
                 "marder_factors": marder, "remission_andreasen": remission,
@@ -288,7 +293,7 @@ class ClinicalProcessor:
             elif total <= 14: severity = "Moderate"
             elif total <= 19: severity = "Moderately severe"
             else: severity = "Severe"
-            
+
             result = {
                 "scale": "PHQ-9", "total": total, "severity": severity,
                 "provisional_mdd": total >= 10,
@@ -645,10 +650,19 @@ class ClinicalProcessor:
         cv_folds = params.get("cv_folds", 10)
         feature_names = params.get("feature_names", [f"feature_{i}" for i in range(X.shape[1])])
 
+        from sklearn.metrics import (
+            accuracy_score,
+            balanced_accuracy_score,
+            cohen_kappa_score,
+            confusion_matrix,
+            f1_score,
+            matthews_corrcoef,
+            precision_score,
+            recall_score,
+            roc_auc_score,
+            roc_curve,
+        )
         from sklearn.model_selection import StratifiedKFold, cross_val_predict
-        from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score,
-                                      roc_auc_score, roc_curve, confusion_matrix, matthews_corrcoef,
-                                      cohen_kappa_score, balanced_accuracy_score)
         from sklearn.preprocessing import StandardScaler
 
         scaler = StandardScaler()
@@ -787,7 +801,7 @@ class ClinicalProcessor:
             np.fill_diagonal(partial_corr, 1.0)
         except np.linalg.LinAlgError:
             pass
-        
+
         r2_sum = np.sum(R**2) - p
         pr2_sum = np.sum(partial_corr**2) - p
         kmo_overall = r2_sum / (r2_sum + pr2_sum) if (r2_sum + pr2_sum) > 0 else 0

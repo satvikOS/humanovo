@@ -35,8 +35,9 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -44,10 +45,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.models.discovery_session import DiscoverySession
 from app.models.user import User
 
@@ -330,7 +331,7 @@ async def stream_chat(
         "id": str(uuid.uuid4()),
         "role": "user",
         "content": req.user_message,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "cards": [],
     }
     messages = list(session.messages or [])
@@ -431,7 +432,7 @@ async def stream_chat(
                         "payload": {"session_id": str(session.id), "ok": result.get("ok")},
                     }
                 ],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "finish_reason": "paper_generated" if result.get("ok") else "paper_failed",
                 "tokens": {"prompt": 0, "completion": 0},
             }
@@ -494,7 +495,7 @@ async def stream_chat(
             "role": "assistant",
             "content": full_text,
             "cards": cards,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "finish_reason": finish_reason,
             "tokens": tokens,
         }

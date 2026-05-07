@@ -8,9 +8,10 @@ Each method returns a GeneratedFigure ready for API serialisation.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402

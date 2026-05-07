@@ -14,7 +14,7 @@ Key capabilities:
 """
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import desc, func, select
 
@@ -349,7 +349,7 @@ class PipelineOptimizerService:
 
 # ============== Singleton ==============
 
-_optimizer: Optional[PipelineOptimizerService] = None
+_optimizer: PipelineOptimizerService | None = None
 
 
 def get_pipeline_optimizer() -> PipelineOptimizerService:

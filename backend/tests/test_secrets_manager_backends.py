@@ -21,7 +21,6 @@ from app.core.credential_backends.secrets_manager import (
     SecretsManagerCredentialBackend,
 )
 
-
 REGION = "us-east-1"
 
 

@@ -13,7 +13,6 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from app.models.base import BaseModel
 
-
 # ---------------------------------------------------------------------------
 # Clinical Trials
 # ---------------------------------------------------------------------------

@@ -4,8 +4,7 @@ Authentication Module
 JWT-based authentication for humanovo.
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
@@ -53,7 +52,7 @@ class UserCreate(BaseModel):
     """User registration schema."""
     email: str
     password: str
-    full_name: Optional[str] = None
+    full_name: str | None = None
 
 
 class UserLogin(BaseModel):
@@ -66,7 +65,7 @@ class UserResponse(BaseModel):
     """User response schema."""
     id: UUID
     email: str
-    full_name: Optional[str]
+    full_name: str | None
     role: str
     is_active: bool
     is_verified: bool
@@ -85,12 +84,12 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(user: User, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(user: User, expires_delta: timedelta | None = None) -> str:
     """Create a JWT access token."""
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode = {
         "sub": str(user.id),
@@ -107,7 +106,7 @@ def create_access_token(user: User, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
-def decode_token(token: str) -> Optional[TokenData]:
+def decode_token(token: str) -> TokenData | None:
     """Decode and validate a JWT token."""
     try:
         payload = jwt.decode(
@@ -134,9 +133,9 @@ def decode_token(token: str) -> Optional[TokenData]:
 
 
 async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
-) -> Optional[User]:
+) -> User | None:
     """Get current authenticated user from JWT token."""
     if not credentials:
         return None
@@ -155,7 +154,7 @@ async def get_current_user(
 
 
 async def get_current_active_user(
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user),
 ) -> User:
     """Get current active user or raise exception."""
     if not current_user:
@@ -218,7 +217,7 @@ from fastapi import WebSocket  # noqa: E402  (kept here for cohesion)
 async def authenticate_websocket(
     websocket: WebSocket,
     db: AsyncSession,
-) -> Optional[User]:
+) -> User | None:
     """Validate a WS connection's `?token=` query param. Closes the
     socket and returns None on any failure (missing/invalid token,
     inactive/missing user). Caller pattern:
@@ -250,7 +249,7 @@ async def authenticate_user(
     email: str,
     password: str,
     db: AsyncSession,
-) -> Optional[User]:
+) -> User | None:
     """Authenticate a user by email and password."""
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()

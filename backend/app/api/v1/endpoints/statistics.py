@@ -7,7 +7,6 @@ survival analysis, and sample size calculations for research data.
 
 import logging
 import math
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,8 +14,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.auth import AUTH_REQUIRED
+from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -62,7 +61,7 @@ class RegressionRequest(BaseModel):
 class SurvivalRequest(BaseModel):
     times: list[float]
     events: list[int]  # 1=event, 0=censored
-    groups: Optional[list[int]] = None
+    groups: list[int] | None = None
     group_labels: list[str] = []
 
 

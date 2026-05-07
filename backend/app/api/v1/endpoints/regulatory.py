@@ -5,8 +5,7 @@ IRB submissions, data use agreements, consent forms, compliance checklists.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,15 +13,15 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.api.v1.endpoints._bulk import attach_bulk_delete
 from app.core.auth import AUTH_REQUIRED
+from app.core.database import get_db
 from app.models.platform_entities import (
     ComplianceChecklist,
     ConsentForm,
     DataUseAgreement,
     IRBSubmission,
 )
-from app.api.v1.endpoints._bulk import attach_bulk_delete
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -41,8 +40,8 @@ class AgreementCreate(BaseModel):
     agreement_type: str = "DUA"
     party: str = ""
     data_types: list[str] = []
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
 
 
 class ConsentFormCreate(BaseModel):
@@ -69,7 +68,7 @@ async def list_irb(db: AsyncSession = Depends(get_db)):
 
 @router.post("/irb-submissions")
 async def create_irb(data: IRBCreate, db: AsyncSession = Depends(get_db)):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     submission = IRBSubmission(
         protocol_title=data.protocol_title,
         irb_number=f"IRB-{now.year}-{str(uuid4())[:4]}",
@@ -160,7 +159,7 @@ async def list_consent_forms(db: AsyncSession = Depends(get_db)):
 
 @router.post("/consent-forms")
 async def create_consent_form(data: ConsentFormCreate, db: AsyncSession = Depends(get_db)):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     form = ConsentForm(
         title=data.title,
         version=data.version,
@@ -212,7 +211,7 @@ async def update_checklist(
     checklist.items = data.items
     completed = sum(1 for i in data.items if i.get("completed"))
     checklist.completion_pct = round(completed / len(data.items) * 100) if data.items else 0
-    checklist.last_reviewed = datetime.now(timezone.utc).isoformat()
+    checklist.last_reviewed = datetime.now(UTC).isoformat()
     await db.flush()
     return checklist.to_dict()
 

@@ -9,16 +9,16 @@ output estimation.
 
 from __future__ import annotations
 
-import io
 import base64
+import io
 import logging
 import math
 from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-from scipy import signal as sp_signal
 from scipy import integrate, interpolate, optimize
+from scipy import signal as sp_signal
 
 from app.compute.types import (
     ComputeDomain,

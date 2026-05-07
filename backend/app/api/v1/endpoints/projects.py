@@ -5,7 +5,7 @@ Manage research projects in humanovo.
 All data persisted to PostgreSQL via Project model.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,9 +13,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.ownership import assert_owns_project, filter_by_owned_project
 from app.models.user import User
 
@@ -64,8 +64,8 @@ class ProjectResponse(BaseModel):
     evidence_count: int = 0
     simulation_count: int = 0
     hypotheses: list[dict] | None = None
-    created_at: datetime = datetime.now(timezone.utc)
-    updated_at: datetime = datetime.now(timezone.utc)
+    created_at: datetime = datetime.now(UTC)
+    updated_at: datetime = datetime.now(UTC)
 
     model_config = {"from_attributes": True}
 

@@ -8,14 +8,13 @@ backend surface today, so we provide one.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from app.core.auth import AUTH_REQUIRED
 
+from app.core.auth import AUTH_REQUIRED
 
 router = APIRouter(dependencies=AUTH_REQUIRED)
 # ── Schemas ──────────────────────────────────────────────────────
@@ -33,24 +32,24 @@ class ExperimentCreate(BaseModel):
     results: str = ""
     conclusion: str = ""
     tags: list[str] = Field(default_factory=list)
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    project_id: Optional[UUID] = None
+    start_date: str | None = None
+    end_date: str | None = None
+    project_id: UUID | None = None
 
 
 class ExperimentUpdate(BaseModel):
-    title: Optional[str] = None
-    hypothesis: Optional[str] = None
-    status: Optional[str] = None
-    protocol: Optional[list[str]] = None
-    materials: Optional[list[str]] = None
-    observations: Optional[str] = None
-    results: Optional[str] = None
-    conclusion: Optional[str] = None
-    tags: Optional[list[str]] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    project_id: Optional[UUID] = None
+    title: str | None = None
+    hypothesis: str | None = None
+    status: str | None = None
+    protocol: list[str] | None = None
+    materials: list[str] | None = None
+    observations: str | None = None
+    results: str | None = None
+    conclusion: str | None = None
+    tags: list[str] | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    project_id: UUID | None = None
 
 
 class Experiment(ExperimentCreate):
@@ -72,7 +71,7 @@ class ExperimentListResponse(BaseModel):
 _experiments: dict[UUID, Experiment] = {}
 
 
-def _validate_status(status: Optional[str]) -> None:
+def _validate_status(status: str | None) -> None:
     if status is not None and status not in EXPERIMENT_STATUSES:
         raise HTTPException(
             status_code=400,
@@ -86,8 +85,8 @@ def _validate_status(status: Optional[str]) -> None:
 async def list_experiments(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
-    status: Optional[str] = None,
-    project_id: Optional[UUID] = None,
+    status: str | None = None,
+    project_id: UUID | None = None,
 ) -> ExperimentListResponse:
     _validate_status(status)
     items = list(_experiments.values())
@@ -109,7 +108,7 @@ async def list_experiments(
 @router.post("", response_model=Experiment, status_code=201)
 async def create_experiment(body: ExperimentCreate) -> Experiment:
     _validate_status(body.status)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     exp = Experiment(
         id=uuid4(),
         created_at=now,
@@ -135,7 +134,7 @@ async def update_experiment(experiment_id: UUID, body: ExperimentUpdate) -> Expe
         raise HTTPException(status_code=404, detail="Experiment not found")
     update = body.model_dump(exclude_unset=True)
     _validate_status(update.get("status"))
-    updated = exp.model_copy(update={**update, "updated_at": datetime.now(timezone.utc)})
+    updated = exp.model_copy(update={**update, "updated_at": datetime.now(UTC)})
     _experiments[experiment_id] = updated
     return updated
 

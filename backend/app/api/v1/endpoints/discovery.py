@@ -4,14 +4,13 @@ Discovery API Endpoints
 API endpoints for the disease discovery service.
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from app.core.auth import AUTH_REQUIRED
 from app.core.errors import ErrorCode, safe_error
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
 from app.services.disease_discovery_service import (
     DiscoveryResult,
     DiscoveryType,
@@ -34,7 +33,7 @@ class DiscoveryRequest(BaseModel):
     # The client does not pick a model; the orchestrator routes to the
     # right model per stage. Keeping the field as a no-op for backwards
     # compatibility with older clients but it is ignored.
-    llm_provider: Optional[str] = None
+    llm_provider: str | None = None
 
 
 class DiscoveryResponse(BaseModel):
@@ -63,7 +62,7 @@ class ComparisonRequest(BaseModel):
 
 
 # Service instance (lazy initialization)
-_service: Optional[DiseaseDiscoveryService] = None
+_service: DiseaseDiscoveryService | None = None
 
 
 async def get_service(provider: str = None) -> DiseaseDiscoveryService:

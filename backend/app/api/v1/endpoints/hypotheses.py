@@ -14,9 +14,9 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.ownership import (
     assert_owns_project,
     fetch_owned_or_404,
@@ -24,8 +24,14 @@ from app.core.ownership import (
 )
 from app.models.hypothesis import (
     EvidenceReference as EvidenceReferenceModel,
+)
+from app.models.hypothesis import (
     EvidenceType as EvidenceTypeModel,
+)
+from app.models.hypothesis import (
     Hypothesis,
+)
+from app.models.hypothesis import (
     HypothesisStatus as HypothesisStatusModel,
 )
 from app.models.user import User

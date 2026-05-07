@@ -6,7 +6,7 @@ Enforces project-level and global budget limits.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
@@ -99,7 +99,7 @@ class CostTracker:
             latency_ms=latency_ms,
             success=success,
             error_type=error_type,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
         )
         # Store in database
         if self._db:

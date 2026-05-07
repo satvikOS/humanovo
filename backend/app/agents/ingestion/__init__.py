@@ -14,7 +14,6 @@ from app.agents.ingestion.base import (
     IngestionStatus,
     SourceType,
 )
-from app.ingestion.extractors import ExtractedEntity, ExtractedRelation
 from app.agents.ingestion.clinical_trials_agent import ClinicalTrialsIngestionAgent
 from app.agents.ingestion.custom_document_agent import CustomDocumentIngestionAgent
 from app.agents.ingestion.orchestrator import IngestionOrchestrator
@@ -47,6 +46,7 @@ from app.agents.ingestion.state_manager import (
     initialize_state_manager,
     shutdown_state_manager,
 )
+from app.ingestion.extractors import ExtractedEntity, ExtractedRelation
 
 __all__ = [
     # Base classes

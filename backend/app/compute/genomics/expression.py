@@ -13,17 +13,17 @@ Provides advanced transcriptomic analysis operations:
 
 from __future__ import annotations
 
-import io
 import base64
+import io
 from collections.abc import Callable
 
-import numpy as np
-from scipy import stats as sp_stats
-from scipy import optimize as sp_optimize
-from scipy.spatial.distance import pdist, squareform
-from scipy.cluster.hierarchy import linkage, fcluster, leaves_list, dendrogram
-
 import matplotlib
+import numpy as np
+from scipy import optimize as sp_optimize
+from scipy import stats as sp_stats
+from scipy.cluster.hierarchy import dendrogram, fcluster, leaves_list, linkage
+from scipy.spatial.distance import pdist, squareform
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -36,7 +36,6 @@ from app.compute.types import (
     GeneratedFigure,
     StatisticalTest,
 )
-
 
 # ── Utilities ───────────────────────────────────────────────────────
 
@@ -1736,7 +1735,7 @@ class ExpressionProcessor:
         elif isinstance(fold_changes, dict):
             fc_dict = fold_changes
         else:
-            fc_dict = {g: 0.0 for g in gene_list}
+            fc_dict = dict.fromkeys(gene_list, 0.0)
 
         gene_set = set(gene_list)
 

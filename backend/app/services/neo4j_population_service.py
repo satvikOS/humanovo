@@ -21,10 +21,10 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from neo4j import AsyncGraphDatabase, AsyncDriver
+from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -172,7 +172,7 @@ def _generate_entity_id(entity_type: str, name: str) -> str:
 
 def _utcnow_iso() -> str:
     """Return current UTC time as ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ class Neo4jPopulationService:
     """
 
     def __init__(self) -> None:
-        self._driver: Optional[AsyncDriver] = None
+        self._driver: AsyncDriver | None = None
         self._initialized: bool = False
         self._entity_resolver: Any = None  # lazy-loaded EntityResolver
 
@@ -1519,7 +1519,7 @@ class Neo4jPopulationService:
 # Module-level singleton and convenience functions
 # ---------------------------------------------------------------------------
 
-_service: Optional[Neo4jPopulationService] = None
+_service: Neo4jPopulationService | None = None
 
 
 async def init_neo4j_population_service() -> Neo4jPopulationService:

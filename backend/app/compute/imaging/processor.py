@@ -346,8 +346,8 @@ class ImagingProcessor:
             }
 
         elif method == "watershed":
-            from skimage.segmentation import watershed
             from skimage.feature import peak_local_max
+            from skimage.segmentation import watershed
             distance = ndimage.distance_transform_edt(image > image.mean())
             coords = peak_local_max(distance, min_distance=params.get("min_distance", 10))
             mask_markers = np.zeros(distance.shape, dtype=bool)
@@ -526,7 +526,8 @@ class ImagingProcessor:
                 error="Empty ROI — mask selects no voxels",
             )
 
-        from scipy.stats import skew, kurtosis, entropy as sp_entropy
+        from scipy.stats import entropy as sp_entropy
+        from scipy.stats import kurtosis, skew
 
         # First-order statistics
         first_order = {

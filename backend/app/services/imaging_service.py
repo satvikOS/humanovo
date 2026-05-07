@@ -6,8 +6,8 @@ For neuroimaging data (MRI, EEG).
 """
 
 import os
-from datetime import datetime, timezone
-from uuid import uuid4, uuid5, NAMESPACE_DNS
+from datetime import UTC, datetime
+from uuid import NAMESPACE_DNS, uuid4, uuid5
 
 from pydantic import BaseModel
 
@@ -95,8 +95,8 @@ class ImagingService:
             patient_id_hash=patient_hash,
             study_date=metadata.get("study_date"),
             series_description=metadata.get("series_description"),
-            created_at=datetime.now(timezone.utc).isoformat(),
-            updated_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
         )
 
         # Store in database

@@ -8,13 +8,13 @@ Comprehensive REST API with full visualization data for:
 - Pipeline optimization recommendations and history
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.core.logging import get_logger
 from app.core.auth import AUTH_REQUIRED
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -26,27 +26,27 @@ class FeedbackRequest(BaseModel):
     hypothesis_id: str
     feedback_type: str = "user_rating"
     overall_quality: float = Field(..., ge=0.0, le=1.0)
-    discovery_run_id: Optional[str] = None
-    reviewer: Optional[str] = None
-    biological_plausibility: Optional[float] = Field(None, ge=0.0, le=1.0)
-    evidence_strength: Optional[float] = Field(None, ge=0.0, le=1.0)
-    novelty: Optional[float] = Field(None, ge=0.0, le=1.0)
-    feasibility: Optional[float] = Field(None, ge=0.0, le=1.0)
-    clinical_relevance: Optional[float] = Field(None, ge=0.0, le=1.0)
-    mechanism_clarity: Optional[float] = Field(None, ge=0.0, le=1.0)
-    reproducibility: Optional[float] = Field(None, ge=0.0, le=1.0)
-    comments: Optional[str] = None
+    discovery_run_id: str | None = None
+    reviewer: str | None = None
+    biological_plausibility: float | None = Field(None, ge=0.0, le=1.0)
+    evidence_strength: float | None = Field(None, ge=0.0, le=1.0)
+    novelty: float | None = Field(None, ge=0.0, le=1.0)
+    feasibility: float | None = Field(None, ge=0.0, le=1.0)
+    clinical_relevance: float | None = Field(None, ge=0.0, le=1.0)
+    mechanism_clarity: float | None = Field(None, ge=0.0, le=1.0)
+    reproducibility: float | None = Field(None, ge=0.0, le=1.0)
+    comments: str | None = None
     strengths: list[str] = []
     weaknesses: list[str] = []
     suggested_improvements: list[str] = []
-    best_stage: Optional[int] = None
-    worst_stage: Optional[int] = None
+    best_stage: int | None = None
+    worst_stage: int | None = None
     stage_contributions: dict[str, float] = {}
-    matches_known_biology: Optional[bool] = None
-    novel_insight: Optional[bool] = None
-    actionable: Optional[bool] = None
-    disease: Optional[str] = None
-    round_number: Optional[int] = None
+    matches_known_biology: bool | None = None
+    novel_insight: bool | None = None
+    actionable: bool | None = None
+    disease: str | None = None
+    round_number: int | None = None
 
 
 class BenchmarkTestCaseRequest(BaseModel):
@@ -62,10 +62,10 @@ class BenchmarkTestCaseRequest(BaseModel):
     expected_key_claims: list[str] = []
     focus_entities: list[str] = []
     external_factors: list[dict] = []
-    pathway_context: Optional[str] = None
-    description: Optional[str] = None
-    source_publication: Optional[str] = None
-    source_pmid: Optional[str] = None
+    pathway_context: str | None = None
+    description: str | None = None
+    source_publication: str | None = None
+    source_pmid: str | None = None
     difficulty: str = "medium"
     tags: list[str] = []
     mechanism_match_weight: float = 0.3
@@ -76,17 +76,17 @@ class BenchmarkTestCaseRequest(BaseModel):
 
 
 class BenchmarkRunRequest(BaseModel):
-    test_case_ids: Optional[list[str]] = None
-    disease_filter: Optional[str] = None
-    name: Optional[str] = None
-    description: Optional[str] = None
+    test_case_ids: list[str] | None = None
+    disease_filter: str | None = None
+    name: str | None = None
+    description: str | None = None
 
 
 class OptimizationApplyRequest(BaseModel):
     action: str
-    target_stage: Optional[int] = None
-    target_model: Optional[str] = None
-    target_disease: Optional[str] = None
+    target_stage: int | None = None
+    target_model: str | None = None
+    target_disease: str | None = None
     parameter_name: str
     old_value: Any = None
     new_value: Any = None
@@ -107,8 +107,8 @@ async def get_learning_stats():
 
 @router.get("/learning/model-profiles")
 async def get_model_profiles(
-    stage_number: Optional[int] = None,
-    disease: Optional[str] = None,
+    stage_number: int | None = None,
+    disease: str | None = None,
 ):
     """Get model performance profiles for all stages/models."""
     from app.services.learning_memory_service import get_learning_memory
@@ -238,7 +238,7 @@ async def get_stage_cost_heatmap():
 @router.get("/costs/recent")
 async def get_recent_api_calls(
     limit: int = Query(50, ge=1, le=500),
-    run_id: Optional[str] = None,
+    run_id: str | None = None,
 ):
     """Get recent API calls for real-time monitoring.
 
@@ -252,7 +252,7 @@ async def get_recent_api_calls(
 @router.get("/costs/pricing")
 async def get_current_pricing():
     """Get current model pricing configuration."""
-    from app.services.cost_tracking_service import CURRENT_PRICING, BIOMEDICAL_API_PRICING
+    from app.services.cost_tracking_service import BIOMEDICAL_API_PRICING, CURRENT_PRICING
     return {
         "llm_pricing": {
             f"{provider}/{model}": {
@@ -293,7 +293,7 @@ async def create_benchmark_test_case(request: BenchmarkTestCaseRequest):
 
 @router.get("/benchmarks/test-cases")
 async def list_benchmark_test_cases(
-    disease: Optional[str] = None,
+    disease: str | None = None,
     status: str = "active",
     limit: int = Query(100, ge=1, le=500),
 ):

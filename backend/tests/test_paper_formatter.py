@@ -2,7 +2,6 @@
 Tests for the strict paper formatter.
 """
 
-import pytest
 
 from app.services.paper_formatter_service import (
     JournalStyle,

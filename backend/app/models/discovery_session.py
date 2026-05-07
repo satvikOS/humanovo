@@ -40,7 +40,8 @@ never query by individual turn. If that assumption breaks, the
 migration to a child table is straightforward.
 """
 from sqlalchemy import Boolean, Column, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from app.models.base import BaseModel
 

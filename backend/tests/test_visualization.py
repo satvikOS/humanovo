@@ -6,7 +6,6 @@ installed. When matplotlib IS installed, the test verifies that we
 emit non-empty PNG + SVG for a canonical figure request.
 """
 
-import pytest
 
 from app.visualization.figures import (
     FigureSpec,

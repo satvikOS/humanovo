@@ -6,10 +6,7 @@ depends on.
 """
 from __future__ import annotations
 
-import pytest
-
 from app.compute.schemas import OPERATION_SCHEMAS, P, ParamType, _sel
-
 
 # ── P() builder ────────────────────────────────────────────────────────
 

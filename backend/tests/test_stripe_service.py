@@ -15,13 +15,12 @@ import pytest
 from app.core.config import settings
 from app.models.user import UserTier
 from app.services.stripe_service import (
-    StripeNotConfiguredError,
     _PAID_STATUSES,
+    StripeNotConfiguredError,
     _price_id_to_tier,
     _resolve_tier_for_subscription,
     _tier_to_price_id,
 )
-
 
 # ─── Configuration paths ────────────────────────────────────────────
 

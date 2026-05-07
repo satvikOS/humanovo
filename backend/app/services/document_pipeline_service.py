@@ -44,9 +44,9 @@ import base64
 import io
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from app.core.config import settings
@@ -204,14 +204,20 @@ class PdfRenderer:
     def render(self, bundle: DocumentBundle) -> bytes:
         try:
             from reportlab.lib import colors
+            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
             from reportlab.lib.pagesizes import letter
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
             from reportlab.lib.units import inch
             from reportlab.platypus import (
-                SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-                PageBreak, HRFlowable, Preformatted,
+                HRFlowable,
+                PageBreak,
+                Paragraph,
+                Preformatted,
+                SimpleDocTemplate,
+                Spacer,
+                Table,
+                TableStyle,
             )
-            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
         except ImportError:
             raise RuntimeError("reportlab required for PDF generation")
 
@@ -838,7 +844,7 @@ class DocumentPipelineService:
             "disease": disease,
             "discovery_type": discovery_type,
             "total_hypotheses": len(hypotheses),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
         }
 
     # ---- Stage 1: Bundle Assembly ----
@@ -1260,7 +1266,7 @@ class DocumentPipelineService:
 # Singleton
 # ============================================================================
 
-_pipeline_service: Optional[DocumentPipelineService] = None
+_pipeline_service: DocumentPipelineService | None = None
 
 
 def get_document_pipeline_service() -> DocumentPipelineService:

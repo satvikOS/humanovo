@@ -27,9 +27,9 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from app.core.auth import AUTH_REQUIRED
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED
 from app.services.kg_first_service import (
     UploadPermission,
     get_kg_first_service,

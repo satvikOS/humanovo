@@ -40,9 +40,9 @@ module is exercise-tested before the real AWS account exists.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
-from app.agents.prompt_loader import PromptBackend, PromptBackendError, PROMPT_IDS
+from app.agents.prompt_loader import PROMPT_IDS, PromptBackend, PromptBackendError
 from app.core.credential_pool import CredentialBackend, KeySpec
 from app.core.logging import get_logger
 
@@ -184,7 +184,7 @@ class SecretsManagerCredentialBackend(CredentialBackend):
 
         # list_secrets paginates; collect everything under the prefix.
         secrets: list[dict] = []
-        next_token: Optional[str] = None
+        next_token: str | None = None
         while True:
             kwargs = {
                 "Filters": [
@@ -264,7 +264,7 @@ class SecretsManagerCredentialBackend(CredentialBackend):
 # ---------------------------------------------------------------------------
 
 
-def _parse_iso8601(value: Optional[str]) -> Optional[float]:
+def _parse_iso8601(value: str | None) -> float | None:
     """Parse an ISO8601 timestamp tag value to epoch seconds; None on failure."""
     if not value:
         return None
@@ -280,7 +280,7 @@ def _parse_iso8601(value: Optional[str]) -> Optional[float]:
         return None
 
 
-def _parse_int(value: Optional[str], default: int) -> int:
+def _parse_int(value: str | None, default: int) -> int:
     if not value:
         return default
     try:

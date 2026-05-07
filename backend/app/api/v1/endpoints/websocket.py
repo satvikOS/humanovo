@@ -5,7 +5,7 @@ Real-time communication for live updates on agents, simulations, and more.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -104,7 +104,7 @@ class WSMessage(BaseModel):
 
     def __init__(self, **data):
         if "timestamp" not in data:
-            data["timestamp"] = datetime.now(timezone.utc)
+            data["timestamp"] = datetime.now(UTC)
         super().__init__(**data)
 
 

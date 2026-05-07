@@ -4,7 +4,7 @@ Simulation API Endpoints
 Run and manage Monte Carlo simulations.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -13,10 +13,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.ownership import assert_owns_project
 from app.models.user import User
 
@@ -190,7 +190,7 @@ async def create_simulation(
     )
 
     simulation_id = uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     simulation_data = SimulationResponse(
         id=simulation_id,
@@ -262,7 +262,7 @@ async def _run_simulation(simulation_id: UUID, config: SimulationCreate) -> None
         sim.outcomes = outcomes
         sim.iterations_completed = config.iterations
         sim.runtime_seconds = end_time - start_time
-        sim.completed_at = datetime.now(timezone.utc)
+        sim.completed_at = datetime.now(UTC)
         sim.summary = _generate_summary(outcomes)
 
         logger.info(

@@ -18,7 +18,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import Optional
 
 from app.core.logging import get_logger
 
@@ -46,7 +45,7 @@ class KeySpec:
     status: str = "active"                # active | draining | revoked
     rpm_limit: int = 1_000
     tpm_limit: int = 1_000_000
-    expires_at: Optional[float] = None    # epoch seconds; None = never
+    expires_at: float | None = None    # epoch seconds; None = never
 
 
 @dataclass
@@ -57,7 +56,7 @@ class _KeyState:
     rpm_used: int = 0
     rpm_window_start: float = field(default_factory=time.time)
     cooldown_until: float = 0.0
-    last_failure_code: Optional[str] = None
+    last_failure_code: str | None = None
     last_failure_at: float = 0.0
 
 
@@ -95,7 +94,7 @@ class MockCredentialBackend(CredentialBackend):
     legacy single-key call sites keep working.
     """
 
-    def __init__(self, pools: Optional[dict[str, list[KeySpec]]] = None):
+    def __init__(self, pools: dict[str, list[KeySpec]] | None = None):
         self._pools: dict[str, list[KeySpec]] = {k: list(v) for k, v in (pools or {}).items()}
 
     def seed(self, pool_name: str, key_id: str, api_key: str, **kwargs) -> None:
@@ -171,7 +170,7 @@ class CredentialPool:
                     del self._states[known]
             self._last_refresh = now
 
-    def _pick_candidate(self) -> Optional[_KeyState]:
+    def _pick_candidate(self) -> _KeyState | None:
         now = time.time()
         with self._lock:
             # Reset rpm window where it's expired.
@@ -203,7 +202,7 @@ class CredentialPool:
             return None
 
     @asynccontextmanager
-    async def acquire(self, tenant_id: Optional[str] = None) -> AsyncIterator[Credential]:
+    async def acquire(self, tenant_id: str | None = None) -> AsyncIterator[Credential]:
         """Hand out a credential for the duration of an upstream call.
 
         Usage::

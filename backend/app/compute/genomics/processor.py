@@ -607,7 +607,7 @@ class GenomicsProcessor:
     def _upgma(self, dist: np.ndarray, labels: list[str]) -> dict:
         n = len(labels)
         clusters = {i: {"label": labels[i], "height": 0.0} for i in range(n)}
-        sizes = {i: 1 for i in range(n)}
+        sizes = dict.fromkeys(range(n), 1)
         active = set(range(n))
         d = dist.copy()
         next_id = n

@@ -12,11 +12,10 @@ from app.services.audit_service import (
     AuditSeverity,
     get_audit_service,
 )
-
 from app.services.disease_discovery_service import (
-    DiseaseDiscoveryService,
     DiscoveryResult,
     DiscoveryType,
+    DiseaseDiscoveryService,
     EvidenceStrength,
     LLMProvider,
     discover_cures,

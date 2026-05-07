@@ -12,7 +12,7 @@ Combines all scoring components for comprehensive edge confidence:
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .citation_analyzer import CitationAnalyzer, CitationMetrics
@@ -353,7 +353,7 @@ class ConfidenceScorer:
             component_contributions=contributions,
             confidence_level=confidence_level,
             evidence_count=len(evidence_sources),
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
     def _calculate_co_occurrence_score(self, count: int) -> float:
@@ -454,7 +454,7 @@ class ConfidenceScorer:
             "validator": validator,
             "is_valid": is_valid,
             "comments": comments,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         return edge_score

@@ -15,26 +15,27 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime, timezone
-from typing import Any, Iterator
-from urllib.request import urlopen, Request
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from typing import Any
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 import boto3
 from botocore.exceptions import ClientError
 
 from app.etl.datasets import (
     DATASETS,
-    DatasetConfig,
     DatasetCategory,
+    DatasetConfig,
     DatasetFormat,
 )
 from app.etl.parsers import (
+    MeSHParser,
     OBOParser,
     OWLParser,
-    TSVParser,
-    MeSHParser,
     ParsedRecord,
+    TSVParser,
     decompress_gz,
 )
 
@@ -323,7 +324,7 @@ class BulkLoader:
             if max_records and total_loaded >= max_records:
                 break
 
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             content_text = record.to_text()
             content_hash = hashlib.sha256(
                 f"{record.id}|{content_text[:200]}".encode()
@@ -650,7 +651,7 @@ class BulkLoader:
                 MessageBody=json.dumps({
                     "action": "embed_dataset",
                     "dataset": dataset_key,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }),
             )
         except Exception as e:
@@ -671,7 +672,7 @@ class BulkLoader:
                 return False
 
             last_dt = datetime.fromisoformat(last_run)
-            return (datetime.now(timezone.utc) - last_dt).days < 30
+            return (datetime.now(UTC) - last_dt).days < 30
         except Exception:
             return False
 
@@ -682,7 +683,7 @@ class BulkLoader:
                 Item={
                     "source": f"bulk_etl:{dataset_key}",
                     "status": "completed",
-                    "last_run": datetime.now(timezone.utc).isoformat(),
+                    "last_run": datetime.now(UTC).isoformat(),
                     "records_fetched": records_loaded,
                     "error": "",
                 }

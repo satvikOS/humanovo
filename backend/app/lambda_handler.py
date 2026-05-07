@@ -1,5 +1,6 @@
 """AWS Lambda entrypoint. Wraps the FastAPI app in Mangum for API Gateway v2 events."""
 from mangum import Mangum
+
 from app.main import app
 
 # lifespan="off" because Lambda containers don't have a graceful shutdown

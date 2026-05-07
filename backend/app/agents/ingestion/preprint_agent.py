@@ -6,11 +6,10 @@ using their public API.
 """
 
 import hashlib
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
-from app.core.http_allowlist import make_httpx_client
 
 from app.agents.ingestion.base import (
     IngestionAgent,
@@ -18,6 +17,7 @@ from app.agents.ingestion.base import (
     IngestionRecord,
     SourceType,
 )
+from app.core.http_allowlist import make_httpx_client
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -378,7 +378,7 @@ class PreprintIngestionAgent(IngestionAgent):
             )
         else:
             # Use date-range API
-            end_date = self.preprint_config.date_to or datetime.now(timezone.utc).date()
+            end_date = self.preprint_config.date_to or datetime.now(UTC).date()
             start_date = self.preprint_config.date_from or (end_date - timedelta(days=30))
 
             if isinstance(end_date, datetime):
@@ -496,7 +496,7 @@ class PreprintIngestionAgent(IngestionAgent):
         Returns:
             List of recent IngestionRecords
         """
-        end_date = datetime.now(timezone.utc).date()
+        end_date = datetime.now(UTC).date()
         start_date = end_date - timedelta(days=days)
 
         original_dates = (self.preprint_config.date_from, self.preprint_config.date_to)

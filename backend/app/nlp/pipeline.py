@@ -20,7 +20,7 @@ import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .assertion_detector import Assertion, AssertionDetector
@@ -282,7 +282,7 @@ class NLPPipeline:
             document_id=document_id,
             text=text,
             metadata=metadata or {},
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
         # Step 1: Entity Recognition

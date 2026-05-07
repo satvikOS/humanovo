@@ -19,19 +19,19 @@ import csv
 import io
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, text, func
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db, async_session_factory
-from app.core.logging import get_logger
 from app.core.auth import AUTH_REQUIRED, get_current_active_user
+from app.core.database import async_session_factory, get_db
+from app.core.logging import get_logger
 from app.core.ownership import assert_owns_project
 from app.models.user import User
 
@@ -147,8 +147,8 @@ async def _run_discovery_pipeline(
 ):
     """Background task that runs the real 12-stage discovery pipeline."""
     from app.agents.discovery_orchestrator import (
-        DiscoveryOrchestrator,
         DiscoveryHypothesis,
+        DiscoveryOrchestrator,
     )
     from app.services.budget_enforcer_service import (
         BudgetExceeded,
@@ -160,7 +160,7 @@ async def _run_discovery_pipeline(
 
     run_record = _active_discovery_runs.get(run_id, {})
     run_record["status"] = "running"
-    run_record["started_at"] = datetime.now(timezone.utc).isoformat()
+    run_record["started_at"] = datetime.now(UTC).isoformat()
 
     enforcer = None
     try:
@@ -226,7 +226,7 @@ async def _run_discovery_pipeline(
                 "tags": h.tags,
                 "evidence_summary": h.evidence_summary[:5],
                 "risks": h.risks[:5],
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             }
             hypotheses.append(h_dict)
             # Broadcast via WebSocket if available
@@ -240,7 +240,7 @@ async def _run_discovery_pipeline(
                     "round": h.round_number,
                     "title": h.title[:200],
                     "confidence_score": h.confidence if h.confidence == h.confidence else 0.5,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 })
             except Exception:
                 pass
@@ -257,7 +257,7 @@ async def _run_discovery_pipeline(
                     "hypotheses_found": stats.hypotheses_found,
                     "current_round": stats.current_round,
                     "best_confidence": stats.current_best_confidence,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 })
             except Exception:
                 pass
@@ -282,7 +282,7 @@ async def _run_discovery_pipeline(
         # Store completed hypotheses
         _completed_hypotheses[run_id] = hypotheses
         run_record["status"] = "completed"
-        run_record["completed_at"] = datetime.now(timezone.utc).isoformat()
+        run_record["completed_at"] = datetime.now(UTC).isoformat()
         run_record["total_hypotheses"] = len(hypotheses)
         run_record["best_confidence"] = max((h.get("confidence_score", 0) for h in hypotheses), default=0)
 
@@ -295,7 +295,7 @@ async def _run_discovery_pipeline(
                 "run_id": run_id,
                 "total_hypotheses": len(hypotheses),
                 "best_confidence": run_record["best_confidence"],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
         except Exception:
             pass
@@ -319,7 +319,7 @@ async def _run_discovery_pipeline(
                 "error": str(be),
                 "recoverable": False,
                 "reason": "budget_exhausted",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
         except Exception:
             pass
@@ -336,7 +336,7 @@ async def _run_discovery_pipeline(
                 "run_id": run_id,
                 "error": str(e),
                 "recoverable": False,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
         except Exception:
             pass
@@ -373,7 +373,7 @@ async def _run_synthesis_pipeline(
 
     run_record = _active_synthesis_runs.get(run_id, {})
     run_record["status"] = "running"
-    run_record["started_at"] = datetime.now(timezone.utc).isoformat()
+    run_record["started_at"] = datetime.now(UTC).isoformat()
 
     enforcer = None
     try:
@@ -390,8 +390,8 @@ async def _run_synthesis_pipeline(
             )
             return
 
-        from app.services.synthesis_pipeline import SynthesisPipeline
         from app.agents.discovery_orchestrator import MultiModelLLM, TokenPool
+        from app.services.synthesis_pipeline import SynthesisPipeline
 
         token_pool = TokenPool()
         llm = MultiModelLLM(token_pool)
@@ -409,7 +409,7 @@ async def _run_synthesis_pipeline(
                     "stage": stage_name,
                     "stage_number": stage_num,
                     "model": model,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 })
             except Exception:
                 pass
@@ -426,7 +426,7 @@ async def _run_synthesis_pipeline(
         )
 
         run_record["status"] = "completed"
-        run_record["completed_at"] = datetime.now(timezone.utc).isoformat()
+        run_record["completed_at"] = datetime.now(UTC).isoformat()
         run_record["result"] = result.model_dump() if hasattr(result, "model_dump") else {}
 
         logger.info(f"Synthesis run {run_id} completed")
@@ -462,6 +462,7 @@ async def _load_discovery_runs_from_db(
     """Merge the in-memory in-flight runs with completed runs from the
     `discovery_runs` Postgres table. Returns a (items, total) tuple."""
     from sqlalchemy import text
+
     from app.core.database import engine
 
     # In-memory (currently running) rows.
@@ -598,7 +599,7 @@ async def start_discovery(
         "disease": body.disease,
         "discovery_type": body.discovery_type,
         "status": "queued",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "total_hypotheses": 0,
         "best_confidence": 0,
         "output_format": body.output_format,
@@ -629,7 +630,7 @@ async def start_discovery(
         "project_id": project_id,
         "disease": body.disease,
         "discovery_type": body.discovery_type,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -672,7 +673,7 @@ async def start_synthesis(
         "output_format": body.output_format,
         "verbosity": body.verbosity,
         "status": "queued",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     background_tasks.add_task(
@@ -699,7 +700,7 @@ async def start_synthesis(
         "status": "queued",
         "project_id": project_id,
         "hypothesis": body.hypothesis[:200],
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -776,6 +777,7 @@ async def submit_hypothesis_feedback(hypothesis_id: str, body: FeedbackRequest) 
     # Store feedback (will be persisted to hypothesis_feedback table)
     try:
         from sqlalchemy import text
+
         from app.core.database import get_async_session
         async for session in get_async_session():
             await session.execute(
@@ -801,7 +803,7 @@ async def submit_hypothesis_feedback(hypothesis_id: str, body: FeedbackRequest) 
         "hypothesis_id": hypothesis_id,
         "feedback_id": feedback_id,
         "overall_quality": body.overall_quality,
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "recorded_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -815,7 +817,7 @@ async def generate_hypothesis_paper(
         "hypothesis_id": hypothesis_id,
         "status": "queued",
         "websocket_url": f"/ws/paper/{run_id}",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -900,7 +902,7 @@ async def export_synthesis(
             "run_id": run_id,
             "format": body.format,
             "download_url": f"/api/v1/downloads/{run_id}.{body.format}",
-            "expires_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": datetime.now(UTC).isoformat(),
         }
     )
 
@@ -931,7 +933,7 @@ async def upload_imaging(
         "size_bytes": len(content),
         "file_path": file_path,
         "status": "uploaded",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1061,7 +1063,7 @@ async def link_hypothesis_to_imaging(
         "project_id": project_id,
         "record_id": record_id,
         "hypothesis_id": body.hypothesis_id,
-        "linked_at": datetime.now(timezone.utc).isoformat(),
+        "linked_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1223,7 +1225,7 @@ async def pgvector_reembed(body: PgvectorDeleteRequest) -> dict:
                 if bio_emb is not None or gen_emb is not None:
                     # Update the embeddings in DB
                     async with async_session_factory() as session:
-                        updates = {"updated_at": datetime.now(timezone.utc)}
+                        updates = {"updated_at": datetime.now(UTC)}
                         set_clauses = ["updated_at = :updated_at"]
                         if bio_emb is not None:
                             updates["bio_emb"] = str(bio_emb)
@@ -1292,7 +1294,7 @@ async def pgvector_ttl_cleanup() -> dict:
             await session.commit()
             return {
                 "removed": result.rowcount,
-                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "completed_at": datetime.now(UTC).isoformat(),
             }
     except Exception as e:
         logger.warning(f"pgvector TTL cleanup failed: {e}")
@@ -1319,7 +1321,7 @@ async def pgvector_reindex() -> dict:
                 "ix_vector_embeddings_biomedical_cosine",
                 "ix_vector_embeddings_general_cosine",
             ],
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.warning(f"pgvector reindex failed: {e}")
@@ -1341,7 +1343,7 @@ async def pgvector_purge_source(body: PgvectorPurgeSourceRequest) -> dict:
             return {
                 "source_name": body.source_name,
                 "removed": result.rowcount,
-                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "completed_at": datetime.now(UTC).isoformat(),
             }
     except Exception as e:
         logger.warning(f"pgvector purge source failed: {e}")
@@ -1360,7 +1362,7 @@ async def pgvector_vacuum() -> dict:
         return {
             "status": "completed",
             "table": "vector_embeddings",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.warning(f"pgvector vacuum failed: {e}")

@@ -8,7 +8,7 @@ monitoring endpoints for all system components.
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -74,13 +74,13 @@ class MetricSeries:
     def add_point(self, value: float, labels: dict[str, str] | None = None) -> None:
         self.points.append(
             MetricPoint(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 value=value,
                 labels=labels or {},
             )
         )
         # Keep only last hour of data
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        cutoff = datetime.now(UTC) - timedelta(hours=1)
         self.points = [p for p in self.points if p.timestamp > cutoff]
 
 
@@ -272,7 +272,7 @@ class HealthChecker:
 
     async def check_component(self, component: ComponentType) -> HealthCheckResult:
         """Check health of a specific component."""
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         try:
             if component == ComponentType.RAG_SERVICE:
@@ -293,24 +293,24 @@ class HealthChecker:
                     status=HealthStatus.UNKNOWN,
                     latency_ms=0,
                     message="Check not implemented",
-                    last_check=datetime.now(timezone.utc),
+                    last_check=datetime.now(UTC),
                 )
 
-            latency = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+            latency = (datetime.now(UTC) - start_time).total_seconds() * 1000
             result.latency_ms = latency
-            result.last_check = datetime.now(timezone.utc)
+            result.last_check = datetime.now(UTC)
 
             self._last_results[component.value] = result
             return result
 
         except Exception as e:
-            latency = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+            latency = (datetime.now(UTC) - start_time).total_seconds() * 1000
             result = HealthCheckResult(
                 component=component.value,
                 status=HealthStatus.UNHEALTHY,
                 latency_ms=latency,
                 message=str(e),
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
             self._last_results[component.value] = result
             return result
@@ -330,7 +330,7 @@ class HealthChecker:
                 else HealthStatus.DEGRADED,
                 latency_ms=0,
                 details=health,
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
         except Exception as e:
             return HealthCheckResult(
@@ -338,7 +338,7 @@ class HealthChecker:
                 status=HealthStatus.UNHEALTHY,
                 latency_ms=0,
                 message=str(e),
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
 
     async def _check_vector_store(self) -> HealthCheckResult:
@@ -353,7 +353,7 @@ class HealthChecker:
                 component="vector_store",
                 status=HealthStatus.HEALTHY,
                 latency_ms=0,
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
         except Exception as e:
             return HealthCheckResult(
@@ -361,7 +361,7 @@ class HealthChecker:
                 status=HealthStatus.UNHEALTHY,
                 latency_ms=0,
                 message=str(e),
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
 
     async def _check_graph_store(self) -> HealthCheckResult:
@@ -376,7 +376,7 @@ class HealthChecker:
                 component="graph_store",
                 status=HealthStatus.HEALTHY,
                 latency_ms=0,
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
         except Exception as e:
             return HealthCheckResult(
@@ -384,7 +384,7 @@ class HealthChecker:
                 status=HealthStatus.UNHEALTHY,
                 latency_ms=0,
                 message=str(e),
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
 
     async def _check_ingestion_orchestrator(self) -> HealthCheckResult:
@@ -400,7 +400,7 @@ class HealthChecker:
                 status=HealthStatus.HEALTHY,
                 latency_ms=0,
                 details=stats,
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
         except Exception as e:
             return HealthCheckResult(
@@ -408,7 +408,7 @@ class HealthChecker:
                 status=HealthStatus.UNHEALTHY,
                 latency_ms=0,
                 message=str(e),
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
 
     async def _check_scheduler(self) -> HealthCheckResult:
@@ -427,7 +427,7 @@ class HealthChecker:
                     "pending": stats.get("pending", 0),
                     "running": stats.get("running", 0),
                 },
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
         except Exception as e:
             return HealthCheckResult(
@@ -435,7 +435,7 @@ class HealthChecker:
                 status=HealthStatus.UNHEALTHY,
                 latency_ms=0,
                 message=str(e),
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
 
     async def _check_database(self) -> HealthCheckResult:
@@ -446,7 +446,7 @@ class HealthChecker:
                 component="database",
                 status=HealthStatus.HEALTHY,
                 latency_ms=0,
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
         except Exception as e:
             return HealthCheckResult(
@@ -454,7 +454,7 @@ class HealthChecker:
                 status=HealthStatus.UNHEALTHY,
                 latency_ms=0,
                 message=str(e),
-                last_check=datetime.now(timezone.utc),
+                last_check=datetime.now(UTC),
             )
 
     async def check_all(self) -> list[HealthCheckResult]:
@@ -544,7 +544,7 @@ async def get_system_health(
 
     return SystemHealthResponse(
         status=overall,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         components=results,
         summary=summary,
     )
@@ -565,7 +565,7 @@ async def get_metrics(
 ) -> MetricsResponse:
     """Get current system metrics."""
     return MetricsResponse(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         metrics=metrics_collector.get_all_metrics(),
     )
 
@@ -575,8 +575,9 @@ async def get_ingestion_metrics(
     db: AsyncSession = Depends(get_db),
 ) -> IngestionMetricsResponse:
     """Get ingestion-specific metrics."""
+    from sqlalchemy import func, select
+
     from app.agents.ingestion.base import SourceType
-    from sqlalchemy import select, func
 
     # Calculate agent metrics
     agents = []
@@ -601,7 +602,7 @@ async def get_ingestion_metrics(
         )
 
     # Calculate job statistics from database
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     day_ago = now - timedelta(hours=24)
 
     active_jobs = 0
@@ -675,7 +676,7 @@ async def get_performance_metrics(
 ) -> PerformanceMetrics:
     """Get system performance metrics."""
     return PerformanceMetrics(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         latency_p50_ms=metrics_collector.get_histogram_percentile("api_latency", 50),
         latency_p95_ms=metrics_collector.get_histogram_percentile("api_latency", 95),
         latency_p99_ms=metrics_collector.get_histogram_percentile("api_latency", 99),
@@ -698,7 +699,7 @@ async def get_rag_metrics(
         graph_stats = get_graph_connector().get_stats()
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "vector_indexing": rag_stats,
             "graph_updates": graph_stats,
             "query_stats": {
@@ -747,7 +748,7 @@ async def readiness_check() -> dict[str, Any]:
     )
 
     if critical_healthy:
-        return {"status": "ready", "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {"status": "ready", "timestamp": datetime.now(UTC).isoformat()}
     else:
         raise HTTPException(status_code=503, detail="Service not ready")
 
@@ -759,7 +760,7 @@ async def liveness_check() -> dict[str, Any]:
 
     Returns 200 if the service is alive.
     """
-    return {"status": "alive", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "alive", "timestamp": datetime.now(UTC).isoformat()}
 
 
 def get_metrics_collector() -> MetricsCollector:

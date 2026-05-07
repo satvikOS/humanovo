@@ -6,7 +6,7 @@ Defines the base classes and interfaces for all humanovo agents.
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -135,7 +135,7 @@ class BaseAgent(ABC, LoggerMixin):
 
         self.logger.debug("Calling tool", tool=tool_name, kwargs=list(kwargs.keys()))
 
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         try:
             result = await tool.handler(**kwargs)
             return result

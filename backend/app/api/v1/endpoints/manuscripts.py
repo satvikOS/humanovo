@@ -5,8 +5,7 @@ Manuscript CRUD, co-author management, journal formatting, submission tracking.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,10 +14,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.api.v1.endpoints._bulk import attach_bulk_archive, attach_bulk_delete
 from app.core.auth import AUTH_REQUIRED
+from app.core.database import get_db
 from app.models.platform_entities import Manuscript
-from app.api.v1.endpoints._bulk import attach_bulk_delete, attach_bulk_archive
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -41,11 +40,11 @@ class ManuscriptCreate(BaseModel):
 
 
 class ManuscriptUpdate(BaseModel):
-    title: Optional[str] = None
-    status: Optional[str] = None
-    journal_target: Optional[str] = None
-    sections: Optional[dict] = None
-    keywords: Optional[list[str]] = None
+    title: str | None = None
+    status: str | None = None
+    journal_target: str | None = None
+    sections: dict | None = None
+    keywords: list[str] | None = None
 
 
 class AuthorCreate(BaseModel):
@@ -205,7 +204,7 @@ async def submit_manuscript(manuscript_id: str, data: SubmissionCreate, db: Asyn
         "journal": data.journal,
         "notes": data.notes,
         "status": "submitted",
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "submitted_at": datetime.now(UTC).isoformat(),
     }
     current_history = list(ms.submission_history or [])
     current_history.append(submission)

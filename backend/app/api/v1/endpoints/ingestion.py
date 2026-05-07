@@ -4,7 +4,7 @@ Ingestion Agent Management API Endpoints
 RESTful API for managing ingestion agents, jobs, and scheduling with SQLAlchemy persistence.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -15,12 +15,16 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.ingestion.base import SourceType
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.models.ingestion_job import (
     IngestionJob,
+)
+from app.models.ingestion_job import (
     IngestionJobStatus as IngestionJobStatusModel,
+)
+from app.models.ingestion_job import (
     IngestionSource as IngestionSourceModel,
 )
 from app.models.user import User
@@ -316,7 +320,7 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
                     "status": "running",
                     "current_query": config.query,
                     "records_processed": 0,
-                    "last_activity": datetime.now(timezone.utc),
+                    "last_activity": datetime.now(UTC),
                     "errors_count": 0,
                 }
 
@@ -354,7 +358,7 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
                     "status": "idle",
                     "current_query": None,
                     "records_processed": _agent_tracker.get(st.value, {}).get("records_processed", 0) + job.items_indexed,
-                    "last_activity": datetime.now(timezone.utc),
+                    "last_activity": datetime.now(UTC),
                     "errors_count": _agent_tracker.get(st.value, {}).get("errors_count", 0),
                 }
 
@@ -374,7 +378,7 @@ async def _execute_ingestion_job(job_id: UUID, config: IngestionJobCreate) -> No
                 if s in _agent_tracker:
                     _agent_tracker[s]["status"] = "error"
                     _agent_tracker[s]["errors_count"] = _agent_tracker[s].get("errors_count", 0) + 1
-                    _agent_tracker[s]["last_activity"] = datetime.now(timezone.utc)
+                    _agent_tracker[s]["last_activity"] = datetime.now(UTC)
 
 
 @router.get("/jobs", response_model=IngestionJobListResponse)
@@ -529,7 +533,7 @@ async def create_recurring_job(
         interval_hours=job.interval_hours,
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     db_job = IngestionJob(
         id=uuid4(),
@@ -653,7 +657,7 @@ async def toggle_recurring_job(
     job.is_scheduled = 1 if enabled else 0
 
     if enabled:
-        job.next_run_at = datetime.now(timezone.utc)
+        job.next_run_at = datetime.now(UTC)
     else:
         job.next_run_at = None
 
@@ -922,7 +926,7 @@ async def update_source_config(
 
     # Persist config in memory
     config_data = config.model_dump()
-    config_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    config_data["updated_at"] = datetime.now(UTC).isoformat()
     _source_configs[source_type] = config_data
 
     return {

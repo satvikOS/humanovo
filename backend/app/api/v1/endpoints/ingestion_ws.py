@@ -6,7 +6,7 @@ Real-time updates for ingestion progress, agent status, and indexing events.
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -62,7 +62,7 @@ class IngestionWSManager:
             {
                 "type": "connected",
                 "job_id": str(job_id),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 
@@ -85,7 +85,7 @@ class IngestionWSManager:
             {
                 "type": "connected",
                 "channel": "global",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 
@@ -108,7 +108,7 @@ class IngestionWSManager:
             {
                 "type": "connected",
                 "agent_type": agent_type,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 
@@ -138,7 +138,7 @@ class IngestionWSManager:
         event = {
             "type": "job_update",
             "job_id": str(job_id),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **update,
         }
 
@@ -173,7 +173,7 @@ class IngestionWSManager:
     async def broadcast_global(self, update: dict[str, Any]) -> None:
         """Broadcast update to all global connections."""
         event = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **update,
         }
 
@@ -192,7 +192,7 @@ class IngestionWSManager:
         event = {
             "type": "agent_update",
             "agent_type": agent_type,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             **update,
         }
 
@@ -362,7 +362,7 @@ async def job_websocket(
                 await websocket.send_json(
                     {
                         "type": "pong",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
                 )
             elif message.get("type") == "subscribe_entities":
@@ -412,7 +412,7 @@ async def global_ingestion_websocket(
                 await websocket.send_json(
                     {
                         "type": "pong",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
                 )
             elif message.get("type") == "get_stats":
@@ -461,7 +461,7 @@ async def agent_websocket(
                 await websocket.send_json(
                     {
                         "type": "pong",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
                 )
 

@@ -15,9 +15,9 @@ from fastapi import HTTPException
 
 from app.api.v1.endpoints.compute import (
     RegressionRequest,
-    regression,
-    _t_critical_95,
     _student_t_two_sided_p,
+    _t_critical_95,
+    regression,
 )
 
 

@@ -5,15 +5,14 @@ Comments, project sharing, notifications, and audit trail.
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.auth import AUTH_REQUIRED
+from app.core.database import get_db
 from app.models.platform_entities import (
     AuditLogEntry,
     CollaborationComment,
@@ -31,7 +30,7 @@ class CommentCreate(BaseModel):
     content: str
     user_id: str = "user-1"
     user_name: str = ""
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
 
 
 class ShareCreate(BaseModel):
@@ -48,7 +47,7 @@ class NotificationCreate(BaseModel):
     user_id: str
     title: str
     message: str
-    link: Optional[str] = None
+    link: str | None = None
     notification_type: str = "info"  # info, mention, share, update
 
 
@@ -79,8 +78,8 @@ async def _log_audit(
 
 @router.get("/comments")
 async def list_comments(
-    entity_type: Optional[str] = None,
-    entity_id: Optional[str] = None,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     query = select(CollaborationComment)
@@ -138,8 +137,8 @@ async def delete_comment(comment_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/shares")
 async def list_shares(
-    entity_type: Optional[str] = None,
-    user_id: Optional[str] = None,
+    entity_type: str | None = None,
+    user_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     query = select(ProjectShare)
@@ -286,7 +285,7 @@ async def mark_all_read(
 async def get_audit_log(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    entity_type: Optional[str] = None,
+    entity_type: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     query = select(AuditLogEntry)
