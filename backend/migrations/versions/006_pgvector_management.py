@@ -10,8 +10,6 @@ Create Date: 2026-03-19
 """
 
 from alembic import op
-import sqlalchemy as sa
-
 
 revision = "006_pgvector_management"
 down_revision = "005_billing_and_usage"

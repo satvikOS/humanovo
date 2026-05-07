@@ -18,18 +18,39 @@ from datetime import date, timedelta
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
+from app.models.user import User
 from app.services.budget_enforcer_service import get_user_budget_service
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/user", tags=["user-budget"], dependencies=AUTH_REQUIRED)
+
+
+# ---------------------------------------------------------------------------
+# Tenant-isolation guard
+# ---------------------------------------------------------------------------
+
+def _ensure_self_or_admin(path_user_id: UUID, current_user: User) -> None:
+    """Reject cross-tenant access to user-budget endpoints.
+
+    Returns 404 (not 403) when the path user_id doesn't match the caller
+    and the caller isn't an admin. 404 avoids leaking the existence of
+    accounts the caller doesn't own.
+    """
+    if str(path_user_id) == str(current_user.id):
+        return
+    role = getattr(current_user, "role", None)
+    role_value = role.value if hasattr(role, "value") else role
+    if role_value == "admin":
+        return
+    raise HTTPException(status_code=404, detail="Not found")
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
@@ -89,12 +110,19 @@ class UsageBreakdown(BaseModel):
 
 
 @router.get("/{user_id}/budget", response_model=BudgetResponse)
-async def get_user_budget(user_id: UUID = Path(..., min_length=1, max_length=128)):
+async def get_user_budget(
+    user_id: UUID = Path(..., min_length=1, max_length=128),
+    current_user: User = Depends(get_current_active_user),
+):
     """Return the user's monthly budget config + current spend state.
 
     Also honors month-rollover: if a new calendar month has started since
     the last snapshot, spend is zeroed here (via UserBudgetService.get_or_create).
+
+    Cross-tenant access (user_id != current_user.id) returns 404 unless
+    the caller is an admin.
     """
+    _ensure_self_or_admin(user_id, current_user)
     svc = get_user_budget_service()
     cfg = await svc.get_or_create(user_id)
     status = await svc.check(user_id)
@@ -126,8 +154,10 @@ async def get_user_budget(user_id: UUID = Path(..., min_length=1, max_length=128
 async def update_user_budget(
     payload: BudgetUpdateRequest,
     user_id: UUID = Path(..., min_length=1, max_length=128),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Update the user's monthly cap + threshold + hard-limit flag."""
+    _ensure_self_or_admin(user_id, current_user)
     svc = get_user_budget_service()
     await svc.ensure_schema()
 
@@ -154,7 +184,7 @@ async def update_user_budget(
                 "email": payload.notification_email,
             })
 
-    return await get_user_budget(user_id)
+    return await get_user_budget(user_id, current_user)
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +196,10 @@ async def update_user_budget(
 async def get_user_budget_usage(
     user_id: UUID = Path(..., min_length=1, max_length=128),
     days: int = Query(default=30, ge=1, le=365),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Return a breakdown of the user's real usage for the last N days."""
+    _ensure_self_or_admin(user_id, current_user)
     start = date.today() - timedelta(days=days - 1)
     end = date.today()
 

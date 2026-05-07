@@ -25,6 +25,32 @@ logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Per-source liveness cache. Populated by DataSourceBase._safe_search; read
+# by /api/v1/data-sources/health to answer per-source up/down without firing
+# 62 simultaneous probes on every health check.
+# ---------------------------------------------------------------------------
+
+_LAST_SUCCESS_AT: dict[str, float] = {}
+_LAST_ERROR_AT: dict[str, tuple[float, str]] = {}
+
+
+def get_source_liveness_snapshot() -> dict[str, dict[str, Any]]:
+    """Return a snapshot of {source_name: {last_success_seconds_ago, last_error}}.
+
+    Values are seconds-since-monotonic-anchor at the time _safe_search ran;
+    callers should subtract from time.monotonic() to get age.
+    """
+    now = time.monotonic()
+    snap: dict[str, dict[str, Any]] = {}
+    for name, ts in _LAST_SUCCESS_AT.items():
+        snap.setdefault(name, {})["last_success_age_seconds"] = round(now - ts, 1)
+    for name, (ts, err) in _LAST_ERROR_AT.items():
+        snap.setdefault(name, {})["last_error_age_seconds"] = round(now - ts, 1)
+        snap[name]["last_error"] = err
+    return snap
+
+
+# ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
 
@@ -122,9 +148,18 @@ class DataSourceBase(ABC):
             await self.rate_limiter.acquire()
             result = await self.search(query, max_results)
             result.elapsed_seconds = time.monotonic() - start
+            # Track per-source liveness. The /api/v1/data-sources/health
+            # endpoint reads this cache so it can answer "is source X
+            # currently healthy?" without firing 62 simultaneous probes
+            # on every health check.
+            if result.error is None:
+                _LAST_SUCCESS_AT[self.name] = time.monotonic()
+            else:
+                _LAST_ERROR_AT[self.name] = (time.monotonic(), result.error)
             return result
         except Exception as exc:
             logger.error("data_source_error", source=self.name, error=str(exc))
+            _LAST_ERROR_AT[self.name] = (time.monotonic(), str(exc))
             return DataSourceResult(
                 source=self.name,
                 query=query,

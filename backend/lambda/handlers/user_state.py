@@ -3,6 +3,10 @@ User State Lambda Handler - Sync user state (localStorage) across devices.
 Uses DynamoDB for storage with last-write-wins conflict resolution.
 """
 
+# ruff: noqa: E402
+# Lambda handlers print cold-start markers before imports so a
+# subsequent import crash is tagged in CloudWatch with the handler
+# name. The pattern is intentional; suppress E402 module-wide.
 print("[USER_STATE] Module loading...")
 
 import json

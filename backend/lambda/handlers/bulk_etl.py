@@ -16,7 +16,10 @@ Manual invocation:
     --payload '{"datasets": ["gene_ontology", "hpo"]}' out.json
 """
 
-import json
+# ruff: noqa: E402
+# Lambda handlers print cold-start markers before imports so a
+# subsequent import crash is tagged in CloudWatch with the handler
+# name. The pattern is intentional; suppress E402 module-wide.
 import os
 from typing import Any
 
@@ -29,10 +32,11 @@ metrics = Metrics()
 
 # Import paths — Lambda bundles the backend code
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from app.etl.bulk_loader import BulkLoader, load_priority_datasets
-from app.etl.datasets import DATASETS, get_datasets_by_priority
+from app.etl.bulk_loader import BulkLoader
+from app.etl.datasets import DATASETS
 
 
 @logger.inject_lambda_context

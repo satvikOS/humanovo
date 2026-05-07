@@ -11,10 +11,9 @@ Three tables:
   citation_highlights — PDF annotations per citation
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 revision = "013_citation_library"
 down_revision = "012_discovery_sessions"

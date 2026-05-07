@@ -8,17 +8,17 @@ Revision ID: 008_platform_entities
 Revises: 007_billing_and_usage
 Create Date: 2026-03-19
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers
 revision: str = "008_platform_entities"
-down_revision: Union[str, None] = "007_billing_and_usage"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "007_billing_and_usage"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

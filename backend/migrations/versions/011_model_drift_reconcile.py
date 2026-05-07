@@ -14,7 +14,6 @@ All ALTERs are IF NOT EXISTS — safe to re-run.
 
 from alembic import op
 
-
 revision = "011_model_drift_reconcile"
 down_revision = "010_notebook_pages"
 branch_labels = None

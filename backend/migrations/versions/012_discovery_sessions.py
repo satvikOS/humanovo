@@ -9,10 +9,9 @@ list reloads across tabs/devices and the agent config (model,
 temperature, system prompt, tools) survives reopens.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 revision = "012_discovery_sessions"
 down_revision = "011_model_drift_reconcile"

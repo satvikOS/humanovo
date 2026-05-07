@@ -117,8 +117,8 @@ def save_checkpoint(query: str, last_date: str, last_count: int) -> None:
 
 def fetch_pubmed_ids(query: str, start_date: str | None = None, max_results: int = 100) -> list[str]:
     """Fetch PubMed IDs matching the query."""
-    import urllib.request
     import urllib.parse
+    import urllib.request
     import xml.etree.ElementTree as ET
 
     api_key = get_api_key()
@@ -158,8 +158,8 @@ def fetch_pubmed_ids(query: str, start_date: str | None = None, max_results: int
 
 def fetch_pubmed_details(pmids: list[str]) -> list[dict]:
     """Fetch detailed records for PubMed IDs."""
-    import urllib.request
     import urllib.parse
+    import urllib.request
     import xml.etree.ElementTree as ET
 
     if not pmids:

@@ -7,7 +7,6 @@ Pathway analysis, GSEA, variant annotation, biomarker discovery.
 import json
 import logging
 import math
-import traceback
 from typing import Any
 
 try:

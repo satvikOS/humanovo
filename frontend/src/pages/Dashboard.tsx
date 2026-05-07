@@ -102,7 +102,6 @@ function RecentSimulationsWidget() {
         if (cancelled) return
         const total = result.literature.migrated + result.papers.migrated
         if (total > 0) {
-          // eslint-disable-next-line no-console
           console.info(
             `[migration] drained ${result.literature.migrated} literature ` +
             `+ ${result.papers.migrated} saved paper(s) to backend`,

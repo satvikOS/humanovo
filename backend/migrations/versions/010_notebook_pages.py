@@ -10,10 +10,9 @@ endpoint returns 500 on a fresh DB. Add it here so the page list query
 succeeds.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 revision = "010_notebook_pages"
 down_revision = "009_audit_records"

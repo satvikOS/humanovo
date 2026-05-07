@@ -25,9 +25,8 @@ Strategy:
      ALTER the column to NOT NULL.
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "016_owner_id_on_notebook_activity_ingestion"
 down_revision = "015_owner_id_on_sessions_and_citations"

@@ -5,7 +5,6 @@ Simulation Lambda Handler - Monte Carlo simulation management.
 import json
 import logging
 import os
-import traceback
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -207,7 +206,8 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     try:
         return app.resolve(event, context)
     except Exception as e:
-        import json, traceback
+        import json
+        import traceback
         return {
             "statusCode": 500,
             "headers": {"Content-Type": "application/json"},

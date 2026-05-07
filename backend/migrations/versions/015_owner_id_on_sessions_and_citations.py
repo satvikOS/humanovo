@@ -26,9 +26,8 @@ is expected to be near zero. For production, the operator runs a
 manual reassign / delete sweep before tightening to NOT NULL.
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "015_owner_id_on_sessions_and_citations"
 down_revision = "014_user_pricing_tier"

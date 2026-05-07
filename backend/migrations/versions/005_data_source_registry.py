@@ -9,8 +9,6 @@ Create Date: 2026-03-19
 """
 
 from alembic import op
-import sqlalchemy as sa
-
 
 revision = "005_data_source_registry"
 down_revision = "004_research_project_management"

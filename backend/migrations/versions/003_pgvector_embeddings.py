@@ -9,9 +9,6 @@ Create Date: 2026-03-18
 """
 
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-
 
 # revision identifiers
 revision = "003_pgvector"

@@ -8,10 +8,9 @@ Adds the append-only, hash-chained audit log table used by
 app.services.audit_service.AuditService for HIPAA/SOC 2 compliance.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
-
 
 # revision identifiers
 revision = '009_audit_records'

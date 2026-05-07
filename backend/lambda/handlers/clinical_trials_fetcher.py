@@ -129,8 +129,8 @@ def fetch_clinical_trials(
     page_token: str | None = None,
 ) -> tuple[list[dict], str | None]:
     """Fetch clinical trials from ClinicalTrials.gov API v2."""
-    import urllib.request
     import urllib.parse
+    import urllib.request
 
     params = {
         "query.cond": condition,

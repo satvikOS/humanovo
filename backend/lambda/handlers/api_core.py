@@ -2,14 +2,10 @@
 API Core Lambda Handler - Health check and status endpoints.
 """
 
-import json
 import logging
 import os
-import traceback
 from datetime import datetime
 from typing import Any
-
-import boto3
 
 try:
     from aws_lambda_powertools import Logger, Metrics
@@ -137,7 +133,8 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
     try:
         return app.resolve(event, context)
     except Exception as e:
-        import json, traceback
+        import json
+        import traceback
         return {
             "statusCode": 500,
             "headers": {"Content-Type": "application/json"},

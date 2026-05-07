@@ -3,6 +3,10 @@ Projects Lambda Handler - CRUD operations for research projects.
 Uses DynamoDB for storage.
 """
 
+# ruff: noqa: E402
+# Lambda handlers print cold-start markers before imports so a
+# subsequent import crash is tagged in CloudWatch with the handler
+# name. The pattern is intentional; suppress E402 module-wide.
 print("[PROJECTS] Module loading...")
 
 import json

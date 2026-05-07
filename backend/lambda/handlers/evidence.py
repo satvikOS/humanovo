@@ -2,16 +2,18 @@
 Evidence Lambda Handler - Evidence search and management.
 """
 
+# ruff: noqa: E402
+# Lambda handlers print cold-start markers before imports so a
+# subsequent import crash is tagged in CloudWatch with the handler
+# name. The pattern is intentional; suppress E402 module-wide.
 print("[EVIDENCE] Module loading...")
 
 import json
 import logging
 import os
 import traceback
-from datetime import datetime
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
 
 import boto3
 

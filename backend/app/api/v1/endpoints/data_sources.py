@@ -106,8 +106,10 @@ async def query_data_sources(request: DataSourceQueryRequest):
 
         return DataSourceQueryResponse(
             total_results=len(result_dicts),
-            sources_queried=len(request.sources) if request.sources else 65,
-            sources_succeeded=len(set(r.get("source_name", "") for r in result_dicts)),
+            sources_queried=(
+                len(request.sources) if request.sources else len(orchestrator._sources)
+            ),
+            sources_succeeded=len({r.get("source_name", "") for r in result_dicts}),
             sources_failed=0,
             results=result_dicts,
         )
@@ -144,4 +146,86 @@ async def get_source_stats():
         raise HTTPException(status_code=503, detail="Data sources service not yet initialized")
     except Exception as e:
         logger.error(f"Failed to get source stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Health endpoint — surfaces per-source liveness for the 62 active sources.
+# Reads the in-memory _LAST_SUCCESS_AT / _LAST_ERROR_AT caches populated by
+# DataSourceBase._safe_search; does NOT fire 62 simultaneous network probes.
+# Sources never queried since process start show as "unknown" rather than
+# "down" - the right semantic for "we don't know yet" vs "we know it failed".
+# ---------------------------------------------------------------------------
+
+
+@router.get("/health")
+async def get_data_sources_health():
+    """Per-source liveness snapshot.
+
+    Returns:
+      total_active: number of sources active in the orchestrator (= 62 today).
+      summary: rolled-up healthy / degraded / unknown counts.
+      sources: per-source detail with category, phase, and last success/error
+               age (seconds). Sources never queried this process show as
+               status='unknown' to distinguish from confirmed failures.
+    """
+    try:
+        from app.services.data_sources import (
+            DataSourceOrchestrator,
+            get_source_liveness_snapshot,
+        )
+
+        orchestrator = DataSourceOrchestrator()
+        liveness = get_source_liveness_snapshot()
+
+        # Healthy = success seen within the last hour.
+        # Degraded = error within last hour AND success older than that (or never).
+        # Unknown = never queried this process.
+        STALE_AFTER = 3600  # 1 hour
+
+        healthy = degraded = unknown = 0
+        sources_detail = []
+
+        for src_info in orchestrator.get_available_sources():
+            name = src_info["name"]
+            entry = liveness.get(name, {})
+            last_success_age = entry.get("last_success_age_seconds")
+            last_error_age = entry.get("last_error_age_seconds")
+            last_error = entry.get("last_error")
+
+            status = "unknown"
+            if last_success_age is not None and last_success_age <= STALE_AFTER:
+                status = "healthy"
+                healthy += 1
+            elif last_error_age is not None and last_error_age <= STALE_AFTER:
+                status = "degraded"
+                degraded += 1
+            else:
+                unknown += 1
+
+            sources_detail.append({
+                "name": name,
+                "category": src_info["category"],
+                "phase": src_info["phase"],
+                "status": status,
+                "last_success_age_seconds": last_success_age,
+                "last_error_age_seconds": last_error_age,
+                "last_error": last_error,
+            })
+
+        return {
+            "total_active": len(sources_detail),
+            "summary": {
+                "healthy": healthy,
+                "degraded": degraded,
+                "unknown": unknown,
+            },
+            "sources": sources_detail,
+        }
+    except ImportError:
+        raise HTTPException(
+            status_code=503, detail="Data sources service not yet initialized"
+        )
+    except Exception as e:
+        logger.error(f"Failed to compute source health: {e}")
         raise HTTPException(status_code=500, detail=str(e))

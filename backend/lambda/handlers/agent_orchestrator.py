@@ -8,10 +8,15 @@ Uses mixed providers:
 Model identities are never exposed to the frontend (unbiasing).
 """
 
+# ruff: noqa: E402
+# Lambda handlers print cold-start markers before imports so a
+# subsequent import crash is tagged in CloudWatch with the handler
+# name. The pattern is intentional; suppress E402 module-wide.
 print("[ORCHESTRATOR] Module loading...")
 
 import base64
 import json
+import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,8 +24,6 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
-
-import logging
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -35,7 +38,6 @@ try:
 except ImportError as _import_err:
     # Fallback if powertools layer is missing or incompatible
     logging.error(f"aws_lambda_powertools import failed: {_import_err}")
-    from collections import namedtuple
     logger = logging.getLogger("agent_orchestrator")
     logger.setLevel(logging.DEBUG)
 
@@ -135,10 +137,11 @@ except Exception as _e:
 
 # Azure AI — lightweight client using stdlib (no openai package needed)
 # Uses urllib.request to call Azure AI's OpenAI-compatible chat completion API.
-import urllib.request
+import ssl
 import urllib.error
 import urllib.parse
-import ssl
+import urllib.request
+
 
 class _AzureAIMessage:
     """Mimics openai's message object."""
@@ -1298,8 +1301,7 @@ def call_azure_ai(model_name: str, prompt: str, system_prompt: str,
 
 import math
 import re as _re_embed
-import ssl
-import urllib.request
+
 
 def _call_azure_embedding(texts: list[str], deployment: str) -> list[list[float]] | None:
     """Call Azure OpenAI embedding endpoint synchronously. Returns list of embedding vectors."""
@@ -1477,7 +1479,7 @@ def run_embedding_grounding(
           f"(ratio: {ratio:.0%}), pools: large={len(evidence_pool_large)}, small={len(evidence_pool_small)}")
 
     # Build grounding report for next stage
-    report_parts = [f"## SEMANTIC GROUNDING REPORT (dual Azure embedding analysis)"]
+    report_parts = ["## SEMANTIC GROUNDING REPORT (dual Azure embedding analysis)"]
     report_parts.append(f"Claims analyzed: {len(claims)} | Grounded: {grounded_count} | Ungrounded: {len(ungrounded_claims)}")
 
     if well_grounded_claims:
@@ -2280,7 +2282,7 @@ Return ONLY valid JSON:
                     # Fetch real data from PubMed, ClinicalTrials.gov, FDA, UniProt, Reactome
                     h_title = hypothesis_data.get("title", disease) if hypothesis_data else disease
                     h_mechanism = hypothesis_data.get("mechanism", "") if hypothesis_data else ""
-                    print(f"[WORKER]   Querying PubMed, ClinicalTrials.gov, FDA, UniProt, Reactome...")
+                    print("[WORKER]   Querying PubMed, ClinicalTrials.gov, FDA, UniProt, Reactome...")
                     grounding_data = ground_hypothesis_with_databases(disease, h_title, h_mechanism)
                     grounding_text = format_grounding_for_prompt(grounding_data)
                     num_citations = len(grounding_data.get("summary", []))
@@ -2309,7 +2311,7 @@ Return ONLY valid JSON:
                     h_title = hypothesis_data.get("title", disease) if hypothesis_data else disease
                     h_mechanism = hypothesis_data.get("mechanism", "") if hypothesis_data else ""
                     # Run a second grounding pass with more specific queries
-                    print(f"[WORKER]   Deep grounding: querying databases with refined terms...")
+                    print("[WORKER]   Deep grounding: querying databases with refined terms...")
                     deep_grounding = ground_hypothesis_with_databases(
                         disease,
                         h_title,
@@ -2350,13 +2352,13 @@ Return ONLY valid JSON:
                 else:
                     # All other stages — work with accumulated context
                     stage_instructions = {
-                        2: f"You are the CAUSAL EXPANDER (Stage 2/10). EXPAND the hypothesis with deep causal chain reasoning. Build COMPLETE causal chains: [Molecular Event] → [Protein Effect] → [Pathway Alteration] → [Cellular Phenotype] → [Tissue Effect] → [Clinical Outcome]. Include Kd values, IC50/EC50, expression levels, allele frequencies.",
-                        4: f"You are the COUNTER-ARGUMENT GENERATOR (Stage 4/10). Generate STRONG counter-arguments against this hypothesis. Identify: biological implausibility, pharmacological barriers, safety concerns, resistance mechanisms, manufacturing challenges, regulatory hurdles. Rate each as CRITICAL/MAJOR/MINOR.",
-                        5: f"You are the MECHANISTIC DEEP DIVER (Stage 5/10). Perform a MECHANISTIC DEEP DIVE. Trace the COMPLETE molecular cascade from intervention to clinical outcome. Include: binding kinetics, signal transduction, gene expression changes, protein modifications, cellular responses, tissue effects, systemic outcomes.",
-                        6: f"You are the CROSS-VALIDATOR (Stage 6/10). CROSS-VALIDATE every claim in this hypothesis. Check: known biochemistry, thermodynamic feasibility, binding affinities, evolutionary conservation, clinical trial precedent, regulatory feasibility, manufacturing scalability.",
-                        8: f"You are the CONFIDENCE SCORER (Stage 8/10). Perform MULTI-DIMENSIONAL SCORING: Evidence quality (0-1), Mechanism strength (0-1), Clinical translatability (0-1), Safety profile (0-1), Novelty (0-1), Feasibility (0-1). Calculate overall confidence as weighted average. Be rigorous — do not inflate scores.",
-                        9: f"You are the RAPID REFINER (Stage 9/10). REFINE the hypothesis: improve precision of molecular targets, tighten dose-response relationships, sharpen the clinical protocol, address remaining risks, add quantitative PK/PD modeling. Make every word count.",
-                        10: f"You are the FINAL SYNTHESIZER (Stage 10/10). Produce the DEFINITIVE version of this hypothesis. Integrate all improvements from stages 1-9. Ensure: title is precise, description is comprehensive (300+ words), mechanism is complete, evidence is cited, risks are addressed, validation plan is actionable. This is the final output.",
+                        2: "You are the CAUSAL EXPANDER (Stage 2/10). EXPAND the hypothesis with deep causal chain reasoning. Build COMPLETE causal chains: [Molecular Event] → [Protein Effect] → [Pathway Alteration] → [Cellular Phenotype] → [Tissue Effect] → [Clinical Outcome]. Include Kd values, IC50/EC50, expression levels, allele frequencies.",
+                        4: "You are the COUNTER-ARGUMENT GENERATOR (Stage 4/10). Generate STRONG counter-arguments against this hypothesis. Identify: biological implausibility, pharmacological barriers, safety concerns, resistance mechanisms, manufacturing challenges, regulatory hurdles. Rate each as CRITICAL/MAJOR/MINOR.",
+                        5: "You are the MECHANISTIC DEEP DIVER (Stage 5/10). Perform a MECHANISTIC DEEP DIVE. Trace the COMPLETE molecular cascade from intervention to clinical outcome. Include: binding kinetics, signal transduction, gene expression changes, protein modifications, cellular responses, tissue effects, systemic outcomes.",
+                        6: "You are the CROSS-VALIDATOR (Stage 6/10). CROSS-VALIDATE every claim in this hypothesis. Check: known biochemistry, thermodynamic feasibility, binding affinities, evolutionary conservation, clinical trial precedent, regulatory feasibility, manufacturing scalability.",
+                        8: "You are the CONFIDENCE SCORER (Stage 8/10). Perform MULTI-DIMENSIONAL SCORING: Evidence quality (0-1), Mechanism strength (0-1), Clinical translatability (0-1), Safety profile (0-1), Novelty (0-1), Feasibility (0-1). Calculate overall confidence as weighted average. Be rigorous — do not inflate scores.",
+                        9: "You are the RAPID REFINER (Stage 9/10). REFINE the hypothesis: improve precision of molecular targets, tighten dose-response relationships, sharpen the clinical protocol, address remaining risks, add quantitative PK/PD modeling. Make every word count.",
+                        10: "You are the FINAL SYNTHESIZER (Stage 10/10). Produce the DEFINITIVE version of this hypothesis. Integrate all improvements from stages 1-9. Ensure: title is precise, description is comprehensive (300+ words), mechanism is complete, evidence is cited, risks are addressed, validation plan is actionable. This is the final output.",
                     }
 
                     instruction = stage_instructions.get(stage_num, f"You are Stage {stage_num}/10. Improve the hypothesis from your specialized perspective: {purpose}.")
@@ -2917,7 +2919,7 @@ def get_status():
         # - running/stopping/paused reset after 15 min with no update (Lambda crash recovery)
         current_status = state.get("status", "idle")
         if current_status == "failed":
-            print(f"[STATUS] State is 'failed' — auto-resetting to idle")
+            print("[STATUS] State is 'failed' — auto-resetting to idle")
             update_discovery_state({"status": "idle"})
             current_status = "idle"
         elif current_status in ("completed", "stopped"):
@@ -3043,7 +3045,7 @@ def start_discovery():
             project_id = "discovery"
             project_name = ""
 
-        print(f"[START] Writing DynamoDB initial state...")
+        print("[START] Writing DynamoDB initial state...")
         table.put_item(Item={
             "id": DISCOVERY_TASK_KEY,
             "status": "running",
@@ -3084,7 +3086,7 @@ def start_discovery():
                     "config": config,
                 }, cls=DecimalEncoder),
             )
-            print(f"[START] Async invoke SUCCESS")
+            print("[START] Async invoke SUCCESS")
         except Exception as e:
             print(f"[START] Async invoke FAILED: {e}")
             logger.error(f"Failed to invoke async worker: {e}")
@@ -3209,7 +3211,7 @@ def health_check():
     for role, mc in AGENT_MODELS.items():
         status = results.get(role, "NOT_TESTED")
         print(f"[HEALTH]   {role:12s} | {mc.get('provider', 'unknown'):10s} | {status}")
-    print(f"[HEALTH] ================================================")
+    print("[HEALTH] ================================================")
 
     # Debug diagnostics — show which env vars and clients are available
     debug = {
@@ -4016,7 +4018,7 @@ Use ## for major sections, ### for subsections. Include ALL sections from Abstra
                 if "throttl" in err_str or "too many tokens" in err_str or "rate" in err_str:
                     print(f"[PAPER] Bedrock Opus 4.6 throttled (attempt {attempt+1}/3): {str(retry_err)[:120]}")
                     # Fall back to Claude Opus 4.5 via Bedrock
-                    print(f"[PAPER] Falling back to Claude Opus 4.5 for synthesis...")
+                    print("[PAPER] Falling back to Claude Opus 4.5 for synthesis...")
                     _update_paper_phase(table, "Synthesizing with Claude Opus 4.5...", 2, total_phases)
                     try:
                         paper_md = call_bedrock(
@@ -4141,7 +4143,7 @@ def _build_dynamic_mechanism_svg(h0: dict, disease: str, discovery_type: str) ->
 
     # Build SVG elements
     svg_parts = [
-        f'<div class="figure-box">',
+        '<div class="figure-box">',
         f'  <svg viewBox="0 0 {svg_w} 160" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:{svg_w}px;height:auto;">',
         '    <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/></marker></defs>',
     ]
@@ -4567,13 +4569,17 @@ def _generate_paper_pdf_reportlab(paper_html: str, disease: str, discovery_type:
 
     try:
         from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
         from reportlab.lib.pagesizes import letter
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import inch
         from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, HRFlowable, PageBreak,
+            HRFlowable,
+            PageBreak,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
         )
-        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
     except ImportError:
         return b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj\nxref\n0 4\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n0\n%%EOF"
 
@@ -4700,14 +4706,19 @@ def _generate_hypothesis_pdf_reportlab(hypothesis: dict, disease: str, discovery
 
     try:
         from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
         from reportlab.lib.pagesizes import letter
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import inch
         from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-            HRFlowable, PageBreak,
+            HRFlowable,
+            PageBreak,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
         )
-        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
     except ImportError:
         # ReportLab not available — return a minimal PDF
         return _generate_minimal_pdf(hypothesis, disease)
@@ -5019,7 +5030,7 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
                 print(f"[HANDLER] Starting worker: disease={config.get('disease','?')} continuation={'yes' if continuation else 'no'}")
                 try:
                     run_discovery_worker(config, continuation=continuation)
-                    print(f"[HANDLER] Worker completed successfully")
+                    print("[HANDLER] Worker completed successfully")
                 except Exception as worker_err:
                     print(f"[HANDLER] Worker CRASHED: {worker_err}")
                     import traceback
@@ -5045,7 +5056,7 @@ def handler(event: dict[str, Any], context: LambdaContext) -> dict[str, Any]:
                 print(f"[HANDLER] Starting paper worker: hypothesis={hypothesis_id}, continuation={'yes' if paper_continuation else 'no'}, has_data={'yes' if hypothesis_data else 'no'}")
                 try:
                     run_paper_worker(hypothesis_id, paper_config, continuation=paper_continuation, hypothesis_data=hypothesis_data)
-                    print(f"[HANDLER] Paper worker completed successfully")
+                    print("[HANDLER] Paper worker completed successfully")
                 except Exception as paper_err:
                     print(f"[HANDLER] Paper worker CRASHED: {paper_err}")
                     import traceback

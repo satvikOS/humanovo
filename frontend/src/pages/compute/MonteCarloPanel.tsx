@@ -733,6 +733,9 @@ export default function MonteCarloPanel() {
   const [results, setResults] = useState<SimResults | null>(null);
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
+  // _runHistory is currently write-only - the setter feeds future
+  // history-replay UI; reads will land when that surface ships.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_runHistory, setRunHistory] = useState<{ type: SimulationType; params: Record<string, number>; mean: number; std: number; timestamp: number }[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoRunRef = useRef<ReturnType<typeof setTimeout> | null>(null);

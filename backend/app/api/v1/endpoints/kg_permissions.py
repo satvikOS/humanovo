@@ -25,13 +25,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
+from app.models.user import User
 from app.services.kg_first_service import (
     UploadPermission,
     get_kg_first_service,
@@ -40,6 +41,21 @@ from app.services.kg_first_service import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/kg", tags=["kg-permissions"], dependencies=AUTH_REQUIRED)
+
+
+# ---------------------------------------------------------------------------
+# Tenant-isolation guard
+# ---------------------------------------------------------------------------
+
+def _ensure_self_or_admin(target_user_id: str | UUID, current_user: User) -> None:
+    """Reject cross-tenant access. 404 (not 403) avoids existence leak."""
+    if str(target_user_id) == str(current_user.id):
+        return
+    role = getattr(current_user, "role", None)
+    role_value = role.value if hasattr(role, "value") else role
+    if role_value == "admin":
+        return
+    raise HTTPException(status_code=404, detail="Not found")
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
@@ -82,11 +98,16 @@ class KGOverview(BaseModel):
 async def set_document_permission(
     payload: PermissionUpdate,
     document_id: UUID = Path(..., min_length=1, max_length=128),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Set the KG scope for a document. Default is 'private'. Choosing
     'common' makes the document and any facts extracted from it royalty-
     eligible for the user when other users query them.
+
+    The body's user_id must match current_user.id (or current_user is
+    an admin); cross-tenant access returns 404.
     """
+    _ensure_self_or_admin(payload.user_id, current_user)
     svc = get_kg_first_service()
     try:
         await svc.record_document_permission(
@@ -120,7 +141,9 @@ async def set_document_permission(
 async def get_document_permission(
     document_id: UUID = Path(..., min_length=1, max_length=128),
     user_id: UUID = Query(..., min_length=1),
+    current_user: User = Depends(get_current_active_user),
 ):
+    _ensure_self_or_admin(user_id, current_user)
     svc = get_kg_first_service()
     perm = await svc.get_document_permission(user_id=user_id, document_id=document_id)
     if perm is None:
@@ -146,7 +169,9 @@ async def get_document_permission(
 async def get_user_royalties(
     user_id: UUID = Path(..., min_length=1, max_length=128),
     days: int = Query(default=30, ge=1, le=365),
+    current_user: User = Depends(get_current_active_user),
 ):
+    _ensure_self_or_admin(user_id, current_user)
     svc = get_kg_first_service()
     try:
         summary = await svc.royalty_summary(user_id=user_id, days=days)
@@ -173,7 +198,11 @@ async def get_user_royalties(
 
 
 @router.get("/user/{user_id}/kg/overview", response_model=KGOverview)
-async def get_user_kg_overview(user_id: UUID = Path(..., min_length=1, max_length=128)):
+async def get_user_kg_overview(
+    user_id: UUID = Path(..., min_length=1, max_length=128),
+    current_user: User = Depends(get_current_active_user),
+):
+    _ensure_self_or_admin(user_id, current_user)
     svc = get_kg_first_service()
     await svc.ensure_schema()
 

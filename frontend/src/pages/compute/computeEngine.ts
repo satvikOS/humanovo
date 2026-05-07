@@ -3666,12 +3666,12 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
       }
       return mmat(2, 1, [tr / 2, tr / 2]) // complex eigenvalues — return real parts
     }
-    // For larger: use Gershgorin circles as approximation
+    // For larger: diagonal entries are the cheapest reasonable estimate.
+    // (An earlier draft also computed Gershgorin radii but didn't use
+    // them; full eigendecomposition for n>4 needs a real solver.)
     const evals = new Float64Array(n)
     for (let i = 0; i < n; i++) {
-      let radius = 0
-      for (let j = 0; j < n; j++) if (i !== j) radius += Math.abs(m.data[i * n + j])
-      evals[i] = m.data[i * n + i] // diagonal as estimate
+      evals[i] = m.data[i * n + i]
     }
     return mmat(n, 1, evals)
   })

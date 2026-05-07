@@ -15,8 +15,6 @@ Create Date: 2026-03-18
 """
 
 from alembic import op
-import sqlalchemy as sa
-
 
 revision = "004_research_project_management"
 down_revision = "003_pgvector"
