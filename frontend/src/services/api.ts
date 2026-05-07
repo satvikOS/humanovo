@@ -647,6 +647,35 @@ export interface LibraryHighlight {
   updated_at: string
 }
 
+// ─── Saved research papers ────────────────────────────────────────
+//
+// Backend `SavedResearchPaper` rows. Listing returns the summary
+// (no body); detail GET returns body too (paper_html can be 50–200 KB).
+
+export interface SavedPaperSummary {
+  id: string
+  hypothesis_id: string
+  project_id: string | null
+  hypothesis_title: string
+  disease: string | null
+  filename: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SavedPaperDetail extends SavedPaperSummary {
+  paper_html: string
+}
+
+export interface SavedPaperCreate {
+  hypothesis_id: string
+  project_id?: string | null
+  hypothesis_title: string
+  disease?: string | null
+  filename: string
+  paper_html: string
+}
+
 // ── Discovery Sessions (conversational Discovery persistence) ──
 export interface DiscoveryMessageCard {
   kind: 'hypothesis' | 'evidence' | 'entity' | 'kg_subgraph' | 'citation' | string
@@ -836,6 +865,34 @@ export const api = {
     }
     const resp = await apiClient.post('/citations/export', body, { responseType: 'blob' })
     return resp.data
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Saved research papers — durable persistence for AI-generated paper
+  // HTML artifacts. Replaces the older `research-papers` localStorage key.
+  // Listing endpoint omits the (large) paper_html body; fetch with
+  // getSavedPaper(id) when the user actually opens the paper viewer.
+  //   GET    /v1/saved-papers           — list (owner-scoped, filterable)
+  //   POST   /v1/saved-papers           — create after document_pipeline run
+  //   GET    /v1/saved-papers/{id}      — fetch full paper_html
+  //   DELETE /v1/saved-papers/{id}      — remove from library
+  // ═══════════════════════════════════════════════════════════════════════
+  async listSavedPapers(params?: {
+    project_id?: string; hypothesis_id?: string; limit?: number; offset?: number;
+  }): Promise<SavedPaperSummary[]> {
+    const { data } = await apiClient.get('/saved-papers', { params })
+    return data
+  },
+  async createSavedPaper(body: SavedPaperCreate): Promise<SavedPaperDetail> {
+    const { data } = await apiClient.post('/saved-papers', body)
+    return data
+  },
+  async getSavedPaper(id: string): Promise<SavedPaperDetail> {
+    const { data } = await apiClient.get(`/saved-papers/${id}`)
+    return data
+  },
+  async deleteSavedPaper(id: string): Promise<void> {
+    await apiClient.delete(`/saved-papers/${id}`)
   },
 
   // ═══════════════════════════════════════════════════════════════════════

@@ -50,6 +50,7 @@ from app.api.v1.endpoints import (
     projects,
     rag,
     regulatory,
+    saved_papers,
     simulation,
     statistics,
     user_budget,
@@ -161,3 +162,6 @@ router.include_router(citations.router)
 # Webhook endpoint is intentionally NOT under AUTH_REQUIRED; signature
 # verification on the Stripe-Signature header is the auth.
 router.include_router(billing.router)
+
+# Saved research papers (replaces frontend localStorage 'research-papers' key).
+router.include_router(saved_papers.router)

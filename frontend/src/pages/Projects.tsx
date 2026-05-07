@@ -14,16 +14,6 @@ import { Skeleton } from '../components/Skeleton'
 import { toast } from '../contexts/ToastContext'
 import { modalBackdropProps } from '../utils/clickable'
 
-interface SavedResearchPaper {
-  id: string
-  hypothesis_id: string
-  hypothesis_title: string
-  project_id: string
-  disease: string
-  generated_at: string
-  filename: string
-}
-
 type ViewMode = 'grid' | 'list'
 type SortOption = 'recent' | 'name' | 'hypotheses' | 'status'
 type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'archived'
@@ -33,11 +23,24 @@ type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'archived'
 
 function StatsBar({ projects }: { projects: Project[] }) {
   const totalHypotheses = projects.reduce((sum, p) => sum + (p.hypothesis_count || 0), 0)
+  // project-documents still localStorage-only — Round 4c will wire it backend.
   const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
   const totalEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0) + allDocs.length
   const activeCount = projects.filter(p => (p.status || 'active') === 'active').length
   const archivedCount = projects.filter(p => (p.status || 'active') === 'archived').length
-  const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
+
+  // Saved research papers come from the durable backend (Round 4b). The
+  // count starts at 0 while the request is in flight; the StatsBar
+  // re-renders when the request resolves so the user briefly sees a
+  // 0 but never a stale count from a different account.
+  const [paperCount, setPaperCount] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    api.listSavedPapers({ limit: 500 })
+      .then(rows => { if (!cancelled) setPaperCount(rows.length) })
+      .catch(() => { /* leave at 0 if endpoint unreachable */ })
+    return () => { cancelled = true }
+  }, [])
 
   const stats = [
     { label: 'Total', value: projects.length },
@@ -45,7 +48,7 @@ function StatsBar({ projects }: { projects: Project[] }) {
     { label: 'Archived', value: archivedCount },
     { label: 'Hypotheses', value: totalHypotheses },
     { label: 'Evidence', value: totalEvidence },
-    { label: 'Papers', value: allPapers.length },
+    { label: 'Papers', value: paperCount },
   ]
 
   return (
@@ -257,6 +260,7 @@ interface CardProps {
   selectMode: boolean
   selected: boolean
   onToggleSelect: (id: string) => void
+  paperCount?: number
 }
 
 function SelectBox({ selected, onClick }: { selected: boolean; onClick: (e: React.MouseEvent) => void }) {
@@ -272,9 +276,7 @@ function SelectBox({ selected, onClick }: { selected: boolean; onClick: (e: Reac
   )
 }
 
-function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, onToggleSelect }: CardProps) {
-  const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
-  const paperCount = allPapers.filter(p => p.project_id === project.id).length
+function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, onToggleSelect, paperCount = 0 }: CardProps) {
   const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
   const docCount = allDocs.filter(d => d.project_id === project.id).length
   const isArchived = (project.status || 'active') === 'archived'
@@ -382,9 +384,7 @@ function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, o
 
 /* ─── Project Row (List) ───────────────────────────────────────────── */
 
-function ProjectCardList({ project, onDelete, onArchive, selectMode, selected, onToggleSelect }: CardProps) {
-  const allPapers = persistGet<SavedResearchPaper[]>('research-papers', [])
-  const paperCount = allPapers.filter(p => p.project_id === project.id).length
+function ProjectCardList({ project, onDelete, onArchive, selectMode, selected, onToggleSelect, paperCount = 0 }: CardProps) {
   const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
   const docCount = allDocs.filter(d => d.project_id === project.id).length
   const isArchived = (project.status || 'active') === 'archived'
@@ -509,9 +509,28 @@ export default function Projects() {
   const [diseaseFocusFilter, setDiseaseFocusFilter] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d' | '1y'>('all')
+  // paperCountByProject: per-project saved-paper count, fetched once on
+  // mount from /api/v1/saved-papers and indexed by project_id. Empty
+  // until the request resolves; cards default to 0 in the meantime.
+  const [paperCountByProject, setPaperCountByProject] = useState<Record<string, number>>({})
 
   useEffect(() => {
     loadProjects()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    api.listSavedPapers({ limit: 500 })
+      .then(rows => {
+        if (cancelled) return
+        const counts: Record<string, number> = {}
+        for (const r of rows) {
+          if (r.project_id) counts[r.project_id] = (counts[r.project_id] || 0) + 1
+        }
+        setPaperCountByProject(counts)
+      })
+      .catch(() => { /* leave map empty if endpoint unreachable */ })
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
@@ -994,6 +1013,7 @@ export default function Projects() {
                 selectMode={selectMode}
                 selected={selectedIds.has(project.id)}
                 onToggleSelect={toggleSelect}
+                paperCount={paperCountByProject[project.id]}
               />
             ))}
           </div>
@@ -1008,6 +1028,7 @@ export default function Projects() {
                 selectMode={selectMode}
                 selected={selectedIds.has(project.id)}
                 onToggleSelect={toggleSelect}
+                paperCount={paperCountByProject[project.id]}
               />
             ))}
           </div>
