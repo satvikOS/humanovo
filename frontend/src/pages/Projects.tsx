@@ -8,7 +8,7 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, ProjectCreate } from '../services/api'
-import { persistGet, logActivity } from '../utils/persistence'
+import { logActivity } from '../utils/persistence'
 import { formatTimeAgo } from '../utils/time'
 import { Skeleton } from '../components/Skeleton'
 import { toast } from '../contexts/ToastContext'
@@ -21,11 +21,9 @@ type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'archived'
 
 /* ─── Stats Bar ─────────────────────────────────────────────────────── */
 
-function StatsBar({ projects }: { projects: Project[] }) {
+function StatsBar({ projects, totalDocs }: { projects: Project[]; totalDocs: number }) {
   const totalHypotheses = projects.reduce((sum, p) => sum + (p.hypothesis_count || 0), 0)
-  // project-documents still localStorage-only — Round 4c will wire it backend.
-  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
-  const totalEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0) + allDocs.length
+  const totalEvidence = projects.reduce((sum, p) => sum + (p.evidence_count || 0), 0) + totalDocs
   const activeCount = projects.filter(p => (p.status || 'active') === 'active').length
   const archivedCount = projects.filter(p => (p.status || 'active') === 'archived').length
 
@@ -257,6 +255,7 @@ interface CardProps {
   project: Project
   onDelete: (id: string) => void
   onArchive: (id: string, restore: boolean) => void
+  docCount?: number
   selectMode: boolean
   selected: boolean
   onToggleSelect: (id: string) => void
@@ -276,9 +275,7 @@ function SelectBox({ selected, onClick }: { selected: boolean; onClick: (e: Reac
   )
 }
 
-function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, onToggleSelect, paperCount = 0 }: CardProps) {
-  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
-  const docCount = allDocs.filter(d => d.project_id === project.id).length
+function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, onToggleSelect, paperCount = 0, docCount = 0 }: CardProps) {
   const isArchived = (project.status || 'active') === 'archived'
   const visibleTags = (project.tags || []).filter(t => !isNoiseTag(t))
 
@@ -384,9 +381,7 @@ function ProjectCardGrid({ project, onDelete, onArchive, selectMode, selected, o
 
 /* ─── Project Row (List) ───────────────────────────────────────────── */
 
-function ProjectCardList({ project, onDelete, onArchive, selectMode, selected, onToggleSelect, paperCount = 0 }: CardProps) {
-  const allDocs = persistGet<{ id: string; project_id: string }[]>('project-documents', [])
-  const docCount = allDocs.filter(d => d.project_id === project.id).length
+function ProjectCardList({ project, onDelete, onArchive, selectMode, selected, onToggleSelect, paperCount = 0, docCount = 0 }: CardProps) {
   const isArchived = (project.status || 'active') === 'archived'
 
   return (
@@ -513,6 +508,10 @@ export default function Projects() {
   // mount from /api/v1/saved-papers and indexed by project_id. Empty
   // until the request resolves; cards default to 0 in the meantime.
   const [paperCountByProject, setPaperCountByProject] = useState<Record<string, number>>({})
+  // docCountByProject: per-project document count, fetched once on
+  // mount from /api/v1/project-documents (Round 4f). Same pattern as
+  // paperCountByProject — empty until the request resolves.
+  const [docCountByProject, setDocCountByProject] = useState<Record<string, number>>({})
 
   useEffect(() => {
     loadProjects()
@@ -532,6 +531,26 @@ export default function Projects() {
       .catch(() => { /* leave map empty if endpoint unreachable */ })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    api.listProjectDocuments({ limit: 1000 })
+      .then(rows => {
+        if (cancelled) return
+        const counts: Record<string, number> = {}
+        for (const r of rows) {
+          counts[r.project_id] = (counts[r.project_id] || 0) + 1
+        }
+        setDocCountByProject(counts)
+      })
+      .catch(() => { /* leave map empty if endpoint unreachable */ })
+    return () => { cancelled = true }
+  }, [])
+
+  const totalDocCount = useMemo(
+    () => Object.values(docCountByProject).reduce((a, b) => a + b, 0),
+    [docCountByProject],
+  )
 
   useEffect(() => {
     localStorage.setItem('humanovo-projects-view', viewMode)
@@ -833,7 +852,7 @@ export default function Projects() {
       )}
 
       {/* Stats */}
-      {!loading && projects.length > 0 && <StatsBar projects={projects} />}
+      {!loading && projects.length > 0 && <StatsBar projects={projects} totalDocs={totalDocCount} />}
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-6">
@@ -1014,6 +1033,7 @@ export default function Projects() {
                 selected={selectedIds.has(project.id)}
                 onToggleSelect={toggleSelect}
                 paperCount={paperCountByProject[project.id]}
+                docCount={docCountByProject[project.id]}
               />
             ))}
           </div>
@@ -1029,6 +1049,7 @@ export default function Projects() {
                 selected={selectedIds.has(project.id)}
                 onToggleSelect={toggleSelect}
                 paperCount={paperCountByProject[project.id]}
+                docCount={docCountByProject[project.id]}
               />
             ))}
           </div>

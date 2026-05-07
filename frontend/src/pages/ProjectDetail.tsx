@@ -7,8 +7,8 @@ import {
   FiUpload, FiFile, FiEye, FiEdit2, FiCheck,
 } from 'react-icons/fi'
 import clsx from 'clsx'
-import api, { Project, apiClient } from '../services/api'
-import { logActivity, formatDate, usePersistentState, blobPut, blobGet, blobDelete } from '../utils/persistence'
+import api, { Project, apiClient, type ProjectDocumentSummary } from '../services/api'
+import { logActivity, formatDate } from '../utils/persistence'
 import HypothesisDocViewer, { type TranslationalRoadmapDoc } from '../components/HypothesisDocViewer'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { useEscapeKey } from '../utils/clickable'
@@ -36,22 +36,14 @@ interface SavedHypothesis {
   translational_roadmap?: TranslationalRoadmapDoc
 }
 
-interface ProjectDocument {
-  id: string
-  project_id: string
-  title: string
-  doc_type: string
-  authors: string
-  date: string
-  description: string
-  tags: string[]
-  filename: string
-  file_size: number
-  mime_type: string
-  uploaded_at: string
-  knowledge_base: 'private' | 'common'
-  // data_base64 is stored in IndexedDB, NOT in this object (to avoid localStorage size limits)
-}
+// Project documents are now sourced from /api/v1/project-documents
+// (Round 4f). The local interface that lived here described a
+// localStorage shape with `date` / `uploaded_at` fields and an
+// IndexedDB-side blob; both are gone. ProjectDocumentSummary is the
+// authoritative listing-row shape (`document_date` / `created_at` /
+// metadata only); the file body is fetched on demand via
+// api.getProjectDocumentContent(id).
+type ProjectDocument = ProjectDocumentSummary
 
 const DOC_TYPES = ['Protocol', 'Report', 'Dataset', 'Consent Form', 'IRB Approval', 'Lab Notes', 'Manuscript', 'Supplementary', 'Other'] as const
 
@@ -75,22 +67,17 @@ function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () =>
       setLoading(true)
       setError(null)
       try {
-        const base64 = await blobGet(doc.id)
+        // Fetch the raw file body from the backend. The server returns
+        // a Blob with the original Content-Type header; URL.createObjectURL
+        // gives us a renderable handle for <iframe>, <img>, or download
+        // anchors without the base64-decode dance the IndexedDB version
+        // required.
+        const blob = await api.getProjectDocumentContent(doc.id)
         if (cancelled) return
-        if (!base64) {
-          setError('File content not found. It may need to be re-uploaded on this device.')
-          setLoading(false)
-          return
-        }
-        // Convert base64 to Blob → ObjectURL (handles large files properly)
-        const binary = atob(base64)
-        const bytes = new Uint8Array(binary.length)
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-        const blob = new Blob([bytes], { type: doc.mime_type })
         objectUrl = URL.createObjectURL(blob)
         setBlobUrl(objectUrl)
         if (isText) {
-          try { setTextContent(new TextDecoder().decode(bytes)) } catch { setTextContent(null) }
+          try { setTextContent(await blob.text()) } catch { setTextContent(null) }
         }
       } catch (e) {
         if (!cancelled) setError(`Failed to load document: ${e instanceof Error ? e.message : String(e)}`)
@@ -101,7 +88,7 @@ function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () =>
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [doc.id])
+  }, [doc.id, doc.mime_type, isText])
 
   return (
     <div className="h-full flex flex-col">
@@ -116,7 +103,7 @@ function DocumentViewer({ doc, onClose }: { doc: ProjectDocument; onClose: () =>
         <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
           <span>{doc.doc_type}</span>
           {doc.authors && <span>{doc.authors}</span>}
-          <span>{formatDate(doc.date)}</span>
+          {doc.document_date && <span>{formatDate(doc.document_date)}</span>}
           {blobUrl && (
             <a href={blobUrl} download={doc.filename} className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Download">
               <FiFile className="w-3.5 h-3.5" />
@@ -197,17 +184,41 @@ export default function ProjectDetail() {
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
   const [deletePaperId, setDeletePaperId] = useState<string | null>(null)
 
-  // Documents state
-  const [allDocs, setAllDocs] = usePersistentState<ProjectDocument[]>('project-documents', [])
-  const projectDocs = allDocs.filter(d => d.project_id === projectId)
-  const setProjectDocs = useCallback((updater: ProjectDocument[] | ((prev: ProjectDocument[]) => ProjectDocument[])) => {
-    setAllDocs(prev => {
-      const others = prev.filter(d => d.project_id !== projectId)
-      const current = prev.filter(d => d.project_id === projectId)
-      const next = typeof updater === 'function' ? updater(current) : updater
-      return [...next, ...others]
-    })
-  }, [projectId, setAllDocs])
+  // Documents state - sourced from /api/v1/project-documents (Round 4f).
+  // Project-scoped: load on mount, mutate optimistically on upload/delete,
+  // refresh on demand. The list shape is metadata-only; file bodies are
+  // streamed lazily by DocumentViewer via api.getProjectDocumentContent.
+  const [projectDocs, setProjectDocsState] = useState<ProjectDocument[]>([])
+  const [docsLoading, setDocsLoading] = useState(false)
+  const setProjectDocs = useCallback(
+    (updater: ProjectDocument[] | ((prev: ProjectDocument[]) => ProjectDocument[])) => {
+      setProjectDocsState(prev => (typeof updater === 'function' ? updater(prev) : updater))
+    },
+    [],
+  )
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+    setDocsLoading(true)
+    api
+      .listProjectDocuments({ project_id: projectId, limit: 500 })
+      .then(rows => {
+        if (cancelled) return
+        setProjectDocsState(rows)
+      })
+      .catch(err => {
+        // Listing failure leaves the panel empty rather than crashing
+        // the page. The user can retry by refreshing; the upload UI
+        // remains usable.
+        console.warn('ProjectDetail: failed to list project documents', err)
+      })
+      .finally(() => {
+        if (!cancelled) setDocsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
   const [showDocUpload, setShowDocUpload] = useState(false)
   // Wire global Escape closer for the doc-upload modal (sibling backdrop;
   // focus is in the file input so backdrop's own keydown never fires).
@@ -620,54 +631,49 @@ export default function ProjectDetail() {
 
   const handleDocUpload = useCallback(async () => {
     if (!docFile || !docForm.title.trim() || !projectId) return
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const base64 = (reader.result as string).split(',')[1] || ''
-      const docId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      // Store the file blob in IndexedDB (no size limits)
-      await blobPut(docId, base64)
-      // Store metadata in localStorage (small, syncs across devices)
-      const doc: ProjectDocument = {
-        id: docId,
+    try {
+      const created = await api.uploadProjectDocument(docFile, {
         project_id: projectId,
         title: docForm.title.trim(),
         doc_type: docForm.doc_type,
-        authors: docForm.authors.trim(),
-        date: docForm.date || new Date().toISOString().split('T')[0],
-        description: docForm.description.trim(),
+        authors: docForm.authors.trim() || undefined,
+        document_date: docForm.date || undefined,
+        description: docForm.description.trim() || undefined,
         tags: docForm.tags.split(',').map(t => t.trim()).filter(Boolean),
-        filename: docFile.name,
-        file_size: docFile.size,
-        mime_type: docFile.type,
-        uploaded_at: new Date().toISOString(),
         knowledge_base: docForm.knowledge_base,
-      }
-      setProjectDocs(prev => [doc, ...prev])
-      // Also upload to backend ingestion for AI knowledge base
-      try {
-        const { default: apiService } = await import('../services/api')
-        await apiService.uploadDocument(docFile, { project_id: projectId })
-      } catch { /* Backend may be unavailable — local storage still works */ }
-      logActivity({ type: 'evidence', action: 'imported', title: `Uploaded document: ${docForm.title} (${docForm.knowledge_base} KB)`, project: project?.name })
+      })
+      setProjectDocs(prev => [created, ...prev])
+      logActivity({
+        type: 'evidence',
+        action: 'imported',
+        title: `Uploaded document: ${docForm.title} (${docForm.knowledge_base} KB)`,
+        project: project?.name,
+      })
       setShowDocUpload(false)
       setDocForm({ title: '', doc_type: 'Protocol', authors: '', date: '', description: '', tags: '', knowledge_base: 'private' })
       setDocFile(null)
+    } catch (err) {
+      console.error('ProjectDetail: upload failed', err)
     }
-    reader.readAsDataURL(docFile)
   }, [docFile, docForm, projectId, project, setProjectDocs])
 
   const confirmDeleteDoc = async () => {
     if (!deleteDocId) return
     const doc = projectDocs.find(d => d.id === deleteDocId)
-    await blobDelete(deleteDocId).catch(err => {
-      // Local IndexedDB blob deletion failing is non-fatal (the doc
-      // record itself was already removed); log so a dev can see if
-      // the blob store is actually broken vs the doc never had a blob.
-      console.warn('ProjectDetail: failed to delete document blob (record removed anyway)', err)
-    })
-    setProjectDocs(prev => prev.filter(d => d.id !== deleteDocId))
-    logActivity({ type: 'evidence', action: 'deleted', title: `Deleted document: ${doc?.title || deleteDocId}`, project: project?.name })
-    setDeleteDocId(null)
+    try {
+      await api.deleteProjectDocument(deleteDocId)
+      setProjectDocs(prev => prev.filter(d => d.id !== deleteDocId))
+      logActivity({
+        type: 'evidence',
+        action: 'deleted',
+        title: `Deleted document: ${doc?.title || deleteDocId}`,
+        project: project?.name,
+      })
+    } catch (err) {
+      console.error('ProjectDetail: delete failed', err)
+    } finally {
+      setDeleteDocId(null)
+    }
   }
 
   const printPaper = useCallback(() => {
@@ -1291,7 +1297,9 @@ export default function ProjectDetail() {
               </button>
             </div>
 
-            {projectDocs.length > 0 ? (
+            {docsLoading && projectDocs.length === 0 ? (
+              <p className="text-[var(--color-text-muted)] text-sm">Loading documents&hellip;</p>
+            ) : projectDocs.length > 0 ? (
               <div className="space-y-2">
                 {projectDocs.map(doc => (
                   <div
@@ -1304,7 +1312,7 @@ export default function ProjectDetail() {
                       <div className="min-w-0">
                         <p className="text-white text-sm font-medium truncate">{doc.title}</p>
                         <p className="text-[var(--color-text-muted)] text-xs mt-0.5">
-                          {doc.doc_type} &middot; {formatDate(doc.date)} &middot; {(doc.file_size / 1024).toFixed(0)} KB
+                          {doc.doc_type} &middot; {formatDate(doc.document_date || doc.created_at)} &middot; {(doc.file_size / 1024).toFixed(0)} KB
                         </p>
                       </div>
                     </div>

@@ -2306,7 +2306,7 @@ class STITCHSource(DataSourceBase):
 
 
 # ===================================================================
-# PHASE 4 STUBS — Niche, Regional & Specialized Sources
+# PHASE 4 — Niche, Regional & Specialized Sources
 # ===================================================================
 
 class MirBaseSource(DataSourceBase):
@@ -2919,12 +2919,16 @@ PHASE_2_SOURCES = [k for k, v in ALL_SOURCE_CLASSES.items() if v.phase == 2]
 PHASE_3_SOURCES = [k for k, v in ALL_SOURCE_CLASSES.items() if v.phase == 3]
 PHASE_4_SOURCES = [k for k, v in ALL_SOURCE_CLASSES.items() if v.phase == 4]
 
-# Active by default in the orchestrator. Phase 1 + Phase 2 = 36
-# sources that are public-domain / open-license / commercial-use-OK
-# with stable APIs and reasonable rate limits. Phase 3 and 4 require
-# explicit opt-in either via a per-tenant feature flag or an explicit
-# source_names list passed to the orchestrator constructor.
-ACTIVE_SOURCES: list[str] = PHASE_1_SOURCES + PHASE_2_SOURCES
+# Active by default in the orchestrator. Phase 1 + 2 + 3 + 4 = 62
+# biomedical sources, all public-domain / open-license / commercial-use-OK
+# with stable APIs and reasonable rate limits. Each source's _safe_search
+# wraps the network call in try/except so a single source failing never
+# blocks the orchestrator's gather() — failures surface as a
+# DataSourceResult with `error` populated, the rest of the result list
+# is unaffected.
+ACTIVE_SOURCES: list[str] = (
+    PHASE_1_SOURCES + PHASE_2_SOURCES + PHASE_3_SOURCES + PHASE_4_SOURCES
+)
 
 
 # ===================================================================

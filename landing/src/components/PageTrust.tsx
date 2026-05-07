@@ -318,7 +318,7 @@ export default function PageTrust() {
             >
               {[
                 ["Pipeline", "12 adversarial stages"],
-                ["Sources", "36 biomedical APIs"],
+                ["Sources", "62 biomedical APIs"],
                 ["Round-trip", "100% on launch"],
                 ["Audit log", "tamper-evident"],
               ].map(([k, v]) => (
