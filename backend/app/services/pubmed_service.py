@@ -658,7 +658,7 @@ class BiologicalDatabaseService:
         session = await self._get_session()
         try:
             async with session.get(
-                f"https://reactome.org/ContentService/search/query",
+                "https://reactome.org/ContentService/search/query",
                 params={"query": query, "species": "Homo sapiens", "types": "Pathway", "cluster": "true"},
             ) as resp:
                 if resp.status != 200:
@@ -710,7 +710,7 @@ class BiologicalDatabaseService:
         session = await self._get_session()
         try:
             async with session.get(
-                f"https://hmdb.ca/unearth/q",
+                "https://hmdb.ca/unearth/q",
                 params={"query": query, "searcher": "metabolites", "button": ""},
                 allow_redirects=True,
             ) as resp:

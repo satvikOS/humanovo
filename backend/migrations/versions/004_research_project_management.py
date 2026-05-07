@@ -1,4 +1,4 @@
-"""Add research project management tables per Project Jamison v2 spec
+"""Add research project management tables per the v2 platform spec.
 
 Creates tables for:
 - discovery_runs: Track discovery pipeline executions
@@ -35,7 +35,7 @@ def upgrade() -> None:
 
     # ── discovery_runs table ─────────────────────────────────────────
     # Migration 002 already created discovery_runs (pipeline-intelligence
-    # schema, no project_id). Extend it here with the Jamison-v2 columns
+    # schema, no project_id). Extend it here with the v2 columns
     # so both surface areas can coexist on one table.
     op.execute("""
         CREATE TABLE IF NOT EXISTS discovery_runs (
@@ -58,7 +58,7 @@ def upgrade() -> None:
             completed_at TIMESTAMPTZ
         )
     """)
-    # Guard the Jamison-v2 column additions with IF NOT EXISTS so this
+    # Guard the v2 column additions with IF NOT EXISTS so this
     # migration is idempotent after 002 pre-created the table.
     op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE")
     op.execute("ALTER TABLE discovery_runs ADD COLUMN IF NOT EXISTS config JSONB NOT NULL DEFAULT '{}'::jsonb")

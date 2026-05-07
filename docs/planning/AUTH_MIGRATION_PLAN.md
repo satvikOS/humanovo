@@ -55,7 +55,7 @@ This applies `get_current_active_user` to *every* endpoint in the router by defa
 | `imaging` | `endpoints/imaging.py` | user (or hide) | v1 cut list says hide. |
 | `ingestion` | `endpoints/ingestion.py` | admin | Bulk ingestion is admin-only. |
 | `ingestion_ws` | `endpoints/ingestion_ws.py` | admin | WebSocket; auth via initial handshake token. |
-| `jamison_api` | `endpoints/jamison_api.py` | **rename + admin** | P0: rename file to drop the codename. Likely admin/internal. |
+| `platform_api` | `endpoints/platform_api.py` | **rename + admin** | P0: rename file to drop the codename. Likely admin/internal. |
 | `kg_permissions` | `endpoints/kg_permissions.py` | user | User sets permissions on their own KG documents. |
 | `knowledge` | `endpoints/knowledge.py` | user | |
 | `knowledge_graph` | `endpoints/knowledge_graph.py` | user | |
@@ -106,7 +106,7 @@ Endpoints to gate behind `DEBUG` (not exposed in production):
 
 **Wave 2 — admin modules**
 
-6. Apply `dependencies=ADMIN_REQUIRED` to: `admin`, `_bulk`, `ingestion`, `ingestion_ws`, `monitoring`, `jamison_api` (post-rename).
+6. Apply `dependencies=ADMIN_REQUIRED` to: `admin`, `_bulk`, `ingestion`, `ingestion_ws`, `monitoring`, `platform_api` (post-rename).
 7. Drop env-only gating from `admin.py` seed endpoints; replace with admin role check.
 
 **Wave 3 — hidden v1 modules**

@@ -16,7 +16,6 @@ from __future__ import annotations
 import math
 from collections import Counter
 from collections.abc import Callable
-from typing import Any
 
 import numpy as np
 from scipy import stats as sp_stats
@@ -26,10 +25,7 @@ from app.compute.types import (
     ComputeRequest,
     ComputeResult,
     ComputeStatus,
-    DescriptiveStats,
     GeneratedFigure,
-    StatisticalTest,
-    ConfidenceInterval,
 )
 
 # ── Reference pathway databases ──────────────────────────────────

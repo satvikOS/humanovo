@@ -25,10 +25,7 @@ from app.core.auth import AUTH_REQUIRED
 from app.compute.types import (
     ComputeDomain,
     ComputeRequest,
-    ComputeResult,
-    ComputeStatus,
     DataFormat,
-    FigureFormat,
 )
 
 logger = get_logger(__name__)

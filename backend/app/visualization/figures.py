@@ -35,7 +35,7 @@ import io
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from app.visualization.style import (
     apply_humanovo_style,

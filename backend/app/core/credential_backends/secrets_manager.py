@@ -47,7 +47,7 @@ from app.core.credential_pool import CredentialBackend, KeySpec
 from app.core.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover
-    from mypy_boto3_secretsmanager.client import SecretsManagerClient
+    pass
 
 logger = get_logger(__name__)
 

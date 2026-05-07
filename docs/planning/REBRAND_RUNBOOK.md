@@ -25,7 +25,7 @@ The legacy codename `genup` is embedded across Terraform, IAM, AWS resource name
 | File | Lines | Reference |
 |---|---|---|
 | `backend/app/core/auth.py` | 4 | docstring `"JWT-based authentication for GenUp"` |
-| `backend/app/api/v1/endpoints/jamison_api.py` | filename | entire module named after internal codename ("Project Jamison") |
+| `backend/app/api/v1/endpoints/platform_api.py` | filename | entire module named after internal codename ("the v2 platform") |
 | (other occurrences flagged during deep grep) | | sweep at execution time |
 
 ### Tier-3: frontend (localStorage migration required)
@@ -64,7 +64,7 @@ The legacy codename `genup` is embedded across Terraform, IAM, AWS resource name
 **Window — step 1: backend code rename (safe to land first, no infra touch)**
 
 5. Update `backend/app/core/auth.py:4` docstring.
-6. Rename `backend/app/api/v1/endpoints/jamison_api.py` → `backend/app/api/v1/endpoints/internal_api.py` (or consolidate into existing modules). Update router registration.
+6. Rename `backend/app/api/v1/endpoints/platform_api.py` → `backend/app/api/v1/endpoints/internal_api.py` (or consolidate into existing modules). Update router registration.
 7. Sweep `grep -rn "[Gg]enup\|GENUP\|jamison\|Jamison\|JAMISON"` across `backend/`, `frontend/`, `scripts/` and rename per context.
 8. Frontend: add migration shim to `ThemeContext.tsx`:
 

@@ -1,5 +1,5 @@
 """
-3-Layer Grounding System per Project Jamison v2 Spec Section 7.
+3-Layer Grounding System per the v2 platform spec section 7.
 
 Layer 1: RAG via pgvector (cosine >= 0.7 threshold, dual embedding)
 Layer 2: Citation verification (PubMed E-Utilities + DOI HEAD requests)
@@ -9,10 +9,8 @@ Layer 3: Cross-source corroboration (cluster claims, count unique DOIs)
 import asyncio
 import re
 import xml.etree.ElementTree as ET
-from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
 
 import httpx
 from pydantic import BaseModel, Field

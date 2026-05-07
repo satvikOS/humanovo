@@ -48,7 +48,6 @@ from app.core.database import async_session_factory
 from app.services.cost_tracking_service import (
     BudgetStatus,
     compute_cost_cents,
-    get_cost_tracker,
 )
 
 logger = logging.getLogger(__name__)

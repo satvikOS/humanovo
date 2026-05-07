@@ -119,7 +119,7 @@ def build_state(
     initial: str | None = None,
     final: str | None = None,
 ) -> str:
-    lines = ["stateDiagram-v2", f"  direction LR"]
+    lines = ["stateDiagram-v2", "  direction LR"]
     if title:
         lines.insert(0, f"---\ntitle: {title}\n---")
     if initial:
@@ -145,7 +145,7 @@ def build_journey(
     sections: list[dict[str, Any]],
 ) -> str:
     """sections = [{'name': str, 'steps': [{'text': str, 'score': 1-5, 'actor': str}]}]"""
-    lines = [f"journey", f"  title {title}"]
+    lines = ["journey", f"  title {title}"]
     for s in sections:
         lines.append(f'  section {s.get("name", "")}')
         for step in s.get("steps", []):

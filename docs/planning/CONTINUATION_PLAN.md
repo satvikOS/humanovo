@@ -1,8 +1,8 @@
-# Humanovo — Project Jamison v2 Continuation Plan
+# Humanovo — the v2 platform Continuation Plan
 
 **Branch:** `claude/project-jamison-implementation-2R6V0`
 **Last Session:** 2026-03-18
-**Spec:** `/home/user/humanovo/Project Jamison.md` (Definitive Implementation Specification v2)
+**Spec:** `/home/user/humanovo/the v2 platform.md` (Definitive Implementation Specification v2)
 
 ---
 
@@ -34,7 +34,7 @@
 - **Frontend Projects page** — Complete rewrite of `frontend/src/pages/Projects.tsx`
   - Stats bar, grid/list toggle, status filters, sort options, enhanced cards
 
-### Commit 2: Jamison v2 Spec Foundations
+### Commit 2: v2 Spec Foundations
 - **Migration 004** — `backend/migrations/versions/004_research_project_management.py`
   - ALTER projects: lab_profile, discovery_config, total_discovery_runs, total_api_cost_cents, best_confidence_score, last_discovery_at
   - CREATE discovery_runs, synthesis_runs, grounding_cache (1024d + 1536d), citation_cache, imaging_records, hypothesis_feedback
@@ -62,8 +62,8 @@
 ### Context for the next Claude Code session:
 
 ```
-Continue implementing Project Jamison v2 on branch claude/project-jamison-implementation-2R6V0
-in the humanovo repo. The spec is at /home/user/humanovo/Project Jamison.md.
+Continue implementing the v2 platform on branch claude/project-jamison-implementation-2R6V0
+in the humanovo repo. The spec is at /home/user/humanovo/the v2 platform.md.
 
 Session 1 completed:
 - pgvector migration (replace ChromaDB) ✅

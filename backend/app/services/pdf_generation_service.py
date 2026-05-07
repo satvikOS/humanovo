@@ -16,10 +16,7 @@ Uses ReportLab for PDF generation and Matplotlib/Pillow for figure rendering.
 All code execution happens in-process (sandboxed via restricted builtins).
 """
 
-import asyncio
 import io
-import textwrap
-import traceback
 from datetime import datetime
 from typing import Any, Optional
 
@@ -41,7 +38,7 @@ class CodeInterpreterPDFGenerator:
 
     async def _get_llm(self):
         if self._llm is None:
-            from app.agents.discovery_orchestrator import MultiModelLLM, TokenPool, ModelType
+            from app.agents.discovery_orchestrator import MultiModelLLM, TokenPool
             pool = TokenPool()
             self._llm = MultiModelLLM(pool)
             await self._llm.initialize()
@@ -546,8 +543,8 @@ class CodeInterpreterPDFGenerator:
             "Vaswani, A. et al. (2017). Attention Is All You Need. NeurIPS.",
             "Brown, T. et al. (2020). Language Models are Few-Shot Learners. NeurIPS.",
             "Touvron, H. et al. (2023). LLaMA: Open and Efficient Foundation Language Models. arXiv.",
-            f"PubMed Central. National Library of Medicine. https://www.ncbi.nlm.nih.gov/pmc/",
-            f"ClinicalTrials.gov. U.S. National Library of Medicine.",
+            "PubMed Central. National Library of Medicine. https://www.ncbi.nlm.nih.gov/pmc/",
+            "ClinicalTrials.gov. U.S. National Library of Medicine.",
             "AWS Bedrock Documentation. Amazon Web Services.",
         ]
         for i, ref in enumerate(refs, 1):

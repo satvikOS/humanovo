@@ -5,9 +5,9 @@ Provides access to the 60+ biomedical data source orchestrator.
 Supports querying individual sources, categories, or all sources in parallel.
 """
 
-from typing import Any, Optional
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger

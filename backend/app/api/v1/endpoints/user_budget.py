@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -25,7 +25,6 @@ from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.core.auth import AUTH_REQUIRED
 from app.services.budget_enforcer_service import get_user_budget_service
-from app.services.cost_tracking_service import get_cost_tracker
 
 logger = get_logger(__name__)
 

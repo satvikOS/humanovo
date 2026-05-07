@@ -5,13 +5,9 @@ Manages WebSocket connections for discovery and synthesis runs.
 Handles client connect/disconnect/reconnect with event replay.
 """
 
-import asyncio
-import json
 from datetime import datetime, timezone
-from typing import Any
-from uuid import uuid4
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
 from app.core.logging import get_logger
 

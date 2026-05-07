@@ -485,7 +485,7 @@ class ChEBIService:
 
         try:
             async with session.get(
-                f"https://www.ebi.ac.uk/ols4/api/ontologies/chebi/terms",
+                "https://www.ebi.ac.uk/ols4/api/ontologies/chebi/terms",
                 params={"obo_id": chebi_id},
             ) as resp:
                 if resp.status != 200:

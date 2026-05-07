@@ -11,7 +11,7 @@ make the dev loop + sandbox demos self-service from the UI.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field

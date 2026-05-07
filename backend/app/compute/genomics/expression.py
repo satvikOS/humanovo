@@ -14,22 +14,18 @@ Provides advanced transcriptomic analysis operations:
 from __future__ import annotations
 
 import io
-import math
 import base64
 from collections.abc import Callable
-from typing import Any
 
 import numpy as np
 from scipy import stats as sp_stats
 from scipy import optimize as sp_optimize
 from scipy.spatial.distance import pdist, squareform
 from scipy.cluster.hierarchy import linkage, fcluster, leaves_list, dendrogram
-from scipy.special import gammaln, digamma, polygamma
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
 from matplotlib import cm
 
 from app.compute.types import (
@@ -37,10 +33,8 @@ from app.compute.types import (
     ComputeRequest,
     ComputeResult,
     ComputeStatus,
-    DescriptiveStats,
     GeneratedFigure,
     StatisticalTest,
-    ConfidenceInterval,
 )
 
 

@@ -34,7 +34,6 @@ from typing import Any
 from app.agents.verification.citation_verifier import (
     VerificationFailure,
     VerifiedCitation,
-    VerificationVerdict,
 )
 
 logger = logging.getLogger(__name__)

@@ -529,7 +529,6 @@ async def _get_project_data(project_id: UUID, user: User) -> dict[str, Any]:
     a non-owned project (no leak about other users' IDs)."""
     try:
         from app.core.database import get_db
-        from app.models.project import Project
         from app.models.hypothesis import Hypothesis
         from sqlalchemy import select
 

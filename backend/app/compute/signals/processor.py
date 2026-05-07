@@ -20,9 +20,7 @@ from app.compute.types import (
     ComputeResult,
     ComputeStatus,
     DescriptiveStats,
-    FigureFormat,
     GeneratedFigure,
-    StatisticalTest,
 )
 
 logger = logging.getLogger(__name__)
@@ -329,7 +327,7 @@ class SignalProcessor:
         request: ComputeRequest,
         progress_callback: Callable[[int, int], None] | None,
     ) -> ComputeResult:
-        from scipy.signal import periodogram, welch, windows
+        from scipy.signal import periodogram, welch
 
         params = request.parameters
         signal = np.asarray(params["signal"], dtype=np.float64)

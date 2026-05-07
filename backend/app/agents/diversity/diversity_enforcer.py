@@ -38,10 +38,9 @@ candidate is rejected even if the cosine similarity is below threshold.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

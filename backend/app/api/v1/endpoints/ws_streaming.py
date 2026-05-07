@@ -14,7 +14,6 @@ Client -> Server commands:
 """
 
 import asyncio
-import json
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -103,9 +102,9 @@ class RunStreamManager:
                 "run_id": run_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
-            # Also cancel via the Jamison API run tracker
+            # Also cancel via the Platform API run tracker
             try:
-                from app.api.v1.endpoints.jamison_api import _active_discovery_runs
+                from app.api.v1.endpoints.platform_api import _active_discovery_runs
                 run = _active_discovery_runs.get(run_id)
                 if run:
                     orchestrator = run.get("orchestrator")

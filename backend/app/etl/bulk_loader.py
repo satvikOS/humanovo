@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 from urllib.request import urlopen, Request
 from urllib.error import URLError
-from uuid import uuid4
 
 import boto3
 from botocore.exceptions import ClientError

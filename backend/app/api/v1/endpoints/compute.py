@@ -16,7 +16,6 @@ without round-tripping the full sandboxed code path.
 import asyncio
 import math
 import os
-import subprocess
 import tempfile
 from typing import List, Optional
 

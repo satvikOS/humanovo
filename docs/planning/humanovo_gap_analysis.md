@@ -26,7 +26,7 @@
 
 ### The Mock Data Problem
 
-Project Jamison v2 spec (line 1 of Section 1) literally states:
+the v2 platform spec (line 1 of Section 1) literally states:
 
 > "The Workbench page currently runs on hardcoded mock data. Nothing else works until this is fixed."
 
@@ -305,7 +305,7 @@ Replace in requirements.txt:
 
 ### Dead References
 - Rename README.md from "GenUp" to "humanovo"
-- Remove all Chinese model references per Project Jamison spec (DeepSeek-R1, Kimi-K2)
+- Remove all Chinese model references per the v2 platform spec (DeepSeek-R1, Kimi-K2)
 - Remove ChromaDB references (replaced by pgvector)
 
 ---

@@ -9,7 +9,6 @@ Replaces the previous ChromaDB-based implementation while preserving the
 same public API surface.
 """
 
-from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
@@ -17,7 +16,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import (
     Column,
     DateTime,
-    Float,
     Index,
     String,
     Text,
@@ -27,7 +25,6 @@ from sqlalchemy import (
     delete,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
-from sqlalchemy.ext.asyncio import AsyncSession
 from pgvector.sqlalchemy import Vector
 
 from app.core.database import async_session_factory, engine

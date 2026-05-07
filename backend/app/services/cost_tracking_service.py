@@ -1,5 +1,5 @@
 """
-Cost Tracking Service per Project Jamison v2 Spec Section 21.
+Cost Tracking Service per the v2 platform spec section 21.
 
 Wraps all LLM/embedding/API calls with cost recording to usage_events table.
 Provides summary queries for billing dashboard.
@@ -8,7 +8,7 @@ Provides summary queries for billing dashboard.
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Literal, Optional
 

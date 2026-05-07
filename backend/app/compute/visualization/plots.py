@@ -8,7 +8,7 @@ Each method returns a GeneratedFigure ready for API serialisation.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Sequence
 
 import matplotlib
 matplotlib.use("Agg")
@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from app.compute.types import FigureFormat, GeneratedFigure  # noqa: E402
+from app.compute.types import GeneratedFigure  # noqa: E402
 
 
 class PlotGenerator:

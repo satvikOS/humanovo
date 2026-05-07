@@ -1820,7 +1820,7 @@ export const api = {
     return { results: filtered, total: filtered.length, query }
   },
 
-  // ── Jamison Discovery Pipeline ──────────────────────────────
+  // ── Discovery Pipeline ──────────────────────────────
 
   async startProjectDiscovery(projectId: string, config: {
     disease: string
@@ -1898,7 +1898,7 @@ export const api = {
     return data
   },
 
-  // ── Jamison Synthesis Pipeline ──────────────────────────────
+  // ── Synthesis Pipeline ──────────────────────────────
 
   async startSynthesis(projectId: string, config: {
     hypothesis: string

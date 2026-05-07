@@ -1,5 +1,5 @@
 """
-Backward/Synthesis Pipeline — 5-stage evidence synthesis per Project Jamison v2 Spec Section 3.
+Backward/Synthesis Pipeline — 5-stage evidence synthesis per the v2 platform spec section 3.
 
 Stages:
   1. DECOMPOSE (Constant AI Explorer) — Break hypothesis into component claims
@@ -11,11 +11,9 @@ Stages:
 Grant-aware formatting: nih_r01, nih_r21, nsf, dod, private_foundation
 """
 
-import asyncio
 import json
 import time
-from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 from uuid import uuid4
 
 import httpx

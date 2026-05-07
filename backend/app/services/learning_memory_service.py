@@ -13,28 +13,21 @@ Key capabilities:
 """
 
 import asyncio
-import hashlib
-import json
-from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Optional
-from uuid import uuid4
 
-from sqlalchemy import and_, desc, func, select, update
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.models.learning_memory import (
     APICostRecord,
-    BenchmarkResult,
-    BenchmarkRun,
     DiscoveryRun,
     FeedbackType,
     HypothesisFeedback,
     LearningMemoryState,
-    PipelineOptimization,
     StageExecution,
     StageOutcome,
     StagePerformanceAggregate,
@@ -460,7 +453,6 @@ class PersistentLearningMemory:
                     .group_by(StageExecution.stage_number, StageExecution.stage_name, StageExecution.model_type)
                 )
 
-                from sqlalchemy import Integer as SAInteger
 
                 for row in result:
                     # Upsert aggregate record

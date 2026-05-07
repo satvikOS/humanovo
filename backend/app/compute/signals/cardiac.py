@@ -18,17 +18,14 @@ from typing import Any
 
 import numpy as np
 from scipy import signal as sp_signal
-from scipy import integrate, interpolate, optimize, stats
+from scipy import integrate, interpolate, optimize
 
 from app.compute.types import (
     ComputeDomain,
     ComputeRequest,
     ComputeResult,
     ComputeStatus,
-    DescriptiveStats,
     GeneratedFigure,
-    StatisticalTest,
-    ConfidenceInterval,
 )
 
 logger = logging.getLogger(__name__)

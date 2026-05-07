@@ -11,7 +11,6 @@ import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,8 +22,6 @@ from app.agents.discovery_orchestrator import (
     DiscoveryOrchestrator,
     DiscoveryOrchestratorStats,
     OrchestratorState,
-    get_orchestrator,
-    start_discovery,
 )
 
 logger = get_logger(__name__)
@@ -689,7 +686,6 @@ async def save_discovery_to_project(project_name: str = None):
     disease = _current_orchestrator._disease or "Unknown"
     discovery_type = _current_orchestrator._discovery_type or "treatment"
 
-    from datetime import datetime
 
     name = project_name or f"{disease} - {discovery_type.replace('_', ' ').title()} Discovery"
 

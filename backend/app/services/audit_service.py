@@ -29,7 +29,6 @@ from sqlalchemy import Column, DateTime, Float, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.base import Base
 

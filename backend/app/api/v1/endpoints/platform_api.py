@@ -1,12 +1,17 @@
 """
-Jamison API Endpoints — Wired to Real Orchestrator
+Platform API Endpoints — Wired to Real Orchestrator
 
 Discovery, synthesis, imaging, pgvector management, and billing
-per Project Jamison v2 spec. Discovery and synthesis endpoints
-are wired to the real 12-stage pipeline orchestrator.
+endpoints. Discovery and synthesis are wired to the real 12-stage
+pipeline orchestrator.
 
 Routes that already exist in projects.py, config_endpoints.py,
 data_sources.py, and pipeline_intelligence.py are NOT duplicated here.
+
+Long-term plan: split this file by domain (discovery_runs.py,
+synthesis_runs.py, imaging_workflow.py, pgvector_admin.py,
+billing_analytics.py) once each surface stabilises. Kept as a single
+module for v1 to minimise router-include churn.
 """
 
 import asyncio
@@ -21,7 +26,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, text, delete, update, func
+from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, async_session_factory
@@ -456,7 +461,6 @@ async def _load_discovery_runs_from_db(
 ):
     """Merge the in-memory in-flight runs with completed runs from the
     `discovery_runs` Postgres table. Returns a (items, total) tuple."""
-    import json as _json
     from sqlalchemy import text
     from app.core.database import engine
 
@@ -1117,41 +1121,41 @@ async def pgvector_search(body: PgvectorSearchRequest) -> list:
 
 @router.post("/dev/pgvector/similarity-test")
 async def pgvector_similarity_test(body: PgvectorSimilarityTestRequest) -> dict:
-    """Run similarity search using both Cohere and OpenAI embeddings and compare results."""
+    """Run similarity search using both Cohere and OpenAI embeddings and compare results.
+
+    Both embedding services must be reachable; without real embeddings the
+    similarity comparison is meaningless (a zero-vector query returns
+    arbitrary nearest neighbours and the verdict is noise).
+    """
     try:
+        from app.knowledge.embedding_service import get_embedding_service
         from app.knowledge.vector_store import get_vector_store
+
         store = get_vector_store()
+        embed_svc = get_embedding_service()
 
-        # Search with biomedical (Cohere) embeddings only
-        cohere_results = await store.search_biomedical(
-            embedding=[0.0] * 1024,  # placeholder — real call needs actual embedding
-            limit=10,
-            min_score=0.0,
-        )
-        # Search with general (OpenAI/Azure) embeddings only
-        openai_results = await store.search_general(
-            embedding=[0.0] * 1536,  # placeholder — real call needs actual embedding
-            limit=10,
-            min_score=0.0,
-        )
-
-        # Try to get real embeddings if an embedding service is available
         try:
-            from app.knowledge.embedding_service import get_embedding_service
-            embed_svc = get_embedding_service()
             bio_emb, gen_emb = await asyncio.gather(
                 embed_svc.embed_biomedical(body.query),
                 embed_svc.embed_general(body.query),
             )
-            cohere_results = await store.search_biomedical(
-                embedding=bio_emb, limit=10, min_score=0.0,
+        except Exception as embed_exc:
+            logger.warning(
+                "pgvector similarity-test: embedding service unavailable",
+                error=str(embed_exc),
             )
-            openai_results = await store.search_general(
-                embedding=gen_emb, limit=10, min_score=0.0,
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Embedding service is not configured or unreachable. "
+                    "Similarity-test requires real embeddings."
+                ),
             )
-        except Exception:
-            # Fall back to raw SQL similarity search without embeddings
-            pass
+
+        cohere_results, openai_results = await asyncio.gather(
+            store.search_biomedical(embedding=bio_emb, limit=10, min_score=0.0),
+            store.search_general(embedding=gen_emb, limit=10, min_score=0.0),
+        )
 
         cohere_ids = {r.id for r in cohere_results}
         openai_ids = {r.id for r in openai_results}
@@ -1488,7 +1492,6 @@ async def billing_usage(
         query = query.where(APICostRecord.created_at <= datetime.fromisoformat(end_date))
 
     # Count total
-    from sqlalchemy import func
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0

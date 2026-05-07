@@ -14,17 +14,14 @@ from typing import Any
 
 import numpy as np
 from scipy import signal as sp_signal
-from scipy import ndimage, optimize, spatial, sparse, stats as sp_stats, interpolate
+from scipy import ndimage, optimize, sparse, stats as sp_stats
 
 from app.compute.types import (
     ComputeDomain,
     ComputeRequest,
     ComputeResult,
     ComputeStatus,
-    ConfidenceInterval,
-    DescriptiveStats,
     GeneratedFigure,
-    StatisticalTest,
 )
 
 

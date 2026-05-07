@@ -151,7 +151,7 @@ async def seed_reactome(max_pathways: int = 120) -> int:
     kg = get_kg_first_service()
 
     # Query the top-level pathways for Homo sapiens
-    logger.info(f"[seed_reactome] fetching top-level pathways...")
+    logger.info("[seed_reactome] fetching top-level pathways...")
     top_level = await re_client.fetch_json(
         "/ContentService/data/pathways/top/9606"
     )

@@ -2,18 +2,15 @@
 Imaging Ingestion Service — Metadata extraction for biomedical imaging files.
 
 Supports DICOM, NIfTI, PNG, JPG, TIFF formats.
-For Jamison's neuroimaging data (MRI, EEG).
+For neuroimaging data (MRI, EEG).
 """
 
-import hashlib
 import os
 from datetime import datetime, timezone
-from typing import Any
 from uuid import uuid4, uuid5, NAMESPACE_DNS
 
 from pydantic import BaseModel
 
-from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

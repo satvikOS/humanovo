@@ -36,7 +36,7 @@ const ResearchImaging = lazy(() => import('./pages/ResearchImaging'))
 const BiobankManager = lazy(() => import('./pages/BiobankManager'))
 const ComputeLab = lazy(() => import('./pages/compute'))
 
-// Project Jamison — integrated project workspace routes.
+// the v2 platform — integrated project workspace routes.
 const ProjectWorkspace = lazy(() => import('./pages/ProjectWorkspace'))
 const DiscoveryRunner = lazy(() => import('./pages/DiscoveryRunner'))
 const HypothesisReview = lazy(() => import('./pages/HypothesisReview'))
@@ -101,7 +101,7 @@ function App() {
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
         <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />
         <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />
-        {/* Project Jamison — integrated project workspace routes */}
+        {/* the v2 platform — integrated project workspace routes */}
         <Route path="projects/:projectId/workspace" element={<LazyPageWrapper><ProjectWorkspace /></LazyPageWrapper>} />
         <Route path="projects/:projectId/discover" element={<LazyPageWrapper><DiscoveryRunner /></LazyPageWrapper>} />
         <Route path="projects/:projectId/hypotheses/:hypothesisId" element={<LazyPageWrapper><HypothesisReview /></LazyPageWrapper>} />
@@ -142,7 +142,7 @@ function App() {
         <Route path="knowledge-graph" element={<LazyPageWrapper><KnowledgeGraph /></LazyPageWrapper>} />
         <Route path="knowledge-graph/viewer" element={<LazyPageWrapper><KnowledgeGraphViewer /></LazyPageWrapper>} />
         <Route path="ml-models" element={<V1Gate path="/ml-models"><LazyPageWrapper><MLModelManager /></LazyPageWrapper></V1Gate>} />
-        {/* Project Jamison — platform-level pages */}
+        {/* the v2 platform — platform-level pages */}
         <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />
       </Route>
     </Routes>

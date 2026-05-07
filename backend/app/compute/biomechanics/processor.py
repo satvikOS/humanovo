@@ -25,7 +25,6 @@ from app.compute.types import (
     DescriptiveStats,
     FigureFormat,
     GeneratedFigure,
-    StatisticalTest,
 )
 
 # ---------------------------------------------------------------------------

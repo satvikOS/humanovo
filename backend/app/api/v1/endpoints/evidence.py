@@ -20,7 +20,6 @@ from app.core.ownership import (
     assert_owns_project,
     fetch_owned_or_global_or_404,
     filter_by_owned_or_global_project,
-    filter_by_owned_project,
 )
 from app.models.evidence import Evidence, EvidenceSource as EvidenceSourceModel
 from app.models.user import User

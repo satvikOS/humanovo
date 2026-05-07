@@ -20,7 +20,7 @@ from typing import Any
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
@@ -30,7 +30,6 @@ from reportlab.platypus import (
     PageBreak,
     PageTemplate,
     Paragraph,
-    SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
@@ -38,7 +37,7 @@ from reportlab.platypus import (
 from reportlab.platypus.tableofcontents import TableOfContents
 
 from docx import Document as DocxDocument
-from docx.shared import Inches, Pt, Cm, RGBColor
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 
@@ -1480,10 +1479,10 @@ class DocumentExportService:
         parts = [
             f"Background: {disease_name} remains an area of significant unmet "
             f"medical need requiring novel therapeutic strategies.",
-            f"Methods: We employed the Humanovo AI Discovery Platform, a multi-agent "
-            f"system integrating literature mining, knowledge-graph reasoning, and "
-            f"molecular pathway analysis, to systematically generate and validate "
-            f"therapeutic hypotheses.",
+            "Methods: We employed the Humanovo AI Discovery Platform, a multi-agent "
+            "system integrating literature mining, knowledge-graph reasoning, and "
+            "molecular pathway analysis, to systematically generate and validate "
+            "therapeutic hypotheses.",
             f"Results: The platform identified {num_h} novel hypotheses supported "
             f"by {num_e} pieces of evidence from diverse biomedical sources.",
         ]
@@ -1493,8 +1492,8 @@ class DocumentExportService:
                 f"mechanistic plausibility and evidence support."
             )
         parts.append(
-            f"Conclusions: AI-driven multi-agent discovery provides a powerful "
-            f"framework for identifying novel therapeutic targets. The hypotheses "
-            f"generated warrant further experimental and clinical validation."
+            "Conclusions: AI-driven multi-agent discovery provides a powerful "
+            "framework for identifying novel therapeutic targets. The hypotheses "
+            "generated warrant further experimental and clinical validation."
         )
         return " ".join(parts)

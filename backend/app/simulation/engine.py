@@ -18,7 +18,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-from scipy import integrate, optimize, stats
+from scipy import integrate
 
 from app.core.config import settings
 from app.core.logging import LoggerMixin, get_logger

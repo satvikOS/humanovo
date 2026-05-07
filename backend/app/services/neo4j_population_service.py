@@ -18,13 +18,11 @@ Features:
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
-from uuid import uuid4
 
 from neo4j import AsyncGraphDatabase, AsyncDriver
 

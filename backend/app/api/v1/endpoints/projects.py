@@ -6,7 +6,6 @@ All data persisted to PostgreSQL via Project model.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -399,7 +398,7 @@ async def get_project_stats(
     }
 
 
-# ── Lab Profile & Discovery Config (Project Jamison v2) ──────────────
+# ── Lab Profile & Discovery Config (the v2 platform) ──────────────
 
 
 class LabProfile(BaseModel):

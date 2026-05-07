@@ -8,7 +8,6 @@ Comprehensive REST API with full visualization data for:
 - Pipeline optimization recommendations and history
 """
 
-from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query

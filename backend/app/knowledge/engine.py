@@ -11,7 +11,6 @@ Features:
 - Knowledge versioning and lineage tracking
 """
 
-import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone

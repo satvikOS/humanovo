@@ -1,5 +1,5 @@
 /**
- * ProjectWorkspace — 6-tab project view per Jamison spec Section 14.2
+ * ProjectWorkspace — 6-tab project view per v2 spec section 14
  * Tabs: Overview, Discovery Runs, Hypotheses, Evidence, Costs, Settings
  */
 import { useState, useEffect } from 'react'

@@ -15,7 +15,6 @@ Provides MATLAB-equivalent imaging capabilities:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 import numpy as np
 from scipy import ndimage, optimize
@@ -27,7 +26,6 @@ from app.compute.types import (
     ComputeStatus,
     DescriptiveStats,
     GeneratedFigure,
-    FigureFormat,
 )
 
 

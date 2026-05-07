@@ -7,7 +7,7 @@ moves to the next hypothesis. Between EVERY stage, a dual-model embedding
 grounding system ensures zero hallucinations. Constitutional constraints
 are prepended to ALL stage prompts.
 
-12-Stage Pipeline (per Project Jamison v2 Spec Section 6.1):
+12-Stage Pipeline (per the v2 platform spec section 6):
   Stage 1  — SEED       (Claude Opus 4.6, Bedrock)       : Generate initial hypothesis seed
   Stage 2  — EXPAND     (Claude Sonnet 4.6, Bedrock)     : Broaden hypotheses
   Stage 3  — EVIDENCE   (Cohere Command A, Azure OpenAI) : Literature evidence review (+ ALL APIs)
@@ -64,7 +64,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.logging import LoggerMixin, get_logger
-from app.agents.prompts import get_agent_prompt, MASTER_DISCOVERY_PROMPT
+from app.agents.prompts import get_agent_prompt
 
 logger = get_logger(__name__)
 
@@ -207,7 +207,7 @@ class DiscoveryHypothesis:
     round_number: int = 0
     stages_completed: int = 0
     translational_roadmap: dict[str, Any] = field(default_factory=dict)
-    # Jamison v2 additions
+    # v2 additions
     feasibility_score: float = 0.0
     impact_score: float = 0.0
     required_methods: list[str] = field(default_factory=list)
@@ -1483,7 +1483,7 @@ class HypothesisPipelineResult:
 
 class SequentialHypothesisPipeline:
     """
-    12-Stage Sequential Hypothesis Pipeline (Project Jamison v2).
+    12-Stage Sequential Hypothesis Pipeline (the v2 platform).
 
     All models work on ONE hypothesis at a time, passing results
     from stage to stage. Only after all 12 stages complete does the
@@ -1935,7 +1935,7 @@ class SequentialHypothesisPipeline:
             prev_lines = []
             for ph in previous_hypotheses[:6]:
                 prev_lines.append(f"- [{ph.get('confidence', 0)*100:.0f}%] {ph.get('title', 'Untitled')}: {ph.get('mechanism', '')[:200]}")
-            prev_context = f"\n\n## PREVIOUS DISCOVERIES (from earlier rounds)\n" + "\n".join(prev_lines)
+            prev_context = "\n\n## PREVIOUS DISCOVERIES (from earlier rounds)\n" + "\n".join(prev_lines)
 
         # Build refinement context (for rounds 3-4)
         refine_context = ""
@@ -3111,7 +3111,7 @@ Include the translational roadmap from Stage 11."""
         citations: list[dict[str, Any]],
         counter_args: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Build visualization_data per Jamison v2 spec Section 5.
+        """Build visualization_data per v2 spec section 5.
 
         Computes five chart datasets programmatically from pipeline outputs:
         1. evidence_landscape — scatter of evidence papers

@@ -1466,7 +1466,7 @@ TAB 4: Optimizations
 
 # 15. IMAGING INGESTION SERVICE <a name="15-imaging-ingestion"></a>
 
-For Jamison's neuroimaging data (MRI, EEG).
+For neuroimaging data (MRI, EEG).
 
 ```python
 class ImagingService:

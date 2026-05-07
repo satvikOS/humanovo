@@ -8,7 +8,6 @@ regulatory documents, and budget tracking.
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel

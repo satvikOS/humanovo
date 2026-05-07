@@ -14,21 +14,17 @@ Key capabilities:
 """
 
 import json
-from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from sqlalchemy import and_, desc, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import desc, func, select
 
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.models.learning_memory import (
     HypothesisFeedback,
-    LearningMemoryState,
     OptimizationAction,
     PipelineOptimization,
     StageExecution,
-    StageOutcome,
     StagePerformanceAggregate,
 )
 

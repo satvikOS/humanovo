@@ -208,7 +208,7 @@ Allyson Fess reviews `COMPLIANCE.md` and either (a) confirms it addresses URMC's
 - [ ] Generate Supplementary Table S1: Complete data source inventory
 - [ ] Generate Supplementary Table S2: Benchmark specifications
 - [ ] Generate Supplementary Table S3: Per-stage cost/latency breakdown from Sprint 2 results
-- [ ] Generate Supplementary Figure S1: Pipeline architecture diagram (use Project Jamison v2 spec)
+- [ ] Generate Supplementary Figure S1: Pipeline architecture diagram (use the v2 platform spec)
 - [ ] Generate Supplementary Figure S2: Grounding gate decision flow
 
 ### 5.4 — Open-Source Release

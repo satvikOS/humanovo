@@ -17,14 +17,13 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from typing import Any
 
 import numpy as np
-from scipy import stats as sp_stats, optimize, signal, linalg
+from scipy import stats as sp_stats, optimize, signal
 
 from app.compute.types import (
     ComputeDomain, ComputeRequest, ComputeResult, ComputeStatus,
-    DescriptiveStats, GeneratedFigure, FigureFormat, StatisticalTest, ConfidenceInterval,
+    GeneratedFigure, StatisticalTest,
 )
 
 

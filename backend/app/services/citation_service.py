@@ -1,5 +1,5 @@
 """
-Auto-Citation System per Project Jamison v2 Spec Section 8.
+Auto-Citation System per the v2 platform spec section 8.
 
 CitationService: extract_claims, find_citations, inject_citations,
 format_reference_list, verify_citation.
@@ -10,12 +10,10 @@ import asyncio
 import json
 import re
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from typing import Any, Literal
-from uuid import uuid4
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from app.core.config import settings

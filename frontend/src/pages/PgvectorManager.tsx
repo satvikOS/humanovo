@@ -1,5 +1,5 @@
 /**
- * PgvectorManager — Developer pgvector management UI per Jamison spec Section 20.2
+ * PgvectorManager — Developer pgvector management UI per v2 spec section 20
  * Tabs: Cache Overview, Search & Browse, Similarity Testing, Maintenance
  */
 import { useState, useEffect } from 'react'

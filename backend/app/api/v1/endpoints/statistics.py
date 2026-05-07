@@ -7,9 +7,8 @@ survival analysis, and sample size calculations for research data.
 
 import logging
 import math
-from datetime import datetime
 from typing import Optional
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
