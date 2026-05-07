@@ -192,6 +192,10 @@ export default function Colophon() {
             Provenance
           </Link>
           <span aria-hidden style={{ color: "var(--ink-4)" }}>&middot;</span>
+          <Link href="/atlas" className="colophon-link">
+            Atlas
+          </Link>
+          <span aria-hidden style={{ color: "var(--ink-4)" }}>&middot;</span>
           <a
             href="https://github.com/satvikOS/humanovo"
             target="_blank"

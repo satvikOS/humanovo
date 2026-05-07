@@ -58,11 +58,14 @@ jobs:
       # ─── EDIT THIS ONE LINE if the destination repo isn't this one ───
       DEST_REPO: satvikOS/humanovo-landing
       DEST_BRANCH: main
-      # Author identity used for the mirror commit. Doesn't have to
-      # be a real account — what matters is the commit body links
-      # back to the source SHA for traceability.
-      MIRROR_AUTHOR_NAME: humanovo-mirror-bot
-      MIRROR_AUTHOR_EMAIL: mirror-bot@humanovo.net
+      # Author identity used for the mirror commit. Must resolve to a
+      # real GitHub user — Vercel's "Git Author" verification blocks
+      # deployments whose commit email can't be matched to a known
+      # GitHub account. The github.actor noreply email is the canonical
+      # form for that and is automatically valid for any user who can
+      # push to this repo. Set per-job in the commit step using
+      # ${{ github.actor }} so the mirror is attributed to whoever
+      # actually triggered the source push (not a generic bot).
 
     steps:
       - name: Checkout this monorepo
@@ -211,11 +214,20 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
           SOURCE_REF: ${{ github.ref }}
           ACTOR: ${{ github.actor }}
+          ACTOR_ID: ${{ github.actor_id }}
         run: |
           set -euo pipefail
           cd dest
-          git config user.name  "${MIRROR_AUTHOR_NAME}"
-          git config user.email "${MIRROR_AUTHOR_EMAIL}"
+          # Author the commit as the user who triggered this push.
+          # The github.actor + actor_id noreply form
+          # `<id>+<actor>@users.noreply.github.com` resolves to a real
+          # GitHub user account, which Vercel's "Git Author" check
+          # requires (otherwise the deploy is blocked even though the
+          # mirror push succeeded). Side benefit: the deploy repo's
+          # commit history shows who actually shipped each landing
+          # change, not an anonymous bot.
+          git config user.name  "${ACTOR}"
+          git config user.email "${ACTOR_ID}+${ACTOR}@users.noreply.github.com"
 
           git add -A
 
