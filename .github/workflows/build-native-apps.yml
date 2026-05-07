@@ -101,10 +101,12 @@ jobs:
       - name: Install Linux build deps
         if: matrix.platform == 'ubuntu-22.04'
         run: |
+          # libappindicator3-dev was REMOVED from Ubuntu 22.04 — apt-get
+          # would exit 100 on it. The Ayatana fork (libayatana-appindicator3-dev)
+          # is the supported replacement and is what Tauri 2 looks for.
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
             librsvg2-dev \
             patchelf \
             build-essential \
@@ -188,6 +190,22 @@ jobs:
           # offer an upgrade. Patching it in CI (rather than checking
           # in a constantly-bumping value) keeps the repo clean.
           python3 scripts/set_tauri_version.py "${{ steps.version.outputs.version }}"
+
+      - name: Conditionally enable Tauri updater (when signing keys present)
+        shell: bash
+        env:
+          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+        run: |
+          # Updater is disabled in the committed tauri.conf.json so the
+          # very first build (with no signing keys configured) succeeds.
+          # When the operator generates a Tauri updater keypair and
+          # uploads BOTH halves to repo Secrets:
+          #   TAURI_SIGNING_PRIVATE_KEY  (consumed by tauri-action env)
+          #   TAURI_SIGNING_PUBLIC_KEY   (embedded in the binary so it
+          #                                can verify .sig files)
+          # …this step injects the updater plugin block + flips
+          # createUpdaterArtifacts = true. No code change needed.
+          python3 scripts/configure_tauri_updater.py
 
       - name: Build native app
         uses: tauri-apps/tauri-action@v0
