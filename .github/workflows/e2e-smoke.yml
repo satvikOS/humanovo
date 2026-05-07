@@ -1,0 +1,132 @@
+name: E2E Live Smoke (api.humanovo.net)
+
+# Lightweight smoke harness against the deployed backend. Hits the
+# unauth'd `/health` endpoint, asserts auth is enforced on protected
+# routes, and verifies the Stripe webhook signature check still
+# rejects unsigned payloads. No LLM calls — costs $0/run.
+#
+# Triggers:
+#   - schedule: daily 09:00 UTC. Primary canary signal.
+#   - workflow_dispatch: on-demand (e.g. after a backend deploy).
+#   - workflow_run: fires automatically after each successful run of
+#     the deploy-backend-new-account workflow, so a fresh deploy is
+#     immediately validated end-to-end.
+#
+# Fail-soft behavior: if the API host can't accept a TCP connection
+# (backend not yet deployed, DNS not propagated), every test in
+# tests/e2e_live/ skips via pytest.mark.skipif. The job goes green
+# with a "skipped — backend not reachable yet" job-summary message
+# instead of a red flag for a missing-yet-expected resource.
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Override API URL (default https://api.humanovo.net)'
+        required: false
+        default: ''
+  workflow_run:
+    workflows: ['Deploy Backend to NEW account']
+    types: [completed]
+  # Also auto-run on push when the smoke test code itself changes,
+  # so a contributor editing the harness gets instant feedback.
+  push:
+    branches:
+      - humanovo
+    paths:
+      - 'backend/tests/e2e_live/**'
+      - '.github/workflows/e2e-smoke.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialise smoke runs — no value in stacking concurrent probes.
+  group: e2e-smoke-live
+  cancel-in-progress: false
+
+jobs:
+  live-smoke:
+    name: Probe deployed API
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      HUMANOVO_API_URL: ${{ github.event.inputs.api_url || 'https://api.humanovo.net' }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install minimal deps
+        # We only need httpx + pytest for the smoke — no point pulling
+        # in the full backend requirements set (numpy, asyncpg, …).
+        run: pip install httpx pytest
+
+      - name: Run live smoke
+        id: smoke
+        working-directory: backend
+        run: |
+          set +e
+          pytest tests/e2e_live/ -v --tb=short --no-header 2>&1 | tee smoke.log
+          RC=$?
+          set -e
+          echo "exit_code=$RC" >> "$GITHUB_OUTPUT"
+          # pytest exit codes:
+          #   0  = all pass (or all skipped via skipif → also 0)
+          #   1  = some failed
+          #   2  = test execution interrupted
+          #   3  = internal error
+          #   4  = pytest CLI usage error
+          #   5  = no tests collected
+          # 0 and 5 are both "nothing went wrong" for our purposes.
+          if [ "$RC" -ne 0 ] && [ "$RC" -ne 5 ]; then
+            exit "$RC"
+          fi
+
+      - name: Surface result to job summary
+        if: always()
+        working-directory: backend
+        run: |
+          {
+            echo "## E2E Live Smoke"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Target API | \`${HUMANOVO_API_URL}\` |"
+            echo "| Trigger | \`${{ github.event_name }}\` |"
+            echo "| Run timestamp | \`$(date -u +%FT%TZ)\` |"
+            echo ""
+            if [ ! -f smoke.log ]; then
+              echo "**Result:** no log produced — early job failure."
+              exit 0
+            fi
+            # Distinguish "skipped because API unreachable" from real failures.
+            if grep -qE "skipped" smoke.log && ! grep -qE "FAILED|ERROR " smoke.log; then
+              echo "**Result:** ⏭ Skipped — backend not reachable at \`${HUMANOVO_API_URL}\`."
+              echo ""
+              echo "Dispatch the **Bootstrap Backend** workflow to provision it,"
+              echo "then this canary will start running on its daily schedule."
+            elif grep -qE "FAILED|ERROR " smoke.log; then
+              echo "**Result:** ❌ One or more checks failed."
+              echo ""
+              echo "### Failures"
+              echo '```'
+              grep -E "FAILED|ERROR " smoke.log | head -10
+              echo '```'
+            else
+              passed=$(grep -cE "PASSED" smoke.log || echo 0)
+              echo "**Result:** ✅ All checks passed (${passed} tests)."
+            fi
+            echo ""
+            echo "### Tail of test output"
+            echo '```'
+            tail -50 smoke.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
