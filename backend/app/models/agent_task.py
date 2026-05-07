@@ -4,7 +4,7 @@ Agent Task Model
 Tracks tasks executed by various AI agents in the system.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum as PyEnum
 from typing import Any
 
@@ -136,19 +136,19 @@ class AgentTask(BaseModel):
     def queue(self) -> None:
         """Mark task as queued."""
         self.status = AgentTaskStatus.QUEUED
-        self.queued_at = datetime.utcnow()
+        self.queued_at = datetime.now(timezone.utc)
 
     def start(self, agent_id: str, worker_id: str | None = None) -> None:
         """Mark task as started."""
         self.status = AgentTaskStatus.RUNNING
         self.agent_id = agent_id
         self.worker_id = worker_id
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(timezone.utc)
 
     def complete(self, output_data: dict[str, Any]) -> None:
         """Mark task as completed."""
         self.status = AgentTaskStatus.COMPLETED
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         self.output_data = output_data
         self.progress = 1.0
 
@@ -159,7 +159,7 @@ class AgentTask(BaseModel):
     def fail(self, error_message: str, error_details: dict | None = None) -> None:
         """Mark task as failed."""
         self.status = AgentTaskStatus.FAILED
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         self.error_message = error_message
         self.error_details = error_details
 
@@ -184,7 +184,7 @@ class AgentTask(BaseModel):
     def cancel(self) -> None:
         """Mark task as cancelled."""
         self.status = AgentTaskStatus.CANCELLED
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
 
     def update_progress(self, progress: float) -> None:
         """Update task progress (0.0 to 1.0)."""

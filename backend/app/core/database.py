@@ -1,5 +1,5 @@
 """
-GenUp Database Configuration
+humanovo Database Configuration
 
 SQLAlchemy async database setup for PostgreSQL.
 """

@@ -8,7 +8,7 @@ from various biomedical sources.
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -57,7 +57,7 @@ class OrchestratorMetrics:
     def duration_seconds(self) -> float:
         if not self.start_time:
             return 0.0
-        end = self.end_time or datetime.utcnow()
+        end = self.end_time or datetime.now(timezone.utc)
         return (end - self.start_time).total_seconds()
 
     def add_agent_metrics(self, source_type: str, metrics: IngestionMetrics) -> None:
@@ -206,7 +206,7 @@ class IngestionOrchestrator:
             Dict with results and metrics
         """
         self._metrics = OrchestratorMetrics()
-        self._metrics.start_time = datetime.utcnow()
+        self._metrics.start_time = datetime.now(timezone.utc)
         self._seen_hashes = set()
 
         job_id = str(uuid4())
@@ -241,7 +241,7 @@ class IngestionOrchestrator:
         else:
             results = await self._run_sequential()
 
-        self._metrics.end_time = datetime.utcnow()
+        self._metrics.end_time = datetime.now(timezone.utc)
 
         self.logger.info(
             "Orchestrated ingestion complete",

@@ -7,7 +7,7 @@ Connected to multiple ingestion agents for continuous data acquisition.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -390,7 +390,7 @@ class RAGService(LoggerMixin):
             content=content[:500] + "..." if len(content) > 500 else content,
             source=source,
             metadata=metadata,
-            indexed_at=datetime.utcnow(),
+            indexed_at=datetime.now(timezone.utc),
             chunk_count=len(chunking_result.chunks),
             embedding_model=self.config.embedding_model.value,
         )
@@ -398,7 +398,7 @@ class RAGService(LoggerMixin):
         self._indexed_documents[document_id] = indexed_doc
         self._index_stats["total_documents"] += 1
         self._index_stats["total_chunks"] += len(chunking_result.chunks)
-        self._index_stats["last_update"] = datetime.utcnow()
+        self._index_stats["last_update"] = datetime.now(timezone.utc)
 
         self.logger.info(
             "Document indexed",

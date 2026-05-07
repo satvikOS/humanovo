@@ -6,7 +6,7 @@ regulatory documents, and budget tracking.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -165,7 +165,7 @@ async def enroll_subject(trial_id: str, data: SubjectCreate, db: AsyncSession = 
         sex=data.sex,
         arm=data.arm,
         status="active",
-        enrolled_date=datetime.utcnow().strftime("%Y-%m-%d"),
+        enrolled_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
     )
     db.add(subject)
     await db.flush()

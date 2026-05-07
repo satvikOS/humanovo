@@ -1,5 +1,5 @@
 """
-GenUp Backend - Biomedical Discovery Platform
+humanovo Backend - Biomedical Discovery Platform
 
 An AI-centric platform for biomedical hypothesis generation,
 integrating continuous data ingestion, knowledge management,

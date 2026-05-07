@@ -1,5 +1,5 @@
 """
-GenUp Knowledge Engine
+humanovo Knowledge Engine
 
 The Holy Bible of Healthcare - A continuously updating, deduplicated
 knowledge base that aggregates biomedical data from multiple sources.
@@ -14,7 +14,7 @@ Features:
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -48,7 +48,7 @@ class KnowledgeSource(str, Enum):
 
 
 class KnowledgeRecord(BaseModel):
-    """A single piece of knowledge in the GenUp bible."""
+    """A single piece of knowledge in the humanovo bible."""
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     content_hash: str  # MD5 of normalized content for dedup
@@ -124,7 +124,7 @@ class DeduplicationResult(BaseModel):
 
 class KnowledgeEngine:
     """
-    The GenUp Knowledge Engine - continuously building the Holy Bible of Healthcare.
+    The humanovo Knowledge Engine - continuously building the Holy Bible of Healthcare.
 
     This engine:
     1. Schedules and runs ingestion jobs from multiple sources
@@ -292,7 +292,7 @@ class KnowledgeEngine:
         self._stats["total_records"] += 1
         self._stats["records_by_source"][source.value] = \
             self._stats["records_by_source"].get(source.value, 0) + 1
-        self._stats["last_ingestion"] = datetime.utcnow().isoformat()
+        self._stats["last_ingestion"] = datetime.now(timezone.utc).isoformat()
 
         logger.debug(
             "Record ingested",
@@ -365,7 +365,7 @@ class KnowledgeEngine:
             source=source,
             query=query,
             priority=priority,
-            scheduled_at=run_at or datetime.utcnow(),
+            scheduled_at=run_at or datetime.now(timezone.utc),
         )
 
         self._job_queue.append(job)
@@ -383,7 +383,7 @@ class KnowledgeEngine:
     async def run_scheduled_jobs(self) -> list[dict[str, Any]]:
         """Run all scheduled jobs that are due."""
         results = []
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Get jobs that are due
         due_jobs = [j for j in self._job_queue if j.scheduled_at <= now]
@@ -405,7 +405,7 @@ class KnowledgeEngine:
     async def _execute_job(self, job: IngestionJob) -> dict[str, Any]:
         """Execute a single ingestion job."""
         job.status = "running"
-        job.started_at = datetime.utcnow()
+        job.started_at = datetime.now(timezone.utc)
         self._running_jobs[job.id] = job
 
         logger.info("Starting ingestion job", job_id=job.id, source=job.source.value)
@@ -441,7 +441,7 @@ class KnowledgeEngine:
             job.records_fetched = result["metrics"]["total_records_fetched"]
             job.records_indexed = result["metrics"]["total_records_indexed"]
             job.status = "completed"
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
 
             return {
                 "job_id": job.id,
@@ -592,7 +592,7 @@ async def schedule_continuous_ingestion(
 
     This builds up the Holy Bible of Healthcare over time.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     for i, query_config in enumerate(SCHEDULED_QUERIES):
         # Stagger jobs over the interval

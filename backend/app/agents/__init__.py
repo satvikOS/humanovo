@@ -1,5 +1,5 @@
 """
-GenUp AI Agents Module
+humanovo AI Agents Module
 
 Multi-agent orchestration framework for biomedical discovery.
 Includes controller, search, extraction, reasoning, verification,

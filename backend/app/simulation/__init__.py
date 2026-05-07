@@ -1,5 +1,5 @@
 """
-GenUp Simulation Module
+humanovo Simulation Module
 
 Monte Carlo simulation engine for hypothesis validation and outcome prediction.
 """

@@ -35,7 +35,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -330,7 +330,7 @@ async def stream_chat(
         "id": str(uuid.uuid4()),
         "role": "user",
         "content": req.user_message,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "cards": [],
     }
     messages = list(session.messages or [])
@@ -431,7 +431,7 @@ async def stream_chat(
                         "payload": {"session_id": str(session.id), "ok": result.get("ok")},
                     }
                 ],
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "finish_reason": "paper_generated" if result.get("ok") else "paper_failed",
                 "tokens": {"prompt": 0, "completion": 0},
             }
@@ -494,7 +494,7 @@ async def stream_chat(
             "role": "assistant",
             "content": full_text,
             "cards": cards,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "finish_reason": finish_reason,
             "tokens": tokens,
         }

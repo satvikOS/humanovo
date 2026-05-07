@@ -31,7 +31,7 @@ All content is real-time AI generated. Zero hardcoded templates.
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -61,7 +61,7 @@ class ResearchPaper:
         self.hypotheses = hypotheses
         self.stats = stats
         self.external_factors = external_factors or []
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(timezone.utc)
         self.sections: dict[str, str] = {}
         self.references: list[dict[str, str]] = []
         self.tables: list[dict[str, Any]] = []

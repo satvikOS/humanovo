@@ -5,7 +5,7 @@ RESTful API for RAG (Retrieval-Augmented Generation) queries,
 hybrid search, and context retrieval.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -193,7 +193,7 @@ async def rag_query(
         top_k=request.top_k,
     )
 
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     query_id = uuid4()
 
     try:
@@ -269,7 +269,7 @@ async def rag_query(
                 for r in results.relations
             ]
 
-        processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         logger.info(
             "RAG query completed",
@@ -470,7 +470,7 @@ async def rag_health_check() -> dict[str, Any]:
     health = {
         "status": "healthy",
         "components": {},
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     try:

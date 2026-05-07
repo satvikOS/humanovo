@@ -9,7 +9,7 @@ import asyncio
 import base64
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -111,7 +111,7 @@ async def add_annotation(study_id: str, data: AnnotationCreate, db: AsyncSession
         "label": data.label,
         "color": data.color,
         "notes": data.notes,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     current = list(study.annotations or [])
     current.append(annotation)

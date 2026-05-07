@@ -7,7 +7,7 @@ For Jamison's neuroimaging data (MRI, EEG).
 
 import hashlib
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4, uuid5, NAMESPACE_DNS
 
@@ -98,8 +98,8 @@ class ImagingService:
             patient_id_hash=patient_hash,
             study_date=metadata.get("study_date"),
             series_description=metadata.get("series_description"),
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
+            updated_at=datetime.now(timezone.utc).isoformat(),
         )
 
         # Store in database

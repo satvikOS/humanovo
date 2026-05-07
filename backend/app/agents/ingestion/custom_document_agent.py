@@ -15,7 +15,7 @@ allowlist (per INTEGRATION_INVENTORY.md) instead of widening here.
 import hashlib
 import io
 import mimetypes
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -620,7 +620,7 @@ class CustomDocumentIngestionAgent(IngestionAgent):
             abstract=parsed.get("text", "")[:1000],  # First 1000 chars as abstract
             full_text=parsed.get("text"),
             authors=authors,
-            publication_date=datetime.utcnow(),  # Use upload time
+            publication_date=datetime.now(timezone.utc),  # Use upload time
             url=url,
             keywords=keywords,
             metadata={

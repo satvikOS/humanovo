@@ -4,7 +4,7 @@ Simulation API Endpoints
 Run and manage Monte Carlo simulations.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -190,7 +190,7 @@ async def create_simulation(
     )
 
     simulation_id = uuid4()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     simulation_data = SimulationResponse(
         id=simulation_id,
@@ -262,7 +262,7 @@ async def _run_simulation(simulation_id: UUID, config: SimulationCreate) -> None
         sim.outcomes = outcomes
         sim.iterations_completed = config.iterations
         sim.runtime_seconds = end_time - start_time
-        sim.completed_at = datetime.utcnow()
+        sim.completed_at = datetime.now(timezone.utc)
         sim.summary = _generate_summary(outcomes)
 
         logger.info(

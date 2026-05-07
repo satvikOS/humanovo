@@ -5,7 +5,7 @@ Manuscript CRUD, co-author management, journal formatting, submission tracking.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -205,7 +205,7 @@ async def submit_manuscript(manuscript_id: str, data: SubmissionCreate, db: Asyn
         "journal": data.journal,
         "notes": data.notes,
         "status": "submitted",
-        "submitted_at": datetime.utcnow().isoformat(),
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
     }
     current_history = list(ms.submission_history or [])
     current_history.append(submission)

@@ -9,7 +9,7 @@ import asyncio
 import heapq
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import IntEnum
 from typing import Any
 from uuid import UUID, uuid4
@@ -72,11 +72,11 @@ class RateLimitState:
 
     def reset_minute_window(self) -> None:
         self.minute_requests = 0
-        self.minute_window_start = datetime.utcnow()
+        self.minute_window_start = datetime.now(timezone.utc)
 
     def reset_hour_window(self) -> None:
         self.hour_requests = 0
-        self.hour_window_start = datetime.utcnow()
+        self.hour_window_start = datetime.now(timezone.utc)
 
 
 class AgentScheduler:
@@ -196,7 +196,7 @@ class AgentScheduler:
         """
         task = ScheduledTask(
             priority=priority,
-            scheduled_time=datetime.utcnow() + timedelta(seconds=delay_seconds),
+            scheduled_time=datetime.now(timezone.utc) + timedelta(seconds=delay_seconds),
             task_id=uuid4(),
             agent_type=agent_type,
             query=query,
@@ -316,7 +316,7 @@ class AgentScheduler:
         """
         config = self.rate_limits.get(source_type, RateLimitConfig())
         state = self._rate_state[source_type]
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Reset windows if expired
         if (
@@ -354,7 +354,7 @@ class AgentScheduler:
         state = self._rate_state[source_type]
         state.minute_requests += 1
         state.hour_requests += 1
-        state.last_request_time = datetime.utcnow()
+        state.last_request_time = datetime.now(timezone.utc)
 
     async def start(self) -> None:
         """Start the scheduler processor."""
@@ -409,7 +409,7 @@ class AgentScheduler:
         if len(self._running_tasks) >= self.max_concurrent_tasks:
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Find a task that's ready to run
         for i, task in enumerate(self._queue):
@@ -510,7 +510,7 @@ class AgentScheduler:
                 task.retries += 1
                 # Exponential backoff
                 delay = 2**task.retries * 5  # 10s, 20s, 40s
-                task.scheduled_time = datetime.utcnow() + timedelta(seconds=delay)
+                task.scheduled_time = datetime.now(timezone.utc) + timedelta(seconds=delay)
 
                 heapq.heappush(self._queue, task)
                 self._pending_tasks[task.task_id] = task
@@ -646,9 +646,9 @@ class ScheduledIngestionJob:
             "priority": priority,
             "config": config or {},
             "last_run": None,
-            "next_run": datetime.utcnow()
+            "next_run": datetime.now(timezone.utc)
             if start_immediately
-            else datetime.utcnow() + timedelta(seconds=interval_seconds),
+            else datetime.now(timezone.utc) + timedelta(seconds=interval_seconds),
             "enabled": True,
             "run_count": 0,
         }
@@ -708,7 +708,7 @@ class ScheduledIngestionJob:
         """Process recurring jobs."""
         while self._running:
             try:
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
 
                 for job_id, job in self._jobs.items():
                     if not job["enabled"]:

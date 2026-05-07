@@ -14,7 +14,7 @@ import asyncio
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
@@ -212,7 +212,7 @@ class DiscoveryResult(BaseModel):
     translational_roadmap: Optional[TranslationalRoadmap] = None
 
     # Metadata
-    created_at: datetime = datetime.utcnow()
+    created_at: datetime = datetime.now(timezone.utc)
     llm_provider: str = ""
     model_used: str = ""
     processing_time_ms: float = 0.0

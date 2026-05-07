@@ -11,8 +11,22 @@ import os
 from functools import lru_cache
 from typing import Any
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEV_ENVIRONMENTS = {"development", "dev", "test", "testing", "local"}
+_INSECURE_SECRET_KEYS = {
+    "",
+    "change-this-in-production",
+    "change-this-to-a-random-64-char-string",
+    "dev-secret-key-do-not-use-in-prod-32chars-long-please",
+}
+_PLACEHOLDER_PUBMED_EMAILS = {
+    "",
+    "humanovo@example.com",
+    "your-email@institution.edu",
+    "your-email@example.com",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -287,8 +301,11 @@ class Settings(BaseSettings):
     # extension is installed and transparently falls back to Neo4j.
     KG_GRAPH_BACKEND: str = "auto"   # auto | apache_age | neo4j
 
-    # PubMed / Data Sources
-    PUBMED_EMAIL: str = "humanovo@example.com"
+    # PubMed / Data Sources — NCBI requires a real contact email per
+    # E-utilities ToU. Default is intentionally empty so dev callers get
+    # a fail-fast when the env var isn't set; production environments are
+    # blocked at startup by the validator below.
+    PUBMED_EMAIL: str = ""
     PUBMED_API_KEY: SecretStr | None = None
     PUBMED_RATE_LIMIT: int = 10  # requests per second
 
@@ -346,7 +363,8 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
 
-    # Security
+    # Security — see _validate_security_secrets() below; non-dev envs
+    # block startup if SECRET_KEY is left at the placeholder.
     SECRET_KEY: SecretStr = SecretStr("change-this-in-production")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
@@ -424,6 +442,44 @@ class Settings(BaseSettings):
     def azure_embedding_key_value(self) -> str | None:
         """Azure Embedding API key."""
         return self.AZURE_EMBEDDING_KEY.get_secret_value() if self.AZURE_EMBEDDING_KEY else None
+
+    @model_validator(mode="after")
+    def _validate_security_secrets(self) -> "Settings":
+        """Block startup if production-bound secrets are still placeholders.
+
+        Dev environments (development / dev / test / testing / local) get
+        a soft warning. Anything else (production / staging / prod) fails
+        loud — a misconfigured Lambda is better caught at cold-start than
+        after it's been signing JWTs with `change-this-in-production` for
+        a week.
+        """
+        env = (self.ENVIRONMENT or "").lower()
+        is_dev = env in _DEV_ENVIRONMENTS
+
+        secret_value = self.SECRET_KEY.get_secret_value() if self.SECRET_KEY else ""
+        if secret_value in _INSECURE_SECRET_KEYS:
+            msg = (
+                f"SECRET_KEY is set to a known-insecure placeholder "
+                f"({secret_value!r}). Generate a strong random value "
+                f"(>= 32 chars) and set SECRET_KEY in the environment."
+            )
+            if is_dev:
+                logger.warning("[config] %s", msg)
+            else:
+                raise ValueError(msg)
+
+        if self.PUBMED_EMAIL in _PLACEHOLDER_PUBMED_EMAILS:
+            msg = (
+                f"PUBMED_EMAIL is empty or a placeholder "
+                f"({self.PUBMED_EMAIL!r}). NCBI E-utilities requires a "
+                f"real contact email; set PUBMED_EMAIL in the environment."
+            )
+            if is_dev:
+                logger.warning("[config] %s", msg)
+            else:
+                raise ValueError(msg)
+
+        return self
 
 
 @lru_cache

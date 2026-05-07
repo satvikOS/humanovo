@@ -9,7 +9,7 @@ import io
 import json
 import logging
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -381,5 +381,5 @@ async def build_cohort(request: CohortRequest, db: AsyncSession = Depends(get_db
         "row_count": len(filtered),
         "source_row_count": ds.row_count,
         "rows": filtered[:100],
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }

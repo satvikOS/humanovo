@@ -17,7 +17,7 @@ import hashlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .criteria import ExclusionCriteria, InclusionCriteria, SelectionEngine, SelectionResult
@@ -207,10 +207,10 @@ class LiteraturePipeline:
         Returns:
             PipelineResult
         """
-        pipeline_id = f"pipe_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(self.config.name.encode()).hexdigest()[:6]}"
+        pipeline_id = f"pipe_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(self.config.name.encode()).hexdigest()[:6]}"
 
         result = PipelineResult(
-            pipeline_id=pipeline_id, config=self.config, started_at=datetime.utcnow().isoformat()
+            pipeline_id=pipeline_id, config=self.config, started_at=datetime.now(timezone.utc).isoformat()
         )
 
         try:
@@ -263,12 +263,12 @@ class LiteraturePipeline:
             result.statistics = self._calculate_statistics(result)
 
             result.success = True
-            result.completed_at = datetime.utcnow().isoformat()
+            result.completed_at = datetime.now(timezone.utc).isoformat()
 
         except Exception as e:
             logger.error(f"Pipeline failed: {e}")
             result.errors.append(str(e))
-            result.completed_at = datetime.utcnow().isoformat()
+            result.completed_at = datetime.now(timezone.utc).isoformat()
 
         return result
 
@@ -336,7 +336,7 @@ class LiteraturePipeline:
             pr = ProcessedRecord(
                 record=record,
                 selection_result=sel_result,
-                processing_metadata={"processed_at": datetime.utcnow().isoformat()},
+                processing_metadata={"processed_at": datetime.now(timezone.utc).isoformat()},
             )
 
             # NLP Processing (mock - in production, use actual NLP pipeline)

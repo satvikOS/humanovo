@@ -1,12 +1,12 @@
 """
 Base Agent Module
 
-Defines the base classes and interfaces for all GenUp agents.
+Defines the base classes and interfaces for all humanovo agents.
 """
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -90,7 +90,7 @@ class Tool(BaseModel):
 
 
 class BaseAgent(ABC, LoggerMixin):
-    """Base class for all GenUp agents.
+    """Base class for all humanovo agents.
 
     Provides common functionality for logging, tool management,
     and execution tracking.
@@ -135,7 +135,7 @@ class BaseAgent(ABC, LoggerMixin):
 
         self.logger.debug("Calling tool", tool=tool_name, kwargs=list(kwargs.keys()))
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         try:
             result = await tool.handler(**kwargs)
             return result

@@ -11,7 +11,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import (
     Any,
@@ -82,7 +82,7 @@ class IngestionMetrics:
     def duration_seconds(self) -> float:
         if not self.start_time:
             return 0.0
-        end = self.end_time or datetime.utcnow()
+        end = self.end_time or datetime.now(timezone.utc)
         return (end - self.start_time).total_seconds()
 
     @property
@@ -607,7 +607,7 @@ class IngestionAgent(BaseAgent, ABC):
             config=self.config,
             status=IngestionStatus.FETCHING,
         )
-        self.state.metrics.start_time = datetime.utcnow()
+        self.state.metrics.start_time = datetime.now(timezone.utc)
 
         query = self.config.query or context.query
 
@@ -682,7 +682,7 @@ class IngestionAgent(BaseAgent, ABC):
 
             # Complete
             self.state.status = IngestionStatus.COMPLETED
-            self.state.metrics.end_time = datetime.utcnow()
+            self.state.metrics.end_time = datetime.now(timezone.utc)
 
             self.logger.info(
                 "Ingestion completed",
@@ -703,7 +703,7 @@ class IngestionAgent(BaseAgent, ABC):
         except Exception as e:
             self.state.status = IngestionStatus.FAILED
             self.state.error_message = str(e)
-            self.state.metrics.end_time = datetime.utcnow()
+            self.state.metrics.end_time = datetime.now(timezone.utc)
 
             self.logger.error(
                 "Ingestion failed",

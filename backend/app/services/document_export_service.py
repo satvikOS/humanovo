@@ -15,7 +15,7 @@ Output formats: PDF (reportlab) and DOCX (python-docx).
 
 import io
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from reportlab.lib import colors
@@ -106,7 +106,7 @@ def _pdf_header_footer(canvas, doc):
     page_num_text = f"Page {doc.page}"
     canvas.drawCentredString(doc.pagesize[0] / 2, 0.4 * inch, page_num_text)
 
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     canvas.drawRightString(
         doc.pagesize[0] - doc.rightMargin, 0.4 * inch, f"Generated {timestamp}"
     )
@@ -304,7 +304,7 @@ class DocumentExportService:
         )
         title = title or f"Novel Therapeutic Hypotheses for {disease or 'Target Disease'}"
         authors = authors or ["Humanovo AI Discovery Platform"]
-        date_str = datetime.utcnow().strftime("%B %d, %Y")
+        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
         context = self._summarise_disease_context(disease, hypotheses)
         analysis = self._synthesise_discussion(hypotheses, evidence)
         citations = self._extract_citations(evidence)
@@ -334,7 +334,7 @@ class DocumentExportService:
         h_title = hypothesis.get("title", hypothesis.get("name", "Untitled Hypothesis"))
         logger.info("Generating hypothesis report", hypothesis=h_title, format=format)
 
-        date_str = datetime.utcnow().strftime("%B %d, %Y")
+        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
         confidence = hypothesis.get("confidence_score", hypothesis.get("confidence", "N/A"))
         mechanism = hypothesis.get("mechanism", hypothesis.get("description", ""))
         rationale = hypothesis.get("rationale", "")
@@ -385,7 +385,7 @@ class DocumentExportService:
         disease = discovery_run.get("disease", "Unknown Disease")
         run_id = discovery_run.get("id", discovery_run.get("run_id", "N/A"))
         hypotheses = discovery_run.get("hypotheses", [])
-        date_str = datetime.utcnow().strftime("%B %d, %Y")
+        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
         logger.info(
             "Generating discovery summary",
@@ -464,7 +464,7 @@ class DocumentExportService:
         """Compile all evidence from various sources into a structured document."""
         logger.info("Generating evidence compilation", num_evidence=len(evidence), format=format)
 
-        date_str = datetime.utcnow().strftime("%B %d, %Y")
+        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
         sections: list[DocumentSection] = [
             self._build_title_page(
@@ -543,7 +543,7 @@ class DocumentExportService:
         h_title = hypothesis.get("title", hypothesis.get("name", "Untitled Hypothesis"))
         logger.info("Generating translational roadmap", hypothesis=h_title, format=format)
 
-        date_str = datetime.utcnow().strftime("%B %d, %Y")
+        date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
         phases = [
             (

@@ -10,7 +10,7 @@ import asyncio
 import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -83,7 +83,7 @@ class GroundingBatchResult(BaseModel):
     claims: list[str]
     results: list[GroundingResult]
     grounding_ratio: float = 0.0
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 # ---------------------------------------------------------------------------

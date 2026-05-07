@@ -4,7 +4,7 @@ Hypothesis Generation Agent Module
 Generates and ranks hypotheses using RAG and LLM reasoning.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -44,7 +44,7 @@ class GeneratedHypothesis:
         self.supporting_evidence = supporting_evidence or []
         self.entities = entities or []
         self.translational_roadmap = translational_roadmap
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(timezone.utc)
 
     def to_dict(self) -> dict[str, Any]:
         return {

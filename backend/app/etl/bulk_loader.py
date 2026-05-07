@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterator
 from urllib.request import urlopen, Request
 from urllib.error import URLError
@@ -324,7 +324,7 @@ class BulkLoader:
             if max_records and total_loaded >= max_records:
                 break
 
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
             content_text = record.to_text()
             content_hash = hashlib.sha256(
                 f"{record.id}|{content_text[:200]}".encode()
@@ -651,7 +651,7 @@ class BulkLoader:
                 MessageBody=json.dumps({
                     "action": "embed_dataset",
                     "dataset": dataset_key,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }),
             )
         except Exception as e:
@@ -672,7 +672,7 @@ class BulkLoader:
                 return False
 
             last_dt = datetime.fromisoformat(last_run)
-            return (datetime.utcnow() - last_dt).days < 30
+            return (datetime.now(timezone.utc) - last_dt).days < 30
         except Exception:
             return False
 
@@ -683,7 +683,7 @@ class BulkLoader:
                 Item={
                     "source": f"bulk_etl:{dataset_key}",
                     "status": "completed",
-                    "last_run": datetime.utcnow().isoformat(),
+                    "last_run": datetime.now(timezone.utc).isoformat(),
                     "records_fetched": records_loaded,
                     "error": "",
                 }

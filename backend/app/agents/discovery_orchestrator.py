@@ -55,7 +55,7 @@ import json
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -3495,7 +3495,7 @@ class DiscoveryAgent:
             return []
 
         self.state.current_task = f"Exploring from {start_entity}"
-        self.state.last_activity = datetime.utcnow()
+        self.state.last_activity = datetime.now(timezone.utc)
         hypotheses = []
 
         neighbors = graph_data.get("neighbors", {}).get(start_entity, [])

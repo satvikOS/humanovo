@@ -1,5 +1,5 @@
 """
-GenUp Knowledge Storage Module
+humanovo Knowledge Storage Module
 
 Hybrid knowledge storage using vector database for semantic search
 and graph database for structured biomedical knowledge.

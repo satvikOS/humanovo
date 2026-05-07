@@ -11,7 +11,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, TypeVar
@@ -369,7 +369,7 @@ class AgentStateManager:
             agent_id=agent_id,
             agent_type=tracker.agent_type,
             checkpoint_type=checkpoint_type,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             state=tracker.get_state(),
             metrics=tracker.get_metrics(),
             processed_ids=list(tracker.processed_ids),
@@ -690,7 +690,7 @@ class AgentStateTracker:
         """Mark that a checkpoint was completed."""
         self._dirty = False
         self._changes_since_checkpoint = 0
-        self._last_checkpoint_time = datetime.utcnow()
+        self._last_checkpoint_time = datetime.now(timezone.utc)
 
 
 class TransactionalStateUpdate:

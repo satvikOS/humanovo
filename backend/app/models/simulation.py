@@ -123,14 +123,14 @@ class Simulation(BaseModel):
         from datetime import datetime
 
         self.status = SimulationStatus.RUNNING
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(timezone.utc)
 
     def complete(self, outcomes: dict[str, Any]) -> None:
         """Mark simulation as completed with outcomes."""
         from datetime import datetime
 
         self.status = SimulationStatus.COMPLETED
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         self.outcomes = outcomes
         self.progress = 1.0
         self.iterations_completed = self.iterations
@@ -144,7 +144,7 @@ class Simulation(BaseModel):
         from datetime import datetime
 
         self.status = SimulationStatus.FAILED
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         self.error_message = error_message
 
         if self.started_at:
@@ -153,10 +153,10 @@ class Simulation(BaseModel):
 
     def cancel(self) -> None:
         """Mark simulation as cancelled."""
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         self.status = SimulationStatus.CANCELLED
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
 
     def update_progress(self, completed: int) -> None:
         """Update progress based on completed iterations."""

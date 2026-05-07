@@ -5,7 +5,7 @@ Sync user state (localStorage) across devices.
 Uses in-memory storage for the FastAPI backend (same pattern as simulation.py).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -89,7 +89,7 @@ async def get_state(key: str) -> StateItemResponse:
 @router.put("/{key}", response_model=StateItemResponse)
 async def put_state(key: str, body: StateValue) -> StateItemResponse:
     """Set a state value by key (last-write-wins)."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     _state_store[key] = {
         "value": body.value,

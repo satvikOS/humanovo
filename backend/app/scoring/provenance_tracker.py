@@ -13,7 +13,7 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -130,7 +130,7 @@ class ProvenanceRecord:
     def add_event(self, event: ProvenanceEvent):
         """Add an event to the provenance chain."""
         self.events.append(event)
-        self.updated_at = datetime.utcnow().isoformat()
+        self.updated_at = datetime.now(timezone.utc).isoformat()
 
         # Update confidence history
         if event.confidence_delta != 0:
@@ -196,7 +196,7 @@ class ProvenanceTracker:
         Returns:
             Created ProvenanceRecord
         """
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         record_id = self._generate_id(entity_id)
 
@@ -277,7 +277,7 @@ class ProvenanceTracker:
         event = ProvenanceEvent(
             event_id=self._generate_event_id(),
             event_type=event_type,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             agent=agent or self.system_agent,
             action=action,
             input_data=input_data or {},
@@ -418,7 +418,7 @@ class ProvenanceTracker:
             records = list(self._records.values())
 
         return {
-            "export_timestamp": datetime.utcnow().isoformat(),
+            "export_timestamp": datetime.now(timezone.utc).isoformat(),
             "total_records": len(records),
             "records": [r.to_dict() for r in records],
         }
@@ -439,7 +439,7 @@ class ProvenanceTracker:
     def _generate_id(self, entity_id: str) -> str:
         """Generate record ID."""
         if self.auto_hash:
-            return hashlib.md5(f"{entity_id}_{datetime.utcnow().isoformat()}".encode()).hexdigest()[
+            return hashlib.md5(f"{entity_id}_{datetime.now(timezone.utc).isoformat()}".encode()).hexdigest()[
                 :16
             ]
         return str(uuid.uuid4())[:16]
@@ -456,6 +456,6 @@ def create_provenance(entity_id: str, source_id: str | None = None) -> Provenanc
     source_prov = None
     if source_id:
         source_prov = SourceProvenance(
-            source_id=source_id, source_type="unknown", ingestion_date=datetime.utcnow().isoformat()
+            source_id=source_id, source_type="unknown", ingestion_date=datetime.now(timezone.utc).isoformat()
         )
     return tracker.create_record(entity_id, source_prov)

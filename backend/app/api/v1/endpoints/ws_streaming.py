@@ -16,7 +16,7 @@ Client -> Server commands:
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -94,14 +94,14 @@ class RunStreamManager:
             await websocket.send_json({
                 "event": "pong",
                 "run_id": run_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             })
         elif command == "cancel":
             self.request_cancel(run_id)
             await self.broadcast(run_id, {
                 "event": "run_cancelling",
                 "run_id": run_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             })
             # Also cancel via the Jamison API run tracker
             try:
@@ -167,7 +167,7 @@ async def discovery_ws(
                     await websocket.send_json({
                         "event": "keepalive",
                         "run_id": run_id,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 except Exception:
                     break
@@ -202,7 +202,7 @@ async def synthesis_ws(
                     await websocket.send_json({
                         "event": "keepalive",
                         "run_id": run_id,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 except Exception:
                     break

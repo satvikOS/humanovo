@@ -10,7 +10,7 @@ Handles incremental updates to literature data:
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -154,10 +154,10 @@ class UpdateManager:
         """
         import hashlib
 
-        update_id = f"update_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(query.encode()).hexdigest()[:6]}"
+        update_id = f"update_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{hashlib.md5(query.encode()).hexdigest()[:6]}"
 
         result = UpdateResult(
-            update_id=update_id, update_type=update_type, started_at=datetime.utcnow().isoformat()
+            update_id=update_id, update_type=update_type, started_at=datetime.now(timezone.utc).isoformat()
         )
 
         try:
@@ -206,13 +206,13 @@ class UpdateManager:
                 result.new_snapshot_id = snapshot.metadata.snapshot_id
 
             result.success = True
-            result.completed_at = datetime.utcnow().isoformat()
-            self._last_update = datetime.utcnow()
+            result.completed_at = datetime.now(timezone.utc).isoformat()
+            self._last_update = datetime.now(timezone.utc)
 
         except Exception as e:
             logger.error(f"Update failed: {e}")
             result.errors.append(str(e))
-            result.completed_at = datetime.utcnow().isoformat()
+            result.completed_at = datetime.now(timezone.utc).isoformat()
 
         # Track history
         if self.track_history:

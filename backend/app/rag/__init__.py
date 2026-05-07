@@ -1,5 +1,5 @@
 """
-GenUp RAG (Retrieval-Augmented Generation) Module
+humanovo RAG (Retrieval-Augmented Generation) Module
 
 Unified RAG service combining vector search, knowledge graph traversal,
 and keyword matching for comprehensive biomedical information retrieval.

@@ -12,7 +12,7 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class IDNamespace(str, Enum):
     """ID namespaces for different entity sources."""
 
-    GENUP = "genup"  # Internal GenUp IDs
+    GENUP = "genup"  # Internal humanovo IDs
     UMLS = "umls"
     MESH = "mesh"
     DRUGBANK = "drugbank"
@@ -178,11 +178,11 @@ class CanonicalIDManager:
             Generated CanonicalID
         """
         namespace = namespace or self.default_namespace
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         # Generate unique identifier
         if namespace == IDNamespace.GENUP:
-            # Use content-based hash for GenUp IDs
+            # Use content-based hash for humanovo IDs
             content = f"{entity_name}:{entity_type}".lower()
             hash_id = hashlib.sha256(content.encode()).hexdigest()[:12]
             identifier = f"GU{hash_id.upper()}"
@@ -246,7 +246,7 @@ class CanonicalIDManager:
             canonical_id=canonical_id,
             confidence=confidence,
             mapping_source=source,
-            mapping_date=datetime.utcnow().isoformat(),
+            mapping_date=datetime.now(timezone.utc).isoformat(),
         )
 
         # Store mapping
@@ -339,7 +339,7 @@ class CanonicalIDManager:
         # Update source ID
         source_id.status = "merged"
         source_id.merged_into = target_curie
-        source_id.updated_at = datetime.utcnow().isoformat()
+        source_id.updated_at = datetime.now(timezone.utc).isoformat()
         source_id.metadata["merge_reason"] = reason
 
         # Transfer cross-references
@@ -374,7 +374,7 @@ class CanonicalIDManager:
             reason: Reason for deprecation
         """
         canonical_id.status = "deprecated"
-        canonical_id.updated_at = datetime.utcnow().isoformat()
+        canonical_id.updated_at = datetime.now(timezone.utc).isoformat()
         canonical_id.metadata["deprecation_reason"] = reason
 
     def get_external_url(self, namespace: IDNamespace, identifier: str) -> str | None:

@@ -36,6 +36,8 @@ from app.models.learning_memory import (
 from app.models.user import User, UserRole
 from app.models.discovery_session import DiscoverySession
 from app.models.citation import Citation, CitationFolder, CitationHighlight
+from app.models.activity import Activity
+from app.models.notebook import NotebookPage
 from app.models.platform_entities import (
     AuditLogEntry,
     BillingBudget,

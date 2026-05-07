@@ -8,7 +8,7 @@ backend surface today, so we provide one.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -109,7 +109,7 @@ async def list_experiments(
 @router.post("", response_model=Experiment, status_code=201)
 async def create_experiment(body: ExperimentCreate) -> Experiment:
     _validate_status(body.status)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     exp = Experiment(
         id=uuid4(),
         created_at=now,
@@ -135,7 +135,7 @@ async def update_experiment(experiment_id: UUID, body: ExperimentUpdate) -> Expe
         raise HTTPException(status_code=404, detail="Experiment not found")
     update = body.model_dump(exclude_unset=True)
     _validate_status(update.get("status"))
-    updated = exp.model_copy(update={**update, "updated_at": datetime.utcnow()})
+    updated = exp.model_copy(update={**update, "updated_at": datetime.now(timezone.utc)})
     _experiments[experiment_id] = updated
     return updated
 

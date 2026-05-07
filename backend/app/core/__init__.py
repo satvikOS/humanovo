@@ -1,4 +1,4 @@
-"""Core utilities and configuration for GenUp."""
+"""Core utilities and configuration for humanovo."""
 
 from app.core.config import settings
 from app.core.logging import get_logger

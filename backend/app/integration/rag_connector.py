@@ -8,7 +8,7 @@ Handles embedding generation, chunking, and index management.
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -207,7 +207,7 @@ class RAGConnector:
             Indexing result
         """
         cfg = config or self.config
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Get components
@@ -278,12 +278,12 @@ class RAGConnector:
             )
 
             # Calculate duration
-            duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             # Update stats
             self._stats["total_indexed"] += 1
             self._stats["total_chunks"] += len(chunks)
-            self._stats["last_indexed_at"] = datetime.utcnow()
+            self._stats["last_indexed_at"] = datetime.now(timezone.utc)
 
             result = IndexingResult(
                 success=True,
@@ -307,7 +307,7 @@ class RAGConnector:
 
         except Exception as e:
             self._stats["total_errors"] += 1
-            duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             result = IndexingResult(
                 success=False,
@@ -416,7 +416,7 @@ class RAGConnector:
             "title": record.title or "",
             "date": record.publication_date.isoformat() if record.publication_date else "",
             "url": record.url or "",
-            "indexed_at": datetime.utcnow().isoformat(),
+            "indexed_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Optional fields

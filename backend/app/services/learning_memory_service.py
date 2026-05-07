@@ -17,7 +17,7 @@ import hashlib
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -219,7 +219,7 @@ class PersistentLearningMemory:
                     external_factors=external_factors or [],
                     focus_entities=focus_entities or [],
                     config_snapshot=config_snapshot or {},
-                    started_at=datetime.utcnow(),
+                    started_at=datetime.now(timezone.utc),
                     status="running",
                 )
                 session.add(run)
@@ -249,7 +249,7 @@ class PersistentLearningMemory:
                     run.stages_total = stages_total
                     run.stages_succeeded = stages_succeeded
                     run.stages_failed = stages_failed
-                    run.completed_at = datetime.utcnow()
+                    run.completed_at = datetime.now(timezone.utc)
                     run.status = "completed"
 
                     # Compute cost totals from APICostRecords
@@ -500,7 +500,7 @@ class PersistentLearningMemory:
                     agg.avg_confidence_delta = float(row.avg_delta) if row.avg_delta else None
                     agg.avg_output_quality = float(row.avg_quality) if row.avg_quality else None
                     agg.avg_evidence_sources = float(row.avg_evidence) if row.avg_evidence else None
-                    agg.last_aggregated_at = datetime.utcnow()
+                    agg.last_aggregated_at = datetime.now(timezone.utc)
 
     # ============== Feedback ==============
 

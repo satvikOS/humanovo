@@ -1,10 +1,10 @@
 """
 Authentication Module
 
-JWT-based authentication for GenUp.
+JWT-based authentication for humanovo.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -88,9 +88,9 @@ def get_password_hash(password: str) -> str:
 def create_access_token(user: User, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode = {
         "sub": str(user.id),

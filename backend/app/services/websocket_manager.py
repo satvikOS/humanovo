@@ -7,7 +7,7 @@ Handles client connect/disconnect/reconnect with event replay.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -46,7 +46,7 @@ class DiscoveryConnectionManager:
 
     async def send_event(self, run_id: str, event: dict):
         """Send an event to the connected client and log it for replay."""
-        event["timestamp"] = datetime.utcnow().isoformat()
+        event["timestamp"] = datetime.now(timezone.utc).isoformat()
         # Always log for replay
         if run_id not in self._event_logs:
             self._event_logs[run_id] = []
@@ -116,7 +116,7 @@ class DiscoveryConnectionManager:
             ws = self._connections.get(run_id)
             if ws:
                 try:
-                    await ws.send_json({"event": "pong", "timestamp": datetime.utcnow().isoformat()})
+                    await ws.send_json({"event": "pong", "timestamp": datetime.now(timezone.utc).isoformat()})
                 except Exception:
                     pass
         return None

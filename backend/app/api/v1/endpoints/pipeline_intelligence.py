@@ -201,7 +201,7 @@ async def get_run_cost_breakdown(run_id: str):
 @router.get("/costs/time-series")
 async def get_cost_time_series(
     days: int = Query(30, ge=1, le=365),
-    granularity: str = Query("day", regex="^(hour|day|week)$"),
+    granularity: str = Query("day", pattern="^(hour|day|week)$"),
 ):
     """Get cost time series for line/area chart visualization.
 

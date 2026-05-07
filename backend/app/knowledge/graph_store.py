@@ -5,7 +5,7 @@ Manages the biomedical knowledge graph using Neo4j.
 Supports entity/relationship storage, graph queries, and path finding.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -558,7 +558,7 @@ class GraphStore(LoggerMixin):
                         "total_relations": relation_count,
                         "entity_counts": entity_counts,
                         "relation_counts": {},
-                        "last_updated": datetime.utcnow(),
+                        "last_updated": datetime.now(timezone.utc),
                     }
             except Exception as e:
                 logger.warning(
@@ -570,7 +570,7 @@ class GraphStore(LoggerMixin):
             "total_relations": len(self._relations),
             "entity_counts": {},
             "relation_counts": {},
-            "last_updated": datetime.utcnow(),
+            "last_updated": datetime.now(timezone.utc),
         }
 
 

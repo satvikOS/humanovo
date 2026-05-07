@@ -15,7 +15,7 @@ Key capabilities:
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -381,7 +381,7 @@ class BenchmarkService:
             async with session.begin():
                 from app.core.config import settings
                 run = BenchmarkRun(
-                    name=name or f"Benchmark Run {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+                    name=name or f"Benchmark Run {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
                     description=description,
                     config_snapshot={
                         "pipeline_stages": 10,
@@ -391,7 +391,7 @@ class BenchmarkService:
                     pipeline_version=settings.VERSION,
                     total_test_cases=len(test_cases),
                     status=BenchmarkRunStatus.RUNNING,
-                    started_at=datetime.utcnow(),
+                    started_at=datetime.now(timezone.utc),
                 )
                 session.add(run)
                 await session.flush()
@@ -546,7 +546,7 @@ class BenchmarkService:
                     run.total_cost_usd = total_cost
                     run.total_duration_seconds = total_duration
                     run.status = BenchmarkRunStatus.COMPLETED
-                    run.completed_at = datetime.utcnow()
+                    run.completed_at = datetime.now(timezone.utc)
 
         logger.info(
             f"Benchmark run {run_id} completed: {len(scores)} cases, "

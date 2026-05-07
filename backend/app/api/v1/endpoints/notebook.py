@@ -11,7 +11,7 @@ return 404, never 403, so callers can't probe for foreign IDs.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -149,7 +149,7 @@ async def update_page(
             "version": page.version,
             "content": page.content,
             "title": page.title,
-            "created_at": page.updated_at.isoformat() if page.updated_at else datetime.utcnow().isoformat(),
+            "created_at": page.updated_at.isoformat() if page.updated_at else datetime.now(timezone.utc).isoformat(),
         })
         if len(versions) > 50:
             versions = versions[-50:]
@@ -218,7 +218,7 @@ async def restore_version(
         "version": page.version,
         "content": page.content,
         "title": page.title,
-        "created_at": page.updated_at.isoformat() if page.updated_at else datetime.utcnow().isoformat(),
+        "created_at": page.updated_at.isoformat() if page.updated_at else datetime.now(timezone.utc).isoformat(),
     })
     page.versions = versions
     page.version = (page.version or 1) + 1

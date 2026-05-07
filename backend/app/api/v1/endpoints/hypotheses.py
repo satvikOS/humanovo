@@ -1,7 +1,7 @@
 """
 Hypotheses API Endpoints
 
-Manage AI-generated hypotheses in GenUp with SQLAlchemy persistence.
+Manage AI-generated hypotheses in humanovo with SQLAlchemy persistence.
 """
 
 from datetime import datetime

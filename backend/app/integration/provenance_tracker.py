@@ -10,7 +10,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -325,7 +325,7 @@ class ProvenanceTracker:
         Returns:
             Created provenance record
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         data_hash = self._compute_hash(data)
 
         # Create provenance record
@@ -409,7 +409,7 @@ class ProvenanceTracker:
             event_type=ProvenanceEventType.EXTRACTION,
             record_id=record_id,
             source_type=source_type,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             agent_id=agent_id,
             operation=f"extract_{extraction_type}",
             input_records=[record_id],
@@ -470,7 +470,7 @@ class ProvenanceTracker:
             event_type=ProvenanceEventType.TRANSFORMATION,
             record_id=output_record_id,
             source_type=source_type,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             agent_id=agent_id,
             operation=transformation_type,
             input_records=input_record_ids,
@@ -543,7 +543,7 @@ class ProvenanceTracker:
             event_type=ProvenanceEventType.INDEXING,
             record_id=record_id,
             source_type=source_type,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             operation=f"index_{index_type}",
             input_records=[record_id],
             metadata={
@@ -597,7 +597,7 @@ class ProvenanceTracker:
             event_type=ProvenanceEventType.RETRIEVAL,
             record_id=record_id,
             source_type=source_type,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             operation=retrieval_method,
             output_records=[record_id],
             metadata={
@@ -672,8 +672,8 @@ class ProvenanceTracker:
                 leaf_record_id=record_id,
                 path=events,
                 total_transformations=0,
-                earliest_timestamp=events[0].timestamp if events else datetime.utcnow(),
-                latest_timestamp=events[-1].timestamp if events else datetime.utcnow(),
+                earliest_timestamp=events[0].timestamp if events else datetime.now(timezone.utc),
+                latest_timestamp=events[-1].timestamp if events else datetime.now(timezone.utc),
                 confidence=1.0,
             )
 
@@ -698,8 +698,8 @@ class ProvenanceTracker:
             leaf_record_id=record_id,
             path=path,
             total_transformations=transformations,
-            earliest_timestamp=path[0].timestamp if path else datetime.utcnow(),
-            latest_timestamp=path[-1].timestamp if path else datetime.utcnow(),
+            earliest_timestamp=path[0].timestamp if path else datetime.now(timezone.utc),
+            latest_timestamp=path[-1].timestamp if path else datetime.now(timezone.utc),
             confidence=cumulative_confidence,
         )
 

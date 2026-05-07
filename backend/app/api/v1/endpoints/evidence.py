@@ -1,7 +1,7 @@
 """
 Evidence API Endpoints
 
-Manage evidence items (papers, trials, data) in GenUp with SQLAlchemy persistence.
+Manage evidence items (papers, trials, data) in humanovo with SQLAlchemy persistence.
 """
 
 from datetime import datetime

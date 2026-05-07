@@ -5,7 +5,7 @@ IRB submissions, data use agreements, consent forms, compliance checklists.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -69,7 +69,7 @@ async def list_irb(db: AsyncSession = Depends(get_db)):
 
 @router.post("/irb-submissions")
 async def create_irb(data: IRBCreate, db: AsyncSession = Depends(get_db)):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     submission = IRBSubmission(
         protocol_title=data.protocol_title,
         irb_number=f"IRB-{now.year}-{str(uuid4())[:4]}",
@@ -160,7 +160,7 @@ async def list_consent_forms(db: AsyncSession = Depends(get_db)):
 
 @router.post("/consent-forms")
 async def create_consent_form(data: ConsentFormCreate, db: AsyncSession = Depends(get_db)):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     form = ConsentForm(
         title=data.title,
         version=data.version,
@@ -212,7 +212,7 @@ async def update_checklist(
     checklist.items = data.items
     completed = sum(1 for i in data.items if i.get("completed"))
     checklist.completion_pct = round(completed / len(data.items) * 100) if data.items else 0
-    checklist.last_reviewed = datetime.utcnow().isoformat()
+    checklist.last_reviewed = datetime.now(timezone.utc).isoformat()
     await db.flush()
     return checklist.to_dict()
 

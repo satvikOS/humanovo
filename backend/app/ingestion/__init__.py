@@ -1,5 +1,5 @@
 """
-GenUp Data Ingestion Module
+humanovo Data Ingestion Module
 
 Continuous data ingestion pipeline for biomedical data sources.
 """

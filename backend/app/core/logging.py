@@ -1,5 +1,5 @@
 """
-GenUp Logging Configuration
+humanovo Logging Configuration
 
 Structured logging with structlog for JSON output and rich console formatting.
 """

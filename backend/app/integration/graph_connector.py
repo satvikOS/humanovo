@@ -8,7 +8,7 @@ indexing, graph updates, and entity resolution.
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -203,7 +203,7 @@ class GraphConnector:
             Update result
         """
         cfg = config or self.config
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         result = GraphUpdateResult(
             success=True,
@@ -277,13 +277,13 @@ class GraphConnector:
                 result.source_edges_created = source_edges
 
             # Calculate duration
-            result.duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            result.duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             # Update stats
             self._stats["total_entities_created"] += result.entities_created
             self._stats["total_relations_created"] += result.relations_created
             self._stats["total_updates"] += 1
-            self._stats["last_updated_at"] = datetime.utcnow()
+            self._stats["last_updated_at"] = datetime.now(timezone.utc)
 
             if result.errors:
                 result.success = (
@@ -304,7 +304,7 @@ class GraphConnector:
         except Exception as e:
             result.success = False
             result.errors.append(str(e))
-            result.duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            result.duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             self.logger.error(
                 "Graph update failed",
@@ -590,7 +590,7 @@ class GraphConnector:
                     relation_type="MENTIONED_IN",
                     properties={
                         "source_type": record.source_type.value,
-                        "extracted_at": datetime.utcnow().isoformat(),
+                        "extracted_at": datetime.now(timezone.utc).isoformat(),
                     },
                     confidence=1.0,
                 )

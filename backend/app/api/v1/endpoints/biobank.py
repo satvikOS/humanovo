@@ -5,7 +5,7 @@ Sample registry, chain of custody, checkout workflow, storage management.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -83,7 +83,7 @@ async def list_samples(
 @router.post("/samples")
 async def create_sample(data: SampleCreate, db: AsyncSession = Depends(get_db)):
     barcode = data.barcode or f"BIO-{str(uuid4())[:6].upper()}"
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     sample = BiobankSample(
         barcode=barcode,
         sample_type=data.sample_type,
@@ -162,7 +162,7 @@ async def checkout_sample(
         {
             "action": "checked_out",
             "by": data.researcher,
-            "date": datetime.utcnow().strftime("%Y-%m-%d"),
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "notes": f"Purpose: {data.purpose}"
             + (f", Expected return: {data.expected_return}" if data.expected_return else ""),
         }
@@ -191,7 +191,7 @@ async def checkin_sample(
         {
             "action": "returned",
             "by": "Current User",
-            "date": datetime.utcnow().strftime("%Y-%m-%d"),
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "notes": f"Condition: {condition}",
         }
     )

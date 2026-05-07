@@ -5,7 +5,7 @@ Manage research projects in humanovo.
 All data persisted to PostgreSQL via Project model.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -65,8 +65,8 @@ class ProjectResponse(BaseModel):
     evidence_count: int = 0
     simulation_count: int = 0
     hypotheses: list[dict] | None = None
-    created_at: datetime = datetime.utcnow()
-    updated_at: datetime = datetime.utcnow()
+    created_at: datetime = datetime.now(timezone.utc)
+    updated_at: datetime = datetime.now(timezone.utc)
 
     model_config = {"from_attributes": True}
 

@@ -18,7 +18,7 @@ Endpoints:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -78,7 +78,7 @@ class Message(BaseModel):
     role: str  # "user" | "assistant" | "system" | "tool"
     content: str
     cards: list[MessageCard] = Field(default_factory=list)
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finish_reason: str | None = None
     tokens: dict[str, int] | None = None
     # Optional tool-call trace (only set when role == "tool").

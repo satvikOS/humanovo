@@ -44,7 +44,7 @@ import base64
 import io
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 from uuid import uuid4
@@ -838,7 +838,7 @@ class DocumentPipelineService:
             "disease": disease,
             "discovery_type": discovery_type,
             "total_hypotheses": len(hypotheses),
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     # ---- Stage 1: Bundle Assembly ----

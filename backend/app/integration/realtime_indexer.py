@@ -11,7 +11,7 @@ import json
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -288,7 +288,7 @@ class RealtimeIndexer:
             source_type=record.source_type,
             data=self._serialize_record(record),
             consistency=consistency,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Write to WAL first
@@ -337,7 +337,7 @@ class RealtimeIndexer:
         txn = TransactionContext(
             transaction_id=txn_id,
             updates=[],
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             consistency=consistency,
         )
         self._transactions[txn_id] = txn
@@ -376,7 +376,7 @@ class RealtimeIndexer:
             source_type=record.source_type,
             data=self._serialize_record(record),
             consistency=txn.consistency,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         txn.updates.append(update)
@@ -511,7 +511,7 @@ class RealtimeIndexer:
 
             # Mark as applied
             update.status = UpdateStatus.APPLIED
-            update.applied_at = datetime.utcnow()
+            update.applied_at = datetime.now(timezone.utc)
             self._stats["successful_updates"] += 1
 
             self._notify_subscribers(update)
