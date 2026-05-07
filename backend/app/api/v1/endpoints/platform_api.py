@@ -242,8 +242,14 @@ async def _run_discovery_pipeline(
                     "confidence_score": h.confidence if h.confidence == h.confidence else 0.5,
                     "timestamp": datetime.now(UTC).isoformat(),
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort broadcast: clients can poll if WS delivery fails
+                logger.warning(
+                    "discovery.ws_broadcast_failed",
+                    event="hypothesis_completed",
+                    run_id=run_id,
+                    error=str(exc),
+                )
 
         async def on_stats(stats):
             run_record["stats"] = stats.model_dump() if hasattr(stats, "model_dump") else {}
@@ -259,8 +265,14 @@ async def _run_discovery_pipeline(
                     "best_confidence": stats.current_best_confidence,
                     "timestamp": datetime.now(UTC).isoformat(),
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort broadcast: stats are also persisted in run_record
+                logger.warning(
+                    "discovery.ws_broadcast_failed",
+                    event="cost_update",
+                    run_id=run_id,
+                    error=str(exc),
+                )
 
         orchestrator.set_callbacks(on_hypothesis=on_hypothesis, on_stats_update=on_stats)
 
@@ -297,8 +309,14 @@ async def _run_discovery_pipeline(
                 "best_confidence": run_record["best_confidence"],
                 "timestamp": datetime.now(UTC).isoformat(),
             })
-        except Exception:
-            pass
+        except Exception as exc:
+            # best-effort: run_record is the source of truth, WS is a notification channel
+            logger.warning(
+                "discovery.ws_broadcast_failed",
+                event="run_completed",
+                run_id=run_id,
+                error=str(exc),
+            )
 
         logger.info(f"Discovery run {run_id} completed: {len(hypotheses)} hypotheses")
 
@@ -321,8 +339,14 @@ async def _run_discovery_pipeline(
                 "reason": "budget_exhausted",
                 "timestamp": datetime.now(UTC).isoformat(),
             })
-        except Exception:
-            pass
+        except Exception as exc:
+            # best-effort: error is already persisted in run_record before broadcast attempt
+            logger.warning(
+                "discovery.ws_broadcast_failed",
+                event="run_error",
+                run_id=run_id,
+                error=str(exc),
+            )
     except Exception as e:
         logger.error(f"Discovery run {run_id} failed: {e}")
         run_record["status"] = "failed"
@@ -338,8 +362,14 @@ async def _run_discovery_pipeline(
                 "recoverable": False,
                 "timestamp": datetime.now(UTC).isoformat(),
             })
-        except Exception:
-            pass
+        except Exception as exc:
+            # best-effort: error is already persisted in run_record before broadcast attempt
+            logger.warning(
+                "discovery.ws_broadcast_failed",
+                event="run_error",
+                run_id=run_id,
+                error=str(exc),
+            )
     finally:
         # Always push the run's accumulated spend into the user's
         # monthly budget — partial runs still consumed model calls.
@@ -411,8 +441,15 @@ async def _run_synthesis_pipeline(
                     "model": model,
                     "timestamp": datetime.now(UTC).isoformat(),
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort: stage progress is observable via final result polling
+                logger.warning(
+                    "synthesis.ws_broadcast_failed",
+                    event="stage_completed",
+                    run_id=run_id,
+                    stage=stage_name,
+                    error=str(exc),
+                )
 
         result = await pipeline.run(
             project_id=project_id,

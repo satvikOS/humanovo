@@ -111,8 +111,14 @@ class RunStreamManager:
                     if orchestrator and hasattr(orchestrator, "stop"):
                         orchestrator.stop()
                         run["status"] = "cancelled"
-            except Exception:
-                pass
+            except Exception as exc:
+                # log+recover: client already got run_cancelling broadcast; surface failure
+                # so we can debug why orchestrator.stop() failed (often hides import races)
+                logger.warning(
+                    "ws_streaming.cancel_orchestrator_failed",
+                    run_id=run_id,
+                    error=str(exc),
+                )
 
     def cleanup_idle(self, max_idle_seconds: int = 300):
         """Remove connections idle for too long."""

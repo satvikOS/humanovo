@@ -108,7 +108,9 @@ async def admin_health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         try:
             r = (await db.execute(text(sql))).scalar()
             embeddings[label] = int(r or 0)
-        except Exception:
+        except Exception as exc:
+            # best-effort: missing column/table shows as null in admin panel
+            logger.warning("admin.embedding_count_failed: label=%s error=%s", label, exc)
             embeddings[label] = None
 
     flags = {

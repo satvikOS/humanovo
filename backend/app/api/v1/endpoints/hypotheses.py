@@ -223,8 +223,13 @@ def hypothesis_to_response(h: Hypothesis) -> HypothesisResponse:
     if h.translational_roadmap and isinstance(h.translational_roadmap, dict):
         try:
             translational_roadmap = TranslationalRoadmapSchema(**h.translational_roadmap)
-        except Exception:
-            pass
+        except Exception as exc:
+            # best-effort: roadmap is optional render data; surface schema drift in logs
+            logger.warning(
+                "hypotheses.translational_roadmap_parse_failed",
+                hypothesis_id=str(h.id),
+                error=str(exc),
+            )
 
     return HypothesisResponse(
         id=h.id,

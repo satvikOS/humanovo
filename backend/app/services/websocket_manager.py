@@ -113,8 +113,9 @@ class DiscoveryConnectionManager:
             if ws:
                 try:
                     await ws.send_json({"event": "pong", "timestamp": datetime.now(UTC).isoformat()})
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # best-effort: client will reconnect if pong missing; surface broken sockets
+                    logger.warning(f"ping pong failed for run {run_id}: {exc}")
         return None
 
     def cleanup_run(self, run_id: str):

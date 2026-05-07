@@ -1028,8 +1028,9 @@ async def _retrieve_rag_context(query: str) -> str:
                         abstract = item.get("abstract", item.get("snippet", ""))
                         if title:
                             rag_chunks.append(f"Evidence: {title}. {abstract}")
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort: RAG falls back to other sources if evidence retrieval fails
+                logger.debug("rag.evidence_lookup_failed", error=str(exc))
 
             # Search hypotheses
             try:
@@ -1044,8 +1045,9 @@ async def _retrieve_rag_context(query: str) -> str:
                             rag_chunks.append(
                                 f"Hypothesis (confidence: {confidence:.0%}): {statement}. Mechanism: {mechanism}"
                             )
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort: RAG falls back to other sources if hypothesis retrieval fails
+                logger.debug("rag.hypothesis_lookup_failed", error=str(exc))
     except Exception as e:
         logger.debug(f"Platform data retrieval skipped: {e}")
 

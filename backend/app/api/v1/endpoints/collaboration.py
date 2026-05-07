@@ -336,8 +336,9 @@ async def list_team_members(db: AsyncSession = Depends(get_db)) -> dict:
                 "role": "collaborator",
                 "avatar_color": "#60a5fa",
             })
-    except Exception:
-        pass
+    except Exception as exc:
+        # best-effort: comments source is one of multiple member sources, fall through
+        logger.warning("collaboration.members_from_comments_failed: %s", exc)
     try:
         share_result = await db.execute(
             select(ProjectShare.shared_with, ProjectShare.permission).limit(100)
@@ -352,6 +353,7 @@ async def list_team_members(db: AsyncSession = Depends(get_db)) -> dict:
                 "role": perm or "collaborator",
                 "avatar_color": "#a78bfa",
             })
-    except Exception:
-        pass
+    except Exception as exc:
+        # best-effort: shares source is one of multiple member sources, fall through
+        logger.warning("collaboration.members_from_shares_failed: %s", exc)
     return {"members": list(members.values()), "total": len(members)}

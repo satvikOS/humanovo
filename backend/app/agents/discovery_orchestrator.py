@@ -1834,8 +1834,9 @@ class SequentialHypothesisPipeline:
             try:
                 from app.rag.service import get_rag_service
                 self._rag_service = get_rag_service()
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort: pipeline can run without RAG; surface init failure once
+                logger.warning("orchestrator.rag_service_init_failed", error=str(exc))
         return self._rag_service
 
     def _get_available_stages(self) -> list[tuple]:
@@ -2286,8 +2287,9 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                                         parsed.get("title", "") + " " +
                                         parsed.get("mechanism", "")[:1000]
                                     )
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                # best-effort: diversity check uses zero-vector when embed fails
+                                logger.debug("orchestrator.seed_embed_failed", error=str(exc))
                             rep = enf.check_seed(
                                 hypothesis_id=hypothesis_id,
                                 title=parsed.get("title", ""),

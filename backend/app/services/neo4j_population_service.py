@@ -464,8 +464,14 @@ class Neo4jPopulationService:
                         canonical_name = resolved.canonical_name
                     if resolved and resolved.canonical_id:
                         canonical_id_str = resolved.canonical_id.get_curie()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # best-effort: name remains uncanonicalised; surface resolver issues
+                    logger.warning(
+                        "kg.entity_resolver_failed: name=%s type=%s error=%s",
+                        name,
+                        etype,
+                        exc,
+                    )
 
             row = {
                 "entity_id": entity_id,
@@ -1338,8 +1344,9 @@ class Neo4jPopulationService:
                     count = rec["cnt"] if rec else 0
                     if count > 0:
                         entity_counts[etype] = count
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # best-effort: missing label or perms; report partial counts
+                    logger.warning("kg.stats.entity_count_failed: type=%s error=%s", etype, exc)
             stats["entity_counts"] = entity_counts
 
             # Relationship type counts
@@ -1352,8 +1359,9 @@ class Neo4jPopulationService:
                 )
                 async for record in result:
                     rel_counts[record["rel_type"]] = record["cnt"]
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort: stats endpoint should still return entity counts even if rel query fails
+                logger.warning("kg.stats.relationship_counts_failed: %s", exc)
             stats["relationship_counts"] = rel_counts
 
             # Average confidence
@@ -1371,8 +1379,9 @@ class Neo4jPopulationService:
                         "min": round(record["min_conf"] or 0, 4),
                         "max": round(record["max_conf"] or 0, 4),
                     }
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort: confidence aggregate is optional in the stats payload
+                logger.warning("kg.stats.confidence_aggregate_failed: %s", exc)
 
             stats["timestamp"] = _utcnow_iso()
 

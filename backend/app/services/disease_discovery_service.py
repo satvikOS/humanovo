@@ -418,8 +418,13 @@ class BedrockMultiModelClient(BaseLLMClient):
                 )
             )
             return response["output"]["message"]["content"][0]["text"]
-        except Exception:
-            pass
+        except Exception as exc:
+            # log+recover: fall through to InvokeModel below; surface the converse failure
+            logger.warning(
+                "bedrock.converse_failed_fallback_to_invoke",
+                model_id=model_id,
+                error=str(exc),
+            )
 
         # Fallback: InvokeModel
         body = _build_bedrock_invoke_body(model_id, prompt, system_prompt, max_tokens, temperature)

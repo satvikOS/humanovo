@@ -472,27 +472,37 @@ async def get_pipeline_intelligence_dashboard():
 
     try:
         learning_stats = await lm.get_learning_stats()
-    except Exception:
+    except Exception as exc:
+        # best-effort: dashboard tile shows empty rather than failing the whole page
+        logger.warning("pipeline_intelligence.learning_stats_failed", error=str(exc))
         learning_stats = {}
 
     try:
         cost_summary = await tracker.get_cumulative_cost()
-    except Exception:
+    except Exception as exc:
+        # best-effort: dashboard tile shows empty rather than failing the whole page
+        logger.warning("pipeline_intelligence.cost_summary_failed", error=str(exc))
         cost_summary = {}
 
     try:
         model_comparison = await tracker.get_model_cost_comparison()
-    except Exception:
+    except Exception as exc:
+        # best-effort: dashboard tile shows empty rather than failing the whole page
+        logger.warning("pipeline_intelligence.model_comparison_failed", error=str(exc))
         model_comparison = []
 
     try:
         recommendations = await opt.generate_optimizations()
-    except Exception:
+    except Exception as exc:
+        # best-effort: dashboard tile shows empty rather than failing the whole page
+        logger.warning("pipeline_intelligence.recommendations_failed", error=str(exc))
         recommendations = []
 
     try:
         stage_matrix = await opt.get_stage_model_matrix()
-    except Exception:
+    except Exception as exc:
+        # best-effort: dashboard tile shows empty rather than failing the whole page
+        logger.warning("pipeline_intelligence.stage_matrix_failed", error=str(exc))
         stage_matrix = {}
 
     return {
