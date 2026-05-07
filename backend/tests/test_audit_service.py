@@ -395,11 +395,11 @@ def test_compute_record_hash_is_deterministic() -> None:
 def test_compute_record_hash_changes_with_any_field() -> None:
     from datetime import datetime
     ts = datetime(2026, 5, 5, 12, 0, 0, tzinfo=UTC)
-    base = dict(
-        sequence=1, timestamp=ts, event_type="data.read",
-        user_id="u1", action="read", details={"k": "v"},
-        previous_hash=None,
-    )
+    base = {
+        "sequence": 1, "timestamp": ts, "event_type": "data.read",
+        "user_id": "u1", "action": "read", "details": {"k": "v"},
+        "previous_hash": None,
+    }
     h0 = _compute_record_hash(**base)
     h1 = _compute_record_hash(**{**base, "user_id": "u2"})
     h2 = _compute_record_hash(**{**base, "action": "delete"})

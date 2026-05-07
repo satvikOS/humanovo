@@ -19,7 +19,7 @@ Provides:
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from .relation_extractor import BiomedicalRelation, RelationType
@@ -28,7 +28,7 @@ from .transformer_ner import BiomedicalEntity, EntityType
 logger = logging.getLogger(__name__)
 
 
-class DomainRelationType(str, Enum):
+class DomainRelationType(StrEnum):
     """Domain-specific relation types aligned with biomedical ontologies."""
 
     # Drug/Treatment Relations

@@ -13,13 +13,13 @@ import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class CitationType(str, Enum):
+class CitationType(StrEnum):
     """Types of citations."""
 
     SUPPORTING = "supporting"  # Cites as supporting evidence

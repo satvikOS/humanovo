@@ -13,7 +13,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from .sources import LiteratureRecord, SourceType
@@ -21,7 +21,7 @@ from .sources import LiteratureRecord, SourceType
 logger = logging.getLogger(__name__)
 
 
-class CriterionType(str, Enum):
+class CriterionType(StrEnum):
     """Types of selection criteria."""
 
     DATE_RANGE = "date_range"

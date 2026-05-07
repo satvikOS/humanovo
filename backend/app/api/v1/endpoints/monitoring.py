@@ -9,7 +9,7 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-class HealthStatus(str, Enum):
+class HealthStatus(StrEnum):
     """Health status levels."""
 
     HEALTHY = "healthy"
@@ -39,7 +39,7 @@ class HealthStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class ComponentType(str, Enum):
+class ComponentType(StrEnum):
     """Types of system components."""
 
     RAG_SERVICE = "rag_service"

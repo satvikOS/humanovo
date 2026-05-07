@@ -27,7 +27,7 @@ Relation Types:
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 from typing import Any
 
@@ -38,7 +38,7 @@ from .transformer_ner import BiomedicalEntity, EntityType
 logger = logging.getLogger(__name__)
 
 
-class RelationType(str, Enum):
+class RelationType(StrEnum):
     """Biomedical relation types."""
 
     TREATS = "treats"

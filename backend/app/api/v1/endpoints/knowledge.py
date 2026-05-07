@@ -5,7 +5,7 @@ Query and explore the biomedical knowledge graph.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
-class EntityType(str, Enum):
+class EntityType(StrEnum):
     """Types of biomedical entities."""
 
     GENE = "gene"
@@ -36,7 +36,7 @@ class EntityType(str, Enum):
     PUBLICATION = "publication"
 
 
-class RelationType(str, Enum):
+class RelationType(StrEnum):
     """Types of relationships in the knowledge graph."""
 
     INTERACTS_WITH = "interacts_with"

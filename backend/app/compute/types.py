@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 # ── Domain Enums ─────────────────────────────────────────────────
 
 
-class ComputeDomain(str, Enum):
+class ComputeDomain(StrEnum):
     """Biomedical computation domains."""
 
     IMAGING = "imaging"
@@ -33,7 +33,7 @@ class ComputeDomain(str, Enum):
     CLINICAL = "clinical"
 
 
-class ComputeStatus(str, Enum):
+class ComputeStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -41,7 +41,7 @@ class ComputeStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class DataFormat(str, Enum):
+class DataFormat(StrEnum):
     """Supported input data formats — MATLAB-equivalent coverage."""
 
     # ── Imaging ──
@@ -161,7 +161,7 @@ class DescriptiveStats(BaseModel):
 # ── Visualization Types ──────────────────────────────────────────
 
 
-class FigureFormat(str, Enum):
+class FigureFormat(StrEnum):
     PNG = "png"
     SVG = "svg"
     PDF = "pdf"

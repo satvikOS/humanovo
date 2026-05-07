@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ PATHWAY_OVERLAP_MAX = 0.60
 MIN_AXIS_DIFFERENCES = 2  # out of 6 axes
 
 
-class MechanismAxis(str, Enum):
+class MechanismAxis(StrEnum):
     PATHWAY = "pathway_axis"
     ENTITY = "entity_axis"
     MODALITY = "modality_axis"

@@ -12,7 +12,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -22,7 +22,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class IndexUpdateType(str, Enum):
+class IndexUpdateType(StrEnum):
     """Types of index updates."""
 
     CREATE = "create"
@@ -31,7 +31,7 @@ class IndexUpdateType(str, Enum):
     UPSERT = "upsert"
 
 
-class ConsistencyLevel(str, Enum):
+class ConsistencyLevel(StrEnum):
     """Consistency level for updates."""
 
     EVENTUAL = "eventual"  # Fire and forget
@@ -40,7 +40,7 @@ class ConsistencyLevel(str, Enum):
     TRANSACTIONAL = "transactional"  # All-or-nothing
 
 
-class UpdateStatus(str, Enum):
+class UpdateStatus(StrEnum):
     """Status of an update operation."""
 
     PENDING = "pending"

@@ -14,13 +14,13 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     """Types of literature sources."""
 
     PUBMED = "pubmed"
@@ -224,7 +224,7 @@ class PubMedSource(LiteratureSource):
 class PatentSource(LiteratureSource):
     """Patent database source (USPTO, EPO, WIPO)."""
 
-    class PatentOffice(str, Enum):
+    class PatentOffice(StrEnum):
         USPTO = "uspto"
         EPO = "epo"
         WIPO = "wipo"

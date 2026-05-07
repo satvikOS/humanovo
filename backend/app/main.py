@@ -14,16 +14,18 @@ import warnings as _warnings
 
 _warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+# Imports below are intentionally placed after the warnings filter so
+# fastapi/pydantic don't hit the recursion bug noted above. Suppress E402.
+from collections.abc import AsyncGenerator  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
 
-from app.api import router as api_router
-from app.core.config import settings
-from app.core.logging import get_logger, setup_logging
+from app.api import router as api_router  # noqa: E402
+from app.core.config import settings  # noqa: E402
+from app.core.logging import get_logger, setup_logging  # noqa: E402
 
 logger = get_logger(__name__)
 

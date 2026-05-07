@@ -12,13 +12,13 @@ Manages synonyms for biomedical entities:
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class SynonymType(str, Enum):
+class SynonymType(StrEnum):
     """Types of synonyms."""
 
     EXACT = "exact"  # Exact synonym

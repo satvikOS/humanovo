@@ -865,7 +865,9 @@ class CardiacProcessor:
                            "pulse_pressure": _sf(np.ptp(pressure_data))}
 
         try:
-            import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
             fig, ax = plt.subplots(figsize=(10, 4))
             if pressure_data is not None: ax.plot(t, pressure_data, "b-", label="Measured")
             ax.plot(t, fitted[:len(t)], "r--", label=f"Fitted ({model_type})")
@@ -1037,7 +1039,9 @@ class CardiacProcessor:
         if pwv is not None: indices["PWV_m_s"] = pwv
 
         try:
-            import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.plot(t, waveform, "b-", linewidth=0.8)
             ax.plot(t[peaks], waveform[peaks], "rv", markersize=6, label="Systolic")

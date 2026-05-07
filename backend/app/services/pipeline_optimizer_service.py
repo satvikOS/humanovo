@@ -123,7 +123,7 @@ class PipelineOptimizerService:
                     StageExecution.model_type,
                     func.count(StageExecution.id).label("filter_count"),
                 )
-                .where(StageExecution.content_filter_triggered == True)
+                .where(StageExecution.content_filter_triggered)
                 .group_by(StageExecution.stage_number, StageExecution.model_type)
             )
 

@@ -1,1 +1,1 @@
-from app.compute.ingestion.parsers import DataIngestionEngine
+from app.compute.ingestion.parsers import DataIngestionEngine as DataIngestionEngine

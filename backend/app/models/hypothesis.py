@@ -4,7 +4,7 @@ Hypothesis Model
 AI-generated and user-defined hypothesis model.
 """
 
-from enum import Enum as PyEnum
+from enum import StrEnum
 
 from sqlalchemy import Column, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -14,7 +14,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
 
-class HypothesisStatus(str, PyEnum):
+class HypothesisStatus(StrEnum):
     """Hypothesis status enum."""
 
     DRAFT = "draft"
@@ -25,7 +25,7 @@ class HypothesisStatus(str, PyEnum):
     ARCHIVED = "archived"
 
 
-class EvidenceType(str, PyEnum):
+class EvidenceType(StrEnum):
     """Type of evidence relationship."""
 
     SUPPORTING = "supporting"

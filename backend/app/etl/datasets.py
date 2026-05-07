@@ -6,10 +6,10 @@ and parsing configurations. All datasets are freely available.
 """
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class DatasetFormat(str, Enum):
+class DatasetFormat(StrEnum):
     OWL_XML = "owl_xml"
     OBO = "obo"
     TSV = "tsv"
@@ -18,7 +18,7 @@ class DatasetFormat(str, Enum):
     JSON = "json"
 
 
-class DatasetCategory(str, Enum):
+class DatasetCategory(StrEnum):
     ONTOLOGY = "ontology"
     GENE_DISEASE = "gene_disease"
     DRUG = "drug"

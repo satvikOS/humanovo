@@ -1683,7 +1683,7 @@ class ExpressionProcessor:
                     (log2fc[idx], neg_log10_p[idx]),
                     fontsize=7, alpha=0.8,
                     xytext=(5, 5), textcoords="offset points",
-                    arrowprops=dict(arrowstyle="-", color="grey", alpha=0.4),
+                    arrowprops={"arrowstyle": "-", "color": "grey", "alpha": 0.4},
                 )
 
         ax.set_xlabel("log2 Fold Change")

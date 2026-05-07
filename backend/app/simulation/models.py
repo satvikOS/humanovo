@@ -10,7 +10,7 @@ Data models for Monte Carlo simulations with support for:
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -18,7 +18,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 
-class DistributionType(str, Enum):
+class DistributionType(StrEnum):
     """Statistical distribution types for parameter sampling."""
 
     NORMAL = "normal"
@@ -40,7 +40,7 @@ class DistributionType(str, Enum):
     STUDENT_T = "student_t"
 
 
-class SimulationType(str, Enum):
+class SimulationType(StrEnum):
     """Types of simulations."""
 
     CLINICAL_OUTCOME = "clinical_outcome"

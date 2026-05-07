@@ -45,7 +45,7 @@ import io
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -60,7 +60,7 @@ logger = get_logger(__name__)
 # ============================================================================
 
 
-class PipelineStage(str, Enum):
+class PipelineStage(StrEnum):
     """Stages in the document generation pipeline."""
     ASSEMBLING = "assembling"
     GENERATING = "generating"
@@ -204,7 +204,7 @@ class PdfRenderer:
     def render(self, bundle: DocumentBundle) -> bytes:
         try:
             from reportlab.lib import colors
-            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
+            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
             from reportlab.lib.pagesizes import letter
             from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
             from reportlab.lib.units import inch

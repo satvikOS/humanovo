@@ -4,7 +4,7 @@ Evidence Model
 Evidence items from various sources (PubMed, clinical trials, etc.).
 """
 
-from enum import Enum as PyEnum
+from enum import StrEnum
 
 from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -14,7 +14,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
 
-class EvidenceSource(str, PyEnum):
+class EvidenceSource(StrEnum):
     """Source type of evidence."""
 
     PUBMED = "pubmed"

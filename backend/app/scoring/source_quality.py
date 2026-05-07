@@ -14,13 +14,13 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class EvidenceLevel(str, Enum):
+class EvidenceLevel(StrEnum):
     """Evidence hierarchy levels."""
 
     SYSTEMATIC_REVIEW = "systematic_review"  # Level 1a
@@ -36,7 +36,7 @@ class EvidenceLevel(str, Enum):
     UNKNOWN = "unknown"
 
 
-class JournalTier(str, Enum):
+class JournalTier(StrEnum):
     """Journal quality tiers."""
 
     TOP_TIER = "top_tier"  # Nature, Science, Cell, NEJM, Lancet, JAMA
@@ -47,7 +47,7 @@ class JournalTier(str, Enum):
     UNKNOWN = "unknown"
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     """Types of evidence sources."""
 
     JOURNAL_ARTICLE = "journal_article"

@@ -230,11 +230,11 @@ class RewindCoordinator:
         """Heuristic: claims that share >= 4 key nouns with the invalidated
         claim are likely derived from it and should also be stripped."""
         import re
-        stop = set([
+        stop = {
             "the", "a", "an", "is", "are", "was", "were", "be", "been", "by",
             "in", "on", "at", "for", "of", "with", "to", "and", "or", "that",
             "this", "these", "those", "it", "its", "as", "from",
-        ])
+        }
         def key_nouns(s: str) -> set[str]:
             return {w for w in re.findall(r"[A-Za-z][A-Za-z0-9\-]+", s.lower())
                     if w not in stop and len(w) > 3}

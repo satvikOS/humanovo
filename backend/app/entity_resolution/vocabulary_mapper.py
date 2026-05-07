@@ -17,13 +17,13 @@ Maps entities to standardized controlled vocabularies:
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class VocabularySource(str, Enum):
+class VocabularySource(StrEnum):
     """Supported controlled vocabulary sources."""
 
     UMLS = "umls"

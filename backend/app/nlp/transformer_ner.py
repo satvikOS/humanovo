@@ -24,7 +24,7 @@ Entity Types:
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 from typing import Any
 
@@ -34,7 +34,7 @@ from transformers import Pipeline, pipeline
 logger = logging.getLogger(__name__)
 
 
-class EntityType(str, Enum):
+class EntityType(StrEnum):
     """Biomedical entity types."""
 
     GENE = "gene"

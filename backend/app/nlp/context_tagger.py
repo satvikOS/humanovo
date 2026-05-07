@@ -23,13 +23,13 @@ Also captures:
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class ContextCategory(str, Enum):
+class ContextCategory(StrEnum):
     """Context categories for biomedical text."""
 
     DRUG_CONTEXT = "drug_context"
@@ -46,7 +46,7 @@ class ContextCategory(str, Enum):
     DIAGNOSTIC_CONTEXT = "diagnostic_context"
 
 
-class PatientPopulation(str, Enum):
+class PatientPopulation(StrEnum):
     """Patient population categories."""
 
     ADULT = "adult"
@@ -61,7 +61,7 @@ class PatientPopulation(str, Enum):
     RELAPSED = "relapsed"
 
 
-class TreatmentSetting(str, Enum):
+class TreatmentSetting(StrEnum):
     """Treatment setting categories."""
 
     FIRST_LINE = "first_line"
@@ -76,7 +76,7 @@ class TreatmentSetting(str, Enum):
     MONOTHERAPY = "monotherapy"
 
 
-class DiseaseStage(str, Enum):
+class DiseaseStage(StrEnum):
     """Disease stage categories."""
 
     EARLY = "early"

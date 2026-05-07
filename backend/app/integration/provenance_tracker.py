@@ -11,7 +11,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -21,7 +21,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class ProvenanceEventType(str, Enum):
+class ProvenanceEventType(StrEnum):
     """Types of provenance events."""
 
     INGESTION = "ingestion"  # Initial data ingestion
@@ -36,7 +36,7 @@ class ProvenanceEventType(str, Enum):
     UPDATE = "update"  # Data update
 
 
-class DataQualityLevel(str, Enum):
+class DataQualityLevel(StrEnum):
     """Quality level of data."""
 
     HIGH = "high"  # Peer-reviewed, verified

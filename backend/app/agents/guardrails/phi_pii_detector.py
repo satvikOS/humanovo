@@ -44,10 +44,10 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class PHICategory(str, Enum):
+class PHICategory(StrEnum):
     SSN = "SSN"
     EMAIL = "EMAIL"
     PHONE = "PHONE"

@@ -14,13 +14,13 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class ProvenanceEventType(str, Enum):
+class ProvenanceEventType(StrEnum):
     """Types of provenance events."""
 
     SOURCE_INGESTION = "source_ingestion"

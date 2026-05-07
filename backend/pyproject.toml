@@ -54,6 +54,11 @@ ignore = [
     "N806",   # Variable in function should be lowercase (SIR model uses S, I, R)
     "E741",   # Ambiguous variable name (I is standard in epidemiology)
     "F841",   # Local variable assigned but never used (will clean up incrementally)
+    "E701",   # Multiple statements on one line (colon) — compact severity ladders in clinical/biomech code
+    "E702",   # Multiple statements on one line (semicolon) — compact matplotlib axis setup in plot helpers
+    "N802",   # Function name should be lowercase (math/clinical helpers like P(), make_D(), reportlab afterFlowable override)
+    "N803",   # Argument name should be lowercase (TR, X, R, C0, Vmax, Km — domain-standard scientific naming)
+    "N818",   # Exception name should have Error suffix (existing internal markers like BudgetExceeded, PoolExhausted)
 ]
 
 [tool.mypy]

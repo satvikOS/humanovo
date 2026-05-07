@@ -786,7 +786,7 @@ class BiomechanicsProcessor:
                 return np.array([angle1, angle2, angle3])
 
             else:
-                warnings.warn(f"Unsupported Euler sequence '{sequence}', using ZXY")
+                warnings.warn(f"Unsupported Euler sequence '{sequence}', using ZXY", stacklevel=2)
                 return BiomechanicsProcessor._decompose_euler(R, "ZXY")
         except Exception:
             return None

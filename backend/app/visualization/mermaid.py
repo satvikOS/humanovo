@@ -23,14 +23,14 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class MermaidKind(str, Enum):
+class MermaidKind(StrEnum):
     FLOWCHART = "flowchart"
     SEQUENCE = "sequenceDiagram"
     CLASS = "classDiagram"

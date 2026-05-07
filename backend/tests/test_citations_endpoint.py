@@ -157,7 +157,7 @@ async def test_delete_citation_and_404(user: User) -> None:
 async def test_bulk_delete_citations(user: User) -> None:
     created_ids = []
     for i in range(3):
-        c = await _with_session(lambda db: create_citation(CitationCreate(title=f"Bulk {i}", authors=["B"], year=2024, doi=f"10.0/{uuid.uuid4().hex[:8]}"), db, user))
+        c = await _with_session(lambda db, i=i: create_citation(CitationCreate(title=f"Bulk {i}", authors=["B"], year=2024, doi=f"10.0/{uuid.uuid4().hex[:8]}"), db, user))
         created_ids.append(c.id)
     res = await _with_session(lambda db: bulk_delete_citations(BulkDeleteBody(ids=created_ids), db, user))
     assert res["deleted_count"] == 3

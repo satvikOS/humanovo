@@ -57,7 +57,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -124,7 +124,7 @@ def _parse_invoke_response(model_id: str, response_body: dict) -> str:
     return json.dumps(response_body)
 
 
-class OrchestratorState(str, Enum):
+class OrchestratorState(StrEnum):
     """State of the discovery orchestrator."""
     IDLE = "idle"
     RUNNING = "running"
@@ -132,7 +132,7 @@ class OrchestratorState(str, Enum):
     STOPPING = "stopping"
 
 
-class AgentRole(str, Enum):
+class AgentRole(StrEnum):
     """Role of an agent in the discovery process."""
     EXPLORER = "explorer"
     REASONER = "reasoner"
@@ -141,7 +141,7 @@ class AgentRole(str, Enum):
     CRITIC = "critic"
 
 
-class ModelType(str, Enum):
+class ModelType(StrEnum):
     """LLM model types available for parallel discovery."""
     # Primary models — mixed provider routing (9-model pipeline)
     CLAUDE_OPUS = "claude_opus"                    # Explorer + Synthesizer via Bedrock (200K context)

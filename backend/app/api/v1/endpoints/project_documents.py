@@ -24,7 +24,6 @@ is shaped so the transition is additive.
 from __future__ import annotations
 
 from datetime import date as date_type
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -67,9 +66,9 @@ class ProjectDocumentSummary(BaseModel):
     project_id: UUID
     title: str
     doc_type: str
-    authors: Optional[str]
-    document_date: Optional[date_type]
-    description: Optional[str]
+    authors: str | None
+    document_date: date_type | None
+    description: str | None
     tags: list[str]
     filename: str
     file_size: int
@@ -106,10 +105,10 @@ async def upload_project_document(
     project_id: UUID = Form(...),
     title: str = Form(..., min_length=1, max_length=512),
     doc_type: str = Form("Other", max_length=64),
-    authors: Optional[str] = Form(None, max_length=1024),
-    document_date: Optional[date_type] = Form(None),
-    description: Optional[str] = Form(None),
-    tags: Optional[str] = Form(None, description="Comma-separated tag list."),
+    authors: str | None = Form(None, max_length=1024),
+    document_date: date_type | None = Form(None),
+    description: str | None = Form(None),
+    tags: str | None = Form(None, description="Comma-separated tag list."),
     knowledge_base: str = Form("private", max_length=16),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
@@ -169,8 +168,8 @@ async def upload_project_document(
 
 @router.get("", response_model=list[ProjectDocumentSummary])
 async def list_project_documents(
-    project_id: Optional[UUID] = Query(None),
-    doc_type: Optional[str] = Query(None),
+    project_id: UUID | None = Query(None),
+    doc_type: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),

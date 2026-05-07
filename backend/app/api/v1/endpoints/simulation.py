@@ -5,7 +5,7 @@ Run and manage Monte Carlo simulations.
 """
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
-class SimulationType(str, Enum):
+class SimulationType(StrEnum):
     """Types of simulations available."""
 
     CLINICAL_OUTCOME = "clinical_outcome"
@@ -36,7 +36,7 @@ class SimulationType(str, Enum):
     CUSTOM = "custom"
 
 
-class SimulationStatus(str, Enum):
+class SimulationStatus(StrEnum):
     """Status of a simulation."""
 
     QUEUED = "queued"
@@ -46,7 +46,7 @@ class SimulationStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class DistributionType(str, Enum):
+class DistributionType(StrEnum):
     """Statistical distribution types for parameters."""
 
     NORMAL = "normal"

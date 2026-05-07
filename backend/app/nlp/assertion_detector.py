@@ -19,14 +19,14 @@ Also detects:
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class AssertionType(str, Enum):
+class AssertionType(StrEnum):
     """Types of assertions/claims."""
 
     POSITIVE = "positive"
@@ -38,7 +38,7 @@ class AssertionType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class CertaintyLevel(str, Enum):
+class CertaintyLevel(StrEnum):
     """Levels of certainty in assertions."""
 
     DEFINITE = "definite"
@@ -48,7 +48,7 @@ class CertaintyLevel(str, Enum):
     DOUBTFUL = "doubtful"
 
 
-class EvidenceStrength(str, Enum):
+class EvidenceStrength(StrEnum):
     """Strength of evidence supporting assertion."""
 
     STRONG = "strong"  # RCT, meta-analysis

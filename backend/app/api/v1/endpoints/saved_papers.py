@@ -14,7 +14,6 @@ narrow table instead of overloading `manuscripts`.
 """
 from __future__ import annotations
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -44,9 +43,9 @@ class SavedPaperCreate(BaseModel):
     """Body for POST /saved-papers."""
 
     hypothesis_id: UUID
-    project_id: Optional[UUID] = None
+    project_id: UUID | None = None
     hypothesis_title: str = Field(..., min_length=1, max_length=1024)
-    disease: Optional[str] = Field(None, max_length=255)
+    disease: str | None = Field(None, max_length=255)
     filename: str = Field(..., min_length=1, max_length=255)
     paper_html: str = Field(..., min_length=1)
 
@@ -57,9 +56,9 @@ class SavedPaperSummary(BaseModel):
 
     id: UUID
     hypothesis_id: UUID
-    project_id: Optional[UUID]
+    project_id: UUID | None
     hypothesis_title: str
-    disease: Optional[str]
+    disease: str | None
     filename: str
     created_at: str
     updated_at: str
@@ -140,8 +139,8 @@ async def create_saved_paper(
 
 @router.get("", response_model=list[SavedPaperSummary])
 async def list_saved_papers(
-    project_id: Optional[UUID] = Query(None, description="Filter to a project."),
-    hypothesis_id: Optional[UUID] = Query(None, description="Filter to a hypothesis."),
+    project_id: UUID | None = Query(None, description="Filter to a project."),
+    hypothesis_id: UUID | None = Query(None, description="Filter to a hypothesis."),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),

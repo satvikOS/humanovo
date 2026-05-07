@@ -8,7 +8,7 @@ for biomedical text processing with caching and batch processing.
 import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Optional
 
 import numpy as np
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 _embedding_pipeline: Optional["EmbeddingPipeline"] = None
 
 
-class EmbeddingModel(str, Enum):
+class EmbeddingModel(StrEnum):
     """Supported embedding models."""
 
     # General purpose (local sentence-transformers)

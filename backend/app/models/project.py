@@ -4,7 +4,7 @@ Project Model
 Research project/session model.
 """
 
-from enum import Enum as PyEnum
+from enum import StrEnum
 
 from sqlalchemy import Column, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -14,7 +14,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
 
-class ProjectStatus(str, PyEnum):
+class ProjectStatus(StrEnum):
     """Project status enum."""
 
     ACTIVE = "active"

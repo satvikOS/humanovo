@@ -8,7 +8,7 @@ Supports semantic, sentence, and fixed-size chunking with overlap.
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
@@ -18,7 +18,7 @@ from app.core.logging import LoggerMixin, get_logger
 logger = get_logger(__name__)
 
 
-class ChunkingStrategy(str, Enum):
+class ChunkingStrategy(StrEnum):
     """Chunking strategy options."""
 
     FIXED_SIZE = "fixed_size"

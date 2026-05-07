@@ -15,7 +15,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -27,7 +27,7 @@ from app.core.logging import LoggerMixin, get_logger
 logger = get_logger(__name__)
 
 
-class DiscoveryType(str, Enum):
+class DiscoveryType(StrEnum):
     """Type of discovery being sought."""
     CURE = "cure"  # Kept for backward compatibility
     PREVENTION = "prevention"
@@ -37,7 +37,7 @@ class DiscoveryType(str, Enum):
     COMBINATION_THERAPY = "combination_therapy"
 
 
-class EvidenceStrength(str, Enum):
+class EvidenceStrength(StrEnum):
     """Strength of supporting evidence."""
     STRONG = "strong"  # Multiple clinical trials, meta-analyses
     MODERATE = "moderate"  # Some clinical evidence, strong preclinical
@@ -45,7 +45,7 @@ class EvidenceStrength(str, Enum):
     THEORETICAL = "theoretical"  # Based on pathway analysis, no direct evidence
 
 
-class LLMProvider(str, Enum):
+class LLMProvider(StrEnum):
     """Supported LLM providers."""
     AZURE_AI = "azure_ai"   # Azure AI Model Catalog (non-OpenAI) — primary
     BEDROCK = "bedrock"      # AWS Bedrock — fallback
@@ -78,7 +78,7 @@ class DiscoveryEvidence:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class TranslationalPhase(str, Enum):
+class TranslationalPhase(StrEnum):
     """Translational research phase (T0-T5)."""
     T0 = "T0"  # Basic Research
     T1 = "T1"  # Translation to Humans
@@ -1348,7 +1348,7 @@ Return as structured JSON with keys: ranking, differentiators, combinations, res
                 if response.startswith("json"):
                     response = response[4:]
             return json.loads(response)
-        except:
+        except Exception:
             return {"raw_analysis": response}
 
 

@@ -65,7 +65,7 @@ class ClinicalProcessor:
 
     async def _mixed_effects_model(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """Linear mixed-effects model via REML (fitlme equivalent).
-        
+
         Parameters:
             y: dependent variable (n,)
             X: fixed effects design matrix (n, p)

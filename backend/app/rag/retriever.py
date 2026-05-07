@@ -9,7 +9,7 @@ import asyncio
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
@@ -19,7 +19,7 @@ from app.core.logging import LoggerMixin, get_logger
 logger = get_logger(__name__)
 
 
-class RetrievalStrategy(str, Enum):
+class RetrievalStrategy(StrEnum):
     """Retrieval strategy options."""
 
     VECTOR_ONLY = "vector_only"
@@ -29,7 +29,7 @@ class RetrievalStrategy(str, Enum):
     HYBRID_WEIGHTED = "hybrid_weighted"
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     """Source type for retrieved content."""
 
     PUBMED = "pubmed"

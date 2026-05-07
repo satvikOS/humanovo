@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Optional, TypeVar
 from uuid import UUID, uuid4
@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 T = TypeVar("T")
 
 
-class CheckpointType(str, Enum):
+class CheckpointType(StrEnum):
     """Types of checkpoints."""
 
     MANUAL = "manual"  # User-triggered checkpoint

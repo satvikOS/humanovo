@@ -11,7 +11,7 @@ Handles incremental updates to literature data:
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from .snapshots import SnapshotManager
@@ -20,7 +20,7 @@ from .sources import LiteratureRecord, LiteratureSource
 logger = logging.getLogger(__name__)
 
 
-class UpdateType(str, Enum):
+class UpdateType(StrEnum):
     """Types of updates."""
 
     FULL = "full"  # Complete refresh
@@ -28,7 +28,7 @@ class UpdateType(str, Enum):
     DELTA = "delta"  # Minimal changes
 
 
-class ChangeType(str, Enum):
+class ChangeType(StrEnum):
     """Types of changes."""
 
     ADDED = "added"

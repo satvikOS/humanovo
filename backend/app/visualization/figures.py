@@ -34,7 +34,7 @@ import hashlib
 import io
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from app.visualization.style import (
@@ -46,7 +46,7 @@ from app.visualization.style import (
 logger = logging.getLogger(__name__)
 
 
-class FigureType(str, Enum):
+class FigureType(StrEnum):
     BAR = "bar"
     GROUPED_BAR = "grouped_bar"
     STACKED_BAR = "stacked_bar"

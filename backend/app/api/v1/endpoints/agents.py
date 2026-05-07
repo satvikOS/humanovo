@@ -5,7 +5,7 @@ Manage and interact with AI agents with SQLAlchemy persistence.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -37,7 +37,7 @@ logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
-class AgentType(str, Enum):
+class AgentType(StrEnum):
     """Types of AI agents."""
 
     CONTROLLER = "controller"
@@ -49,7 +49,7 @@ class AgentType(str, Enum):
     REPORTING = "reporting"
 
 
-class AgentStatus(str, Enum):
+class AgentStatus(StrEnum):
     """Status of an agent task."""
 
     PENDING = "pending"

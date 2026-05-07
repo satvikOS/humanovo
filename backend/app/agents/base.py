@@ -7,7 +7,7 @@ Defines the base classes and interfaces for all humanovo agents.
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from app.core.logging import LoggerMixin
 
 
-class AgentType(str, Enum):
+class AgentType(StrEnum):
     """Types of agents in the system."""
 
     CONTROLLER = "controller"
@@ -29,7 +29,7 @@ class AgentType(str, Enum):
     INGESTION = "ingestion"
 
 
-class AgentStatus(str, Enum):
+class AgentStatus(StrEnum):
     """Status of an agent execution."""
 
     IDLE = "idle"

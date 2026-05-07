@@ -9,7 +9,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from app.agents.ingestion.base import IngestionRecord
@@ -18,7 +18,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class EmbeddingModel(str, Enum):
+class EmbeddingModel(StrEnum):
     """Available embedding models."""
 
     MINILM = "all-MiniLM-L6-v2"
@@ -30,7 +30,7 @@ class EmbeddingModel(str, Enum):
     OPENAI_LARGE = "text-embedding-3-large"
 
 
-class ChunkingStrategy(str, Enum):
+class ChunkingStrategy(StrEnum):
     """Document chunking strategies."""
 
     FIXED = "fixed"

@@ -39,7 +39,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import text
@@ -84,7 +84,7 @@ class UserBudgetBlocked(Exception):
 # ---------------------------------------------------------------------------
 
 
-class RunKind(str, Enum):
+class RunKind(StrEnum):
     DISCOVERY = "discovery"           # 9 hypotheses, default cap $9
     SINGLE_HYPOTHESIS = "single_hyp"  # 1 hypothesis, default cap $1
     PAPER_GEN = "paper_gen"           # default cap $2
@@ -92,7 +92,7 @@ class RunKind(str, Enum):
     CHAT = "chat"                     # default cap $0.10 per message
 
 
-class DegradationLevel(str, Enum):
+class DegradationLevel(StrEnum):
     NONE = "none"              # <60% spent
     MILD = "mild"              # 60-80% spent (REFINE+TRANSLATE → Haiku)
     MODERATE = "moderate"      # 80-95% spent (all generative → Haiku)

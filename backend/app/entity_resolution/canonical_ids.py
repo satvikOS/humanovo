@@ -13,13 +13,13 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class IDNamespace(str, Enum):
+class IDNamespace(StrEnum):
     """ID namespaces for different entity sources."""
 
     GENUP = "genup"  # Internal humanovo IDs

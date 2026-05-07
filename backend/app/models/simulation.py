@@ -5,7 +5,7 @@ Monte Carlo simulation runs and results.
 """
 
 from datetime import UTC
-from enum import Enum as PyEnum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
@@ -16,7 +16,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
 
-class SimulationStatus(str, PyEnum):
+class SimulationStatus(StrEnum):
     """Simulation status enum."""
 
     PENDING = "pending"
@@ -26,7 +26,7 @@ class SimulationStatus(str, PyEnum):
     CANCELLED = "cancelled"
 
 
-class SimulationType(str, PyEnum):
+class SimulationType(StrEnum):
     """Type of simulation."""
 
     CLINICAL_OUTCOME = "clinical_outcome"
@@ -38,7 +38,7 @@ class SimulationType(str, PyEnum):
     CUSTOM = "custom"
 
 
-class DistributionType(str, PyEnum):
+class DistributionType(StrEnum):
     """Parameter distribution types."""
 
     NORMAL = "normal"

@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import (
     Any,
     TypeVar,
@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 T = TypeVar("T")
 
 
-class IngestionStatus(str, Enum):
+class IngestionStatus(StrEnum):
     """Status of an ingestion operation."""
 
     PENDING = "pending"
@@ -49,7 +49,7 @@ class IngestionStatus(str, Enum):
     RATE_LIMITED = "rate_limited"
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     """Types of data sources for ingestion."""
 
     PUBMED = "pubmed"

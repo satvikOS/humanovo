@@ -286,8 +286,10 @@ def parse_ris(text: str) -> list[dict[str, Any]]:
 
 
 def _ris_fields_to_citation(fields: dict[str, list[str]]) -> dict[str, Any]:
-    get = lambda k: fields.get(k, [""])[0]
-    all_ = lambda k: fields.get(k, [])
+    def get(k):
+        return fields.get(k, [""])[0]
+    def all_(k):
+        return fields.get(k, [])
     cite: dict[str, Any] = {
         "type": _RIS_TYPE_MAP.get(get("TY"), "journal"),
         "title": get("TI") or get("T1") or get("T2"),

@@ -1631,7 +1631,7 @@ async def list_billing_notifications(
     from app.models.platform_entities import BillingNotification
     query = select(BillingNotification).order_by(BillingNotification.created_at.desc())
     if unread_only:
-        query = query.where(BillingNotification.read == False)
+        query = query.where(not BillingNotification.read)
     query = query.limit(limit)
     result = await db.execute(query)
     notifications = result.scalars().all()

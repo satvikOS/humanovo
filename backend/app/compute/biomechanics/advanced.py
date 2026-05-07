@@ -1011,7 +1011,9 @@ class AdvancedBiomechanicsProcessor:
 
         # Figure
         try:
-            import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
             t_axis = np.arange(n_samples) / fs
             fig, ax = plt.subplots(figsize=(10, 4))
             if method in ("kinematic", "combined"):
@@ -1086,7 +1088,9 @@ class AdvancedBiomechanicsProcessor:
 
         # Figure
         try:
-            import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
             # Moment vs angle scatter with regression

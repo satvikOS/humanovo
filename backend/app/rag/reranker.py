@@ -8,7 +8,7 @@ multi-factor relevance scoring for improved precision.
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -19,7 +19,7 @@ from app.rag.retriever import RetrievedChunk
 logger = get_logger(__name__)
 
 
-class RerankerModel(str, Enum):
+class RerankerModel(StrEnum):
     """Supported reranker models."""
 
     # Cross-encoder models

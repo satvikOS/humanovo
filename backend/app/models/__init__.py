@@ -36,8 +36,6 @@ from app.models.learning_memory import (
     StagePerformanceAggregate,
 )
 from app.models.notebook import NotebookPage as NotebookPage
-from app.models.project_document import ProjectDocument
-from app.models.saved_research_paper import SavedResearchPaper
 from app.models.platform_entities import (
     AuditLogEntry,
     BillingBudget,
@@ -63,6 +61,8 @@ from app.models.platform_entities import (
     TrialSubject,
 )
 from app.models.project import Project
+from app.models.project_document import ProjectDocument
+from app.models.saved_research_paper import SavedResearchPaper
 from app.models.simulation import Simulation, SimulationStatus, SimulationType
 from app.models.user import User, UserRole
 
@@ -72,7 +72,7 @@ def __getattr__(name: str):
     avoid circular imports. Currently handles `AuditRecord` (defined in
     `app.services.audit_service`)."""
     if name == "AuditRecord":
-        from app.services.audit_service import AuditRecord as _AR
+        from app.services.audit_service import AuditRecord as _AR  # noqa: N814
         return _AR
     raise AttributeError(f"module 'app.models' has no attribute {name!r}")
 
@@ -137,4 +137,7 @@ __all__ = [
     "Citation",
     "CitationFolder",
     "CitationHighlight",
+    "ProjectDocument",
+    "SavedResearchPaper",
+    "NotebookPage",
 ]

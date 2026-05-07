@@ -9,7 +9,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -22,7 +22,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class UpdateMode(str, Enum):
+class UpdateMode(StrEnum):
     """How to handle existing entities/relations."""
 
     CREATE_ONLY = "create_only"  # Only create new, skip existing
@@ -31,7 +31,7 @@ class UpdateMode(str, Enum):
     REPLACE = "replace"  # Replace existing completely
 
 
-class ConflictResolution(str, Enum):
+class ConflictResolution(StrEnum):
     """How to resolve conflicts between sources."""
 
     KEEP_EXISTING = "keep_existing"

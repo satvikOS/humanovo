@@ -6,7 +6,7 @@ Tracks stage performance, model effectiveness, hypothesis quality feedback,
 API call costs, and benchmark results across all discovery runs.
 """
 
-from enum import Enum as PyEnum
+from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
@@ -31,7 +31,7 @@ from app.models.base import BaseModel
 # ============== Enums ==============
 
 
-class FeedbackType(str, PyEnum):
+class FeedbackType(StrEnum):
     """Type of feedback on a hypothesis or stage output."""
     EXPERT_REVIEW = "expert_review"
     AUTOMATED_SCORE = "automated_score"
@@ -41,7 +41,7 @@ class FeedbackType(str, PyEnum):
     USER_RATING = "user_rating"
 
 
-class StageOutcome(str, PyEnum):
+class StageOutcome(StrEnum):
     """Outcome classification of a pipeline stage."""
     SUCCESS = "success"
     PARTIAL = "partial"
@@ -51,7 +51,7 @@ class StageOutcome(str, PyEnum):
     CONTENT_FILTERED = "content_filtered"
 
 
-class CostCategory(str, PyEnum):
+class CostCategory(StrEnum):
     """Category for API cost tracking."""
     LLM_INPUT = "llm_input"
     LLM_OUTPUT = "llm_output"
@@ -61,14 +61,14 @@ class CostCategory(str, PyEnum):
     STORAGE = "storage"
 
 
-class BenchmarkStatus(str, PyEnum):
+class BenchmarkStatus(StrEnum):
     """Status of a benchmark test case."""
     ACTIVE = "active"
     DEPRECATED = "deprecated"
     DRAFT = "draft"
 
 
-class BenchmarkRunStatus(str, PyEnum):
+class BenchmarkRunStatus(StrEnum):
     """Status of a benchmark run."""
     PENDING = "pending"
     RUNNING = "running"
@@ -77,7 +77,7 @@ class BenchmarkRunStatus(str, PyEnum):
     CANCELLED = "cancelled"
 
 
-class OptimizationAction(str, PyEnum):
+class OptimizationAction(StrEnum):
     """Type of optimization action taken."""
     PROMPT_ADJUSTMENT = "prompt_adjustment"
     TEMPERATURE_CHANGE = "temperature_change"

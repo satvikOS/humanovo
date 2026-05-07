@@ -5,7 +5,7 @@ Tracks tasks executed by various AI agents in the system.
 """
 
 from datetime import UTC, datetime
-from enum import Enum as PyEnum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
@@ -16,7 +16,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
 
-class AgentTaskStatus(str, PyEnum):
+class AgentTaskStatus(StrEnum):
     """Agent task status enum."""
 
     PENDING = "pending"
@@ -28,7 +28,7 @@ class AgentTaskStatus(str, PyEnum):
     RETRYING = "retrying"
 
 
-class AgentTaskType(str, PyEnum):
+class AgentTaskType(StrEnum):
     """Type of agent task."""
 
     LITERATURE_SEARCH = "literature_search"

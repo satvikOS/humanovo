@@ -98,7 +98,7 @@ def spm_hrf(TR: float, peak_delay: float = 6.0, undershoot_delay: float = 16.0,
             p_u_ratio: float = 6.0, onset: float = 0.0,
             duration: float = 32.0) -> np.ndarray:
     """Canonical double-gamma HRF (SPM equivalent).
-    
+
     Returns the HRF sampled at TR intervals from 0 to duration.
     """
     from scipy.stats import gamma as gamma_dist
@@ -138,7 +138,7 @@ def spm_hrf_dispersion_derivative(TR: float, **kwargs) -> np.ndarray:
 
 def fir_basis(TR: float, n_timepoints: int, order: int = 12) -> np.ndarray:
     """Finite Impulse Response (FIR) basis set.
-    
+
     Returns matrix of shape (n_timepoints, order) with delta functions at each lag.
     """
     basis = np.zeros((n_timepoints, order))
@@ -149,7 +149,7 @@ def fir_basis(TR: float, n_timepoints: int, order: int = 12) -> np.ndarray:
 
 def dct_basis(n_timepoints: int, cutoff_period: float, TR: float) -> np.ndarray:
     """Discrete Cosine Transform high-pass filter basis set.
-    
+
     Creates DCT basis functions for frequencies below 1/cutoff_period Hz,
     equivalent to SPM's high-pass filter.
     """
@@ -195,7 +195,7 @@ class NeuroimagingProcessor:
 
     async def _voxel_glm(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """Voxel-wise General Linear Model with HRF convolution (SPM-equivalent).
-        
+
         Parameters:
             data: 4D fMRI data (x, y, z, t) or 2D (voxels, t)
             conditions: list of {name, onsets (in seconds), durations (in seconds)}
@@ -449,7 +449,7 @@ class NeuroimagingProcessor:
 
     async def _rft_correction(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """Random Field Theory multiple comparisons correction (SPM-equivalent).
-        
+
         Parameters:
             t_map: 3D t-statistic map
             df: residual degrees of freedom
@@ -584,7 +584,7 @@ class NeuroimagingProcessor:
 
     async def _functional_connectivity(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """ROI-to-ROI and seed-based functional connectivity analysis.
-        
+
         Parameters:
             timeseries: (n_rois, n_timepoints) or (n_voxels, n_timepoints)
             roi_labels: list of ROI names
@@ -749,7 +749,7 @@ class NeuroimagingProcessor:
 
     async def _atlas_roi_analysis(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """Extract statistics from atlas-defined regions of interest.
-        
+
         Parameters:
             data: 3D volume or 4D timeseries
             atlas: "aal", "desikan_killiany", or integer-labeled 3D volume
@@ -830,7 +830,7 @@ class NeuroimagingProcessor:
 
     async def _ica_decomposition(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """Independent Component Analysis for fMRI data.
-        
+
         Parameters:
             data: 2D (n_voxels, n_timepoints) or 4D (x, y, z, t)
             n_components: number of ICs to extract (default: auto via PCA)
@@ -958,7 +958,7 @@ class NeuroimagingProcessor:
 
     async def _dcm(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """Simplified Dynamic Causal Modeling — bilinear with Balloon model.
-        
+
         Parameters:
             timeseries: (n_regions, n_timepoints) observed BOLD timeseries
             inputs: (n_inputs, n_timepoints) experimental inputs
@@ -1088,7 +1088,7 @@ class NeuroimagingProcessor:
 
     async def _brain_extraction(self, req: ComputeRequest, params: dict) -> ComputeResult:
         """Brain extraction (skull stripping) using intensity-based approach.
-        
+
         Parameters:
             data: 3D volume
             method: "otsu_morphological", "bet_simplified"

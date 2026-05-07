@@ -5,7 +5,7 @@ Manage AI-generated hypotheses in humanovo with SQLAlchemy persistence.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
-class HypothesisStatus(str, Enum):
+class HypothesisStatus(StrEnum):
     """Status of a hypothesis."""
 
     DRAFT = "draft"
@@ -51,7 +51,7 @@ class HypothesisStatus(str, Enum):
     ARCHIVED = "archived"
 
 
-class EvidenceType(str, Enum):
+class EvidenceType(StrEnum):
     """Type of evidence."""
 
     SUPPORTING = "supporting"

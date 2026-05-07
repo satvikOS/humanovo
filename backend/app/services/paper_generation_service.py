@@ -1349,8 +1349,6 @@ Write as a professional analytical assessment. Be data-driven and actionable."""
             "cohere_command_a": "#F59E0B",
             "grok_fast": "#EC4899",
             "o3_mini": "#3B82F6",
-            "gpt_41": "#14B8A6",
-            "o3_mini": "#3B82F6",
         }
         colors = [model_colors.get(m, "#6B7280") for m in models]
 

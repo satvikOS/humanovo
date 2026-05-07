@@ -23,7 +23,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import Column, DateTime, Float, Index, Integer, String
@@ -94,7 +94,7 @@ class AuditRecord(Base):
 
 # ─── Audit Event Types ──────────────────────────────────────────
 
-class AuditEventType(str, Enum):
+class AuditEventType(StrEnum):
     # Pipeline
     PIPELINE_START = "pipeline.start"
     PIPELINE_COMPLETE = "pipeline.complete"
@@ -127,7 +127,7 @@ class AuditEventType(str, Enum):
     AUTH_PERMISSION_DENIED = "auth.permission_denied"
 
 
-class AuditSeverity(str, Enum):
+class AuditSeverity(StrEnum):
     INFO = "info"
     NOTICE = "notice"
     WARNING = "warning"

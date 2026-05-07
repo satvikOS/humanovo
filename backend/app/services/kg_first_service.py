@@ -47,7 +47,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import text
@@ -57,13 +57,13 @@ from app.core.database import async_session_factory
 logger = logging.getLogger(__name__)
 
 
-class KGScope(str, Enum):
+class KGScope(StrEnum):
     PRIVATE = "private"                # visible only to owner
     COMMON = "common"                  # shared, contributor tracked
     PUBLIC_DOMAIN = "public_domain"    # free of individual ownership
 
 
-class UploadPermission(str, Enum):
+class UploadPermission(StrEnum):
     PRIVATE = "private"
     COMMON = "common"
 

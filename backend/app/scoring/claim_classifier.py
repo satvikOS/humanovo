@@ -11,13 +11,13 @@ Classifies biomedical claims by type and strength:
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class ClaimType(str, Enum):
+class ClaimType(StrEnum):
     """Types of scientific claims."""
 
     CAUSAL = "causal"  # X causes Y
@@ -33,7 +33,7 @@ class ClaimType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class ClaimStrength(str, Enum):
+class ClaimStrength(StrEnum):
     """Strength of claims."""
 
     DEFINITIVE = "definitive"  # Proven, established
@@ -44,7 +44,7 @@ class ClaimStrength(str, Enum):
     CONTRADICTED = "contradicted"  # Evidence against
 
 
-class ClaimDirection(str, Enum):
+class ClaimDirection(StrEnum):
     """Direction of claims."""
 
     POSITIVE = "positive"  # Confirms, supports
@@ -53,7 +53,7 @@ class ClaimDirection(str, Enum):
     MIXED = "mixed"  # Both positive and negative aspects
 
 
-class ClaimSpecificity(str, Enum):
+class ClaimSpecificity(StrEnum):
     """Specificity of claims."""
 
     HIGHLY_SPECIFIC = "highly_specific"  # Specific population/context

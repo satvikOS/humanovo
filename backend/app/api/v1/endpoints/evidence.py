@@ -5,7 +5,7 @@ Manage evidence items (papers, trials, data) in humanovo with SQLAlchemy persist
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,7 +29,7 @@ logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
-class EvidenceSource(str, Enum):
+class EvidenceSource(StrEnum):
     """Source type of evidence."""
 
     PUBMED = "pubmed"

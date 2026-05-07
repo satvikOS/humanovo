@@ -8,7 +8,7 @@ Connected to multiple ingestion agents for continuous data acquisition.
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Optional
 
 from pydantic import BaseModel
@@ -43,7 +43,7 @@ logger = get_logger(__name__)
 _rag_service: Optional["RAGService"] = None
 
 
-class RAGMode(str, Enum):
+class RAGMode(StrEnum):
     """RAG operation mode."""
 
     FAST = "fast"  # Quick retrieval, minimal reranking

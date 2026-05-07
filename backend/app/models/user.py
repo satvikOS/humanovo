@@ -5,7 +5,7 @@ User authentication and authorization model.
 """
 
 from datetime import UTC, datetime
-from enum import Enum as PyEnum
+from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, Text
@@ -15,7 +15,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
 
-class UserRole(str, PyEnum):
+class UserRole(StrEnum):
     """User role enum."""
 
     ADMIN = "admin"
@@ -23,7 +23,7 @@ class UserRole(str, PyEnum):
     VIEWER = "viewer"
 
 
-class UserTier(str, PyEnum):
+class UserTier(StrEnum):
     """Pricing-tier enum. Authoritative cap mapping lives in
     `app.services.budget_enforcer_service.TIER_MONTHLY_CAP_CENTS`;
     this enum names the rows. Migration 014_user_pricing_tier creates

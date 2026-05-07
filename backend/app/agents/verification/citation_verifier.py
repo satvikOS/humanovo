@@ -49,7 +49,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # Types
 # ---------------------------------------------------------------------------
 
-class VerificationVerdict(str, Enum):
+class VerificationVerdict(StrEnum):
     VERIFIED = "verified"                    # all 3 rounds pass
     NO_DOI_DECLARED = "no_doi_declared"      # Round 1 skipped, Round 2 passed
     FABRICATED = "fabricated"                # Round 1 fail

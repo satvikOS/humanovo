@@ -5,7 +5,7 @@ Tracks data ingestion jobs from various scientific sources.
 """
 
 from datetime import UTC, datetime
-from enum import Enum as PyEnum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
@@ -16,7 +16,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
 
-class IngestionJobStatus(str, PyEnum):
+class IngestionJobStatus(StrEnum):
     """Ingestion job status enum."""
 
     PENDING = "pending"
@@ -30,7 +30,7 @@ class IngestionJobStatus(str, PyEnum):
     CANCELLED = "cancelled"
 
 
-class IngestionSource(str, PyEnum):
+class IngestionSource(StrEnum):
     """Data source for ingestion."""
 
     PUBMED = "pubmed"

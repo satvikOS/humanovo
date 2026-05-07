@@ -14,7 +14,7 @@ Features:
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -25,7 +25,7 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-class KnowledgeStatus(str, Enum):
+class KnowledgeStatus(StrEnum):
     """Status of a knowledge record."""
     PENDING = "pending"
     PROCESSING = "processing"
@@ -35,7 +35,7 @@ class KnowledgeStatus(str, Enum):
     STALE = "stale"
 
 
-class KnowledgeSource(str, Enum):
+class KnowledgeSource(StrEnum):
     """Sources of knowledge."""
     PUBMED = "pubmed"
     CLINICAL_TRIALS = "clinical_trials"

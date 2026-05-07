@@ -5,7 +5,7 @@ RESTful API for managing ingestion agents, jobs, and scheduling with SQLAlchemy 
 """
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -52,7 +52,7 @@ _agent_tracker: dict[str, dict[str, Any]] = {}
 _source_configs: dict[str, dict[str, Any]] = {}
 
 
-class IngestionPriority(str, Enum):
+class IngestionPriority(StrEnum):
     """Priority levels for ingestion tasks."""
 
     CRITICAL = "critical"

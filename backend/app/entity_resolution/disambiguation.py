@@ -11,13 +11,13 @@ Resolves ambiguous entity mentions using:
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class DisambiguationMethod(str, Enum):
+class DisambiguationMethod(StrEnum):
     """Methods used for disambiguation."""
 
     CONTEXT = "context"

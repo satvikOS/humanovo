@@ -6,7 +6,7 @@ hybrid search, and context retrieval.
 """
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
 
 
-class RetrievalMode(str, Enum):
+class RetrievalMode(StrEnum):
     """Retrieval mode for RAG queries."""
 
     VECTOR = "vector"  # Semantic similarity only
@@ -32,7 +32,7 @@ class RetrievalMode(str, Enum):
     HYBRID_GRAPH = "hybrid_graph"  # All three combined
 
 
-class RerankerType(str, Enum):
+class RerankerType(StrEnum):
     """Type of reranker to use."""
 
     NONE = "none"
