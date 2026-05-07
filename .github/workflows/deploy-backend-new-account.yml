@@ -83,6 +83,11 @@ jobs:
         # steps would fail with cryptic AWS errors. Detect that case
         # here and exit cleanly so the workflow goes green with a
         # clear "skipped" notice instead.
+        #
+        # Note: `terraform output -raw <name>` exits 0 even when the
+        # named output doesn't exist (just prints a warning to stderr).
+        # We need to inspect the JSON output instead — an empty `{}`
+        # means the state file exists but no resources have been applied.
         id: bootstrap_check
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
@@ -96,9 +101,11 @@ jobs:
             echo "should_deploy=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # State exists if outputs include ecr_repository_url.
-          if ! terraform output -raw ecr_repository_url >/dev/null 2>&1; then
-            echo "::warning title=Bootstrap not run::No Terraform outputs found for the backend stack."
+          # Real check: outputs JSON contains the ecr_repository_url key.
+          OUTPUTS_JSON=$(terraform output -json 2>/dev/null || echo '{}')
+          HAS_ECR=$(echo "$OUTPUTS_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if 'ecr_repository_url' in d else 'no')")
+          if [ "$HAS_ECR" != "yes" ]; then
+            echo "::warning title=Bootstrap not run::No ecr_repository_url output found — backend stack not applied yet."
             echo "Run the **Bootstrap Backend** workflow (workflow_dispatch) before pushing backend code to humanovo."
             echo "should_deploy=false" >> "$GITHUB_OUTPUT"
             exit 0

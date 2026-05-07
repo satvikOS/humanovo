@@ -15,7 +15,7 @@
 //! release that updates only the frontend doesn't require re-shipping
 //! the native binary.
 
-use tauri::{Builder, Manager};
+use tauri::{Builder, Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
