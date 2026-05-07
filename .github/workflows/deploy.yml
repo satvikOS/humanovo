@@ -1,13 +1,19 @@
-name: Deploy humanovo
+name: Deploy humanovo (LEGACY — old account)
 
-# Deploy to dev S3 + CloudFront on push to main/humanovo only.
-# Feature branches (claude/*) are intentionally excluded — open a PR
-# and trigger Run Workflow manually when you want a preview.
+# DISABLED auto-trigger 2026-05-06. This workflow targets the OLD AWS
+# account whose credentials were rotated when the new business account
+# was provisioned. Every push to humanovo would fire it and fail at
+# the configure-aws-credentials step, producing a sea of red runs.
+#
+# The replacement pair is in this same directory:
+#   - bootstrap-frontend-cloudfront.yml  (one-time provisioning, NEW account)
+#   - deploy-frontend-new-account.yml    (per-build deploy, NEW account)
+#
+# This file stays workflow_dispatch only so a deliberate dispatch could
+# still hit the old infra in the unlikely case we need it during the
+# migration tail. It'll be deleted entirely once the old account is
+# decommissioned.
 on:
-  push:
-    branches:
-      - main
-      - humanovo
   workflow_dispatch:
 
 env:
