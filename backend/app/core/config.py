@@ -2,13 +2,156 @@
 Humanovo Configuration Module
 
 Centralized configuration management using Pydantic Settings.
-Supports environment variables and .env files.
+Supports environment variables, .env files, and AWS Secrets Manager.
 """
 
+import json
+import logging
+import os
 from functools import lru_cache
+from typing import Any
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+
+# ─── AWS Secrets Manager loader ─────────────────────────────────────
+#
+# When the Lambda is provisioned (see infrastructure/terraform/backend),
+# Terraform sets SECRETS_MANAGER_NAME=humanovo/prod/app on the function.
+# At cold-start we fetch that JSON blob once and merge the keys into
+# the process environment BEFORE pydantic-settings reads them, so the
+# existing field names (STRIPE_SECRET_KEY, etc.) keep working without
+# a separate "secrets" namespace.
+#
+# Local dev never sets SECRETS_MANAGER_NAME, so the .env-based loader
+# remains the default — boto3 isn't even imported.
+
+_SECRETS_FETCHED: dict[str, str] | None = None
+
+
+def _fetch_secret_json(secret_name: str) -> dict[str, str]:
+    """Fetch a JSON blob from AWS Secrets Manager. Returns {} on failure.
+
+    Cold-start cost only — the result is module-level cached via the
+    `_SECRETS_FETCHED` sentinel so warm Lambda invocations don't re-call
+    Secrets Manager. Failures degrade silently to {} so a misconfigured
+    permission can't take the whole app down at import time; the error
+    is logged and individual settings will fall back to env defaults.
+    """
+    try:
+        import boto3  # local import: avoid the dependency in dev when unused
+    except ImportError:
+        logger.warning(
+            "SECRETS_MANAGER_NAME=%s set but boto3 not installed — skipping",
+            secret_name,
+        )
+        return {}
+
+    try:
+        client = boto3.client(
+            "secretsmanager",
+            region_name=os.environ.get("AWS_REGION", "us-east-1"),
+        )
+        resp = client.get_secret_value(SecretId=secret_name)
+        raw = resp.get("SecretString", "{}")
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            logger.warning("Secret %s is not a JSON object — skipping", secret_name)
+            return {}
+        # Coerce all values to strings so they're env-var safe. Empty
+        # placeholders ("REPLACE_ME", "") get filtered so they don't
+        # override real values from .env in mixed-mode setups.
+        return {str(k): str(v) for k, v in parsed.items() if v not in (None, "")}
+    except Exception as exc:  # noqa: BLE001 — we genuinely want to swallow
+        logger.error(
+            "Failed to fetch secret %s from Secrets Manager: %s",
+            secret_name,
+            exc,
+        )
+        return {}
+
+
+def _load_aws_secrets_into_env() -> None:
+    """Populate os.environ from Secrets Manager (one-shot, idempotent).
+
+    Mapped keys follow the convention used by the Terraform stack
+    (`infrastructure/terraform/backend/main.tf`): the JSON blob in
+    `humanovo/prod/app` carries lowercase keys (`jwt_secret_key`,
+    `stripe_secret_key`, etc.) which we map to the uppercase Settings
+    field names.
+    """
+    global _SECRETS_FETCHED
+    if _SECRETS_FETCHED is not None:
+        return  # already loaded
+
+    secret_name = os.environ.get("SECRETS_MANAGER_NAME")
+    if not secret_name:
+        _SECRETS_FETCHED = {}
+        return
+
+    blob = _fetch_secret_json(secret_name)
+
+    # Map the canonical lowercase keys in the secret blob to the
+    # uppercase env-var names pydantic-settings reads. Everything in
+    # `extra_keys` is also passed through verbatim (uppercased) so a
+    # forward-compatible secret schema doesn't require a code change.
+    canonical_map: dict[str, str] = {
+        "jwt_secret_key": "SECRET_KEY",
+        "stripe_secret_key": "STRIPE_SECRET_KEY",
+        "anthropic_api_key": "ANTHROPIC_API_KEY",
+        "openai_api_key": "OPENAI_API_KEY",
+        "auth0_domain": "AUTH0_DOMAIN",
+        "auth0_client_id": "AUTH0_CLIENT_ID",
+        "auth0_client_secret": "AUTH0_CLIENT_SECRET",
+    }
+
+    for raw_key, value in blob.items():
+        target = canonical_map.get(raw_key, raw_key.upper())
+        # Don't clobber an explicitly-set env var (e.g. operator override
+        # for incident response). Secrets Manager is the default source,
+        # not the override.
+        if target not in os.environ:
+            os.environ[target] = value
+
+    # Optionally also fetch the DB + Redis secrets so the URLs can be
+    # assembled from secret material instead of raw env vars. Both are
+    # always-required in the Lambda environment, so a missing one is
+    # logged but not fatal.
+    db_secret_name = os.environ.get("DB_SECRET_NAME")
+    if db_secret_name:
+        db_blob = _fetch_secret_json(db_secret_name)
+        if db_blob and "DATABASE_URL" not in os.environ:
+            host = os.environ.get("RDS_PROXY_HOST") or db_blob.get("host", "")
+            user = db_blob.get("username", "humanovo")
+            pwd = db_blob.get("password", "")
+            dbname = db_blob.get("dbname", "humanovo")
+            port = db_blob.get("port", "5432")
+            if host and pwd:
+                os.environ["DATABASE_URL"] = (
+                    f"postgresql+asyncpg://{user}:{pwd}@{host}:{port}/{dbname}"
+                )
+
+    redis_secret_name = os.environ.get("REDIS_SECRET_NAME")
+    if redis_secret_name:
+        redis_blob = _fetch_secret_json(redis_secret_name)
+        if redis_blob and "REDIS_URL" not in os.environ:
+            host = os.environ.get("REDIS_HOST") or redis_blob.get("host", "")
+            token = redis_blob.get("auth_token", "")
+            if host and token:
+                # ElastiCache Serverless requires TLS — `rediss://`.
+                os.environ["REDIS_URL"] = f"rediss://default:{token}@{host}:6379/0"
+
+    _SECRETS_FETCHED = blob
+
+
+# Run the loader at module import so pydantic-settings sees the merged
+# environment when Settings() is instantiated below. Safe in dev: with
+# SECRETS_MANAGER_NAME unset this is a single dict.get() that returns
+# immediately.
+_load_aws_secrets_into_env()
 
 
 class Settings(BaseSettings):

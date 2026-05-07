@@ -8,6 +8,14 @@ uvicorn[standard]>=0.30.0
 python-multipart>=0.0.12
 websockets>=13.0
 
+# ─── AWS Lambda runtime ──────────────────────────────────────────
+# mangum bridges FastAPI's ASGI interface to API Gateway v2 events.
+# aws-lambda-powertools wraps logging/metrics/tracing in the
+# Lambda-native idiom (structured logs, EMF metrics) — used by the
+# handler in app/lambda_handler.py.
+mangum>=0.17
+aws-lambda-powertools>=2.40
+
 # ─── Database ────────────────────────────────────────────────────
 sqlalchemy>=2.0.35
 asyncpg>=0.30.0

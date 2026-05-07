@@ -1,0 +1,56 @@
+# humanovo Backend — Lambda container image
+#
+# Built from the AWS-managed Lambda Python 3.12 base image so the
+# runtime is API Gateway v2 / Lambda Runtime API compatible without us
+# having to ship our own bootstrap.
+#
+# Built and pushed by `.github/workflows/deploy-backend-new-account.yml`.
+# Provisioned ECR repo lives at the URL emitted by the bootstrap
+# Terraform stack.
+
+FROM public.ecr.aws/lambda/python:3.12
+
+# Build-time deps for asyncpg (psycopg2-binary ships wheels but
+# asyncpg sometimes needs to compile if the wheel is missing on
+# Python 3.12 + manylinux2014). gcc + libpq-devel cover both
+# common cases. Stripped after pip install to keep the image lean.
+RUN dnf install -y --setopt=install_weak_deps=False \
+        gcc \
+        gcc-c++ \
+        make \
+        libpq-devel \
+        python3-devel \
+        openssl-devel \
+        && dnf clean all
+
+# Application requirements first — leverages Docker layer caching so
+# code-only changes don't reinstall every dependency.
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+
+# `-t ${LAMBDA_TASK_ROOT}` is the Lambda-recommended layout: deps
+# go next to the handler so `import app.main` Just Works without a
+# venv on PATH.
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt -t ${LAMBDA_TASK_ROOT}
+
+# Mangum + Powertools are required for the Lambda entrypoint but
+# may not yet be in requirements.txt on older branches. Install
+# explicitly so a stale requirements.txt doesn't break the build.
+# (No-op once the lines land in requirements.txt — pip skips
+# already-satisfied installs.)
+RUN pip install --no-cache-dir \
+        "mangum>=0.17" \
+        "aws-lambda-powertools>=2.40" \
+        -t ${LAMBDA_TASK_ROOT}
+
+# Application source — copied last so a code-only change only
+# rebuilds this layer.
+COPY app/ ${LAMBDA_TASK_ROOT}/app/
+
+# Strip build-time deps to reduce the final image size. Wheels are
+# already extracted into ${LAMBDA_TASK_ROOT}; gcc et al. aren't needed
+# at runtime.
+RUN dnf remove -y gcc gcc-c++ make python3-devel openssl-devel || true
+
+# Mangum reads the FastAPI app at import time. The handler is
+# `app.lambda_handler.handler` which wraps `app.main:app` in Mangum.
+CMD ["app.lambda_handler.handler"]

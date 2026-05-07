@@ -1,0 +1,243 @@
+name: Deploy Backend to NEW account
+
+# Builds the backend container image, pushes it to the ECR repo
+# provisioned by `bootstrap-backend-new-account.yml`, and updates the
+# Lambda function in-place. The Terraform stack pins the image_uri
+# with `ignore_changes = [image_uri]` so this workflow can patch it
+# without a `terraform apply`.
+#
+# Run AFTER bootstrap-backend-new-account.yml has succeeded once
+# (it creates the ECR repo + Lambda function). Then run THIS workflow
+# on every backend code change you want live.
+
+on:
+  # Auto-deploy on every push to humanovo that touches backend code.
+  push:
+    branches:
+      - humanovo
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend-new-account.yml'
+  # Manual override — useful for redeploying without a code change
+  # (e.g., to roll back to a known-good SHA).
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: 'AWS region (must match bootstrap)'
+        required: false
+        default: 'us-east-1'
+      image_tag:
+        description: 'Override image tag to deploy (default: short commit SHA)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize Lambda code updates — concurrent
+  # update-function-code calls land in a "ResourceConflictException"
+  # state and we'd rather queue than retry.
+  group: deploy-backend-new-prod
+  cancel-in-progress: false
+
+env:
+  TF_STATE_BUCKET_PREFIX: humanovo-tf-state
+  TF_LOCK_TABLE: humanovo-tf-locks
+  TF_WORKING_DIR: infrastructure/terraform/backend
+  TERRAFORM_VERSION: '1.6.6'
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+
+jobs:
+  deploy:
+    name: Build + push + update Lambda
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure AWS credentials (new account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm we're in the new account
+        run: |
+          aws sts get-caller-identity --output table
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
+
+      - name: Set up Terraform (to read outputs)
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Check bootstrap state exists
+        # First-run safety: if a contributor pushes a backend/** change
+        # BEFORE bootstrap-backend-new-account.yml has been dispatched,
+        # the ECR repo + Lambda function don't exist yet and downstream
+        # steps would fail with cryptic AWS errors. Detect that case
+        # here and exit cleanly so the workflow goes green with a
+        # clear "skipped" notice instead.
+        id: bootstrap_check
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          set +e
+          terraform init -input=false >/tmp/init.log 2>&1
+          INIT_RC=$?
+          set -e
+          if [ "$INIT_RC" -ne 0 ]; then
+            cat /tmp/init.log
+            echo "::warning title=Bootstrap not run::terraform init failed — likely no state yet."
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # State exists if outputs include ecr_repository_url.
+          if ! terraform output -raw ecr_repository_url >/dev/null 2>&1; then
+            echo "::warning title=Bootstrap not run::No Terraform outputs found for the backend stack."
+            echo "Run the **Bootstrap Backend** workflow (workflow_dispatch) before pushing backend code to humanovo."
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          echo "Bootstrap stack found — proceeding with deploy."
+
+      - name: Read stack outputs
+        id: tf
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          ECR_URL=$(terraform output -raw ecr_repository_url)
+          LAMBDA_NAME=$(terraform output -raw lambda_function_name)
+          API_DOMAIN=$(terraform output -raw api_gateway_custom_domain)
+          {
+            echo "ecr_url=$ECR_URL"
+            echo "lambda_name=$LAMBDA_NAME"
+            echo "api_domain=$API_DOMAIN"
+          } >> "$GITHUB_OUTPUT"
+          echo "Bootstrap stack found:"
+          echo "  ecr        = $ECR_URL"
+          echo "  lambda     = $LAMBDA_NAME"
+          echo "  api domain = $API_DOMAIN"
+
+      - name: Compute image tags
+        id: tags
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          # Manual override wins; otherwise tag with the short SHA.
+          INPUT_TAG="${{ github.event.inputs.image_tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            SHA_TAG="$INPUT_TAG"
+          else
+            SHA_TAG=$(git rev-parse --short HEAD)
+          fi
+          echo "sha_tag=$SHA_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$SHA_TAG"
+
+      - name: ECR login
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          REGISTRY=$(echo "${{ steps.tf.outputs.ecr_url }}" | cut -d'/' -f1)
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Build image
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          ECR_URL="${{ steps.tf.outputs.ecr_url }}"
+          SHA_TAG="${{ steps.tags.outputs.sha_tag }}"
+          docker build \
+            -t "${ECR_URL}:${SHA_TAG}" \
+            -t "${ECR_URL}:latest" \
+            -f backend/Dockerfile.lambda \
+            backend/
+
+      - name: Push image (both tags)
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          ECR_URL="${{ steps.tf.outputs.ecr_url }}"
+          SHA_TAG="${{ steps.tags.outputs.sha_tag }}"
+          docker push "${ECR_URL}:${SHA_TAG}"
+          docker push "${ECR_URL}:latest"
+
+      - name: Update Lambda function code
+        id: update
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          ECR_URL="${{ steps.tf.outputs.ecr_url }}"
+          SHA_TAG="${{ steps.tags.outputs.sha_tag }}"
+          LAMBDA_NAME="${{ steps.tf.outputs.lambda_name }}"
+          IMAGE_URI="${ECR_URL}:${SHA_TAG}"
+
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_NAME" \
+            --image-uri "$IMAGE_URI" \
+            --region "${AWS_REGION}" \
+            --output json > /tmp/update.json
+
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+          echo "Update queued. Waiting for Lambda to finish updating..."
+
+      - name: Wait for Lambda update
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          LAMBDA_NAME="${{ steps.tf.outputs.lambda_name }}"
+          aws lambda wait function-updated \
+            --function-name "$LAMBDA_NAME" \
+            --region "${AWS_REGION}"
+          echo "Lambda update complete."
+
+      - name: Print "skipped" summary if bootstrap not run
+        if: steps.bootstrap_check.outputs.should_deploy != 'true'
+        run: |
+          {
+            echo "## humanovo Backend deploy — SKIPPED"
+            echo ""
+            echo "The backend Terraform stack hasn't been bootstrapped yet, so there's"
+            echo "no ECR repo or Lambda function to update."
+            echo ""
+            echo "**Next step:** run **Bootstrap Backend** (\`bootstrap-backend-new-account.yml\`)"
+            echo "via Actions → Run workflow. After it succeeds, push any \`backend/**\`"
+            echo "change again and this workflow will deploy normally."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Print results to job summary
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          ECR_URL="${{ steps.tf.outputs.ecr_url }}"
+          LAMBDA_NAME="${{ steps.tf.outputs.lambda_name }}"
+          API_DOMAIN="${{ steps.tf.outputs.api_domain }}"
+          IMAGE_URI="${{ steps.update.outputs.image_uri }}"
+          SHA_TAG="${{ steps.tags.outputs.sha_tag }}"
+
+          {
+            echo "## humanovo Backend deployed"
+            echo ""
+            echo "### Live API"
+            echo ""
+            echo "**${API_DOMAIN}**"
+            echo ""
+            echo "Health check: \`${API_DOMAIN}/health\`"
+            echo ""
+            echo "### Deployment details"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| AWS account | \`${ACCOUNT_ID}\` |"
+            echo "| Region | \`${AWS_REGION}\` |"
+            echo "| Lambda function | \`${LAMBDA_NAME}\` |"
+            echo "| Image | \`${IMAGE_URI}\` |"
+            echo "| Build SHA | \`${SHA_TAG}\` |"
+            echo "| ECR repo | \`${ECR_URL}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo ""
+          echo "============================================================"
+          echo "  LIVE:  ${API_DOMAIN}"
+          echo "  IMAGE: ${IMAGE_URI}"
+          echo "============================================================"
+          echo ""
