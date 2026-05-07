@@ -12,6 +12,11 @@ eggs/
 .eggs/
 lib/
 lib64/
+# Don't let the broad Python `lib/` rule above swallow frontend
+# source directories that happen to be named `lib`. The frontend
+# `src/lib/` houses runtime helpers (native.ts, etc.) and IS source.
+!frontend/src/lib/
+!frontend/src/lib/**
 parts/
 sdist/
 var/
