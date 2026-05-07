@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """
-Inject the Tauri updater config into tauri.conf.json IFF the public
-key is provided. The committed config has no updater block so the
-build succeeds with no signing keys at all (first-run UX). Once the
-user generates a Tauri updater keypair and adds both halves to repo
-Secrets, the build workflow runs this script to wire the updater on.
+Inject the Tauri updater config into tauri.conf.json. The committed
+config has no updater block, so this script is responsible for ALWAYS
+writing one — otherwise the updater plugin (loaded unconditionally in
+src-tauri/src/lib.rs) panics at startup with:
 
-Inputs (env vars, not args):
-    TAURI_SIGNING_PUBLIC_KEY  — base64 minisign public key (required to
-                                enable updater)
-    TAURI_UPDATER_ENDPOINT    — manifest URL the updater polls. Defaults
-                                to the latest GitHub Release manifest.
+    PluginInitialization("updater",
+      "Error deserializing 'plugins.updater' within your Tauri configuration:
+       invalid type: null, expected struct Config")
 
-Behavior:
-    - PUBLIC_KEY empty/missing → no-op (exit 0). Build proceeds with
-      updater disabled.
-    - PUBLIC_KEY set            → tauri.conf.json patched in place to
-      enable bundle.createUpdaterArtifacts + plugins.updater.
+Two modes:
+  - PUBLIC_KEY set   → real updater config (active: true) pointing at
+                       the GitHub Releases manifest. Updates work end-to-end.
+  - PUBLIC_KEY empty → inert stub (active: false, no endpoints, no pubkey).
+                       Plugin deserializes cleanly but never tries to update,
+                       so first-build UX (no signing keys) still ships a
+                       launchable binary.
+
+Inputs (env vars):
+    TAURI_SIGNING_PUBLIC_KEY  — base64 minisign public key (optional)
+    TAURI_UPDATER_ENDPOINT    — manifest URL (defaults to GH Releases)
 
 Usage:
     TAURI_SIGNING_PUBLIC_KEY="$KEY" python3 scripts/configure_tauri_updater.py
@@ -35,36 +38,49 @@ DEFAULT_ENDPOINT = (
 
 
 def main() -> int:
-    pubkey = os.environ.get("TAURI_SIGNING_PUBLIC_KEY", "").strip()
-    if not pubkey:
-        print(
-            "TAURI_SIGNING_PUBLIC_KEY not set — leaving updater disabled "
-            "(build will produce unsigned installers).",
-        )
-        return 0
-
     target = Path(os.environ.get("TAURI_CONF_PATH", DEFAULT_PATH))
     if not target.exists():
         print(f"error: {target} not found", file=sys.stderr)
         return 1
 
+    pubkey = os.environ.get("TAURI_SIGNING_PUBLIC_KEY", "").strip()
     endpoint = os.environ.get("TAURI_UPDATER_ENDPOINT", DEFAULT_ENDPOINT).strip()
 
     data = json.loads(target.read_text())
-    data.setdefault("bundle", {})["createUpdaterArtifacts"] = True
     plugins = data.setdefault("plugins", {})
-    plugins["updater"] = {
-        "active": True,
-        "endpoints": [endpoint],
-        "dialog": True,
-        "pubkey": pubkey,
-    }
+
+    if pubkey:
+        # Real config — bundler emits .sig sidecars, app verifies them
+        # against pubkey before applying any update.
+        data.setdefault("bundle", {})["createUpdaterArtifacts"] = True
+        plugins["updater"] = {
+            "active": True,
+            "endpoints": [endpoint],
+            "dialog": True,
+            "pubkey": pubkey,
+        }
+        print(
+            f"{target} updater ENABLED. endpoint={endpoint} "
+            f"pubkey={pubkey[:16]}...{pubkey[-8:]}",
+        )
+    else:
+        # Inert stub — plugin loads, deserializes a valid Config, then
+        # does nothing. Required because Builder::new().build() in
+        # lib.rs runs the plugin's init unconditionally; absence of the
+        # block panics with "invalid type: null".
+        data.setdefault("bundle", {})["createUpdaterArtifacts"] = False
+        plugins["updater"] = {
+            "active": False,
+            "endpoints": [],
+            "dialog": False,
+            "pubkey": "",
+        }
+        print(
+            f"{target} updater stub written (active=false). Set "
+            "TAURI_SIGNING_PUBLIC_KEY repo secret + push to enable real updates."
+        )
 
     target.write_text(json.dumps(data, indent=2) + "\n")
-    print(
-        f"{target} updater enabled. endpoint={endpoint} "
-        f"pubkey={pubkey[:16]}...{pubkey[-8:]}",
-    )
     return 0
 
 
