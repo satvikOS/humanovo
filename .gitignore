@@ -12,11 +12,17 @@ eggs/
 .eggs/
 lib/
 lib64/
-# Don't let the broad Python `lib/` rule above swallow frontend
-# source directories that happen to be named `lib`. The frontend
-# `src/lib/` houses runtime helpers (native.ts, etc.) and IS source.
+# Don't let the broad Python `lib/` rule above swallow frontend or
+# landing source directories that happen to be named `lib`. Both
+# `frontend/src/lib/` and `landing/src/lib/` house runtime helpers
+# (native.ts, gsap.ts, etc.) and ARE source. Without these escape
+# hatches the Vercel build of the landing site fails with
+# `Module not found: @/lib/gsap` because the file silently never
+# gets committed and so never reaches the deploy mirror.
 !frontend/src/lib/
 !frontend/src/lib/**
+!landing/src/lib/
+!landing/src/lib/**
 parts/
 sdist/
 var/
