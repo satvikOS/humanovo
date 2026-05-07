@@ -166,7 +166,12 @@ jobs:
             SHORT="${GITHUB_SHA::8}"
             TAG="auto-${SHORT}"
             BASE="$(node -p "require('./frontend/package.json').version")"
-            VERSION="${BASE}+${SHORT}"
+            # NB: build metadata after `+` MUST be numeric-only and
+            # ≤ 65535 for the Windows MSI bundler. The hex SHA fails
+            # that check, so we use GITHUB_RUN_NUMBER (monotonic, always
+            # numeric, easy to reason about) for the version, and keep
+            # the SHA in the release tag for traceability.
+            VERSION="${BASE}+${GITHUB_RUN_NUMBER}"
             MODE="auto"
           elif [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
             TAG="${{ github.event.inputs.release_tag }}"
@@ -207,25 +212,58 @@ jobs:
           # createUpdaterArtifacts = true. No code change needed.
           python3 scripts/configure_tauri_updater.py
 
+      - name: Forward signing secrets to env (only when actually set)
+        # tauri-action treats any APPLE_CERTIFICATE / TAURI_SIGNING_*
+        # env var as a request to sign — even if it's an empty string,
+        # which makes `security import` exit 1 with "One or more
+        # parameters passed to a function were not valid". GitHub
+        # Actions doesn't support per-key conditional env blocks, so
+        # we forward each var to GITHUB_ENV only when its source secret
+        # is non-empty. Result: a no-secrets repo produces unsigned
+        # installers cleanly; a fully-configured repo signs everything.
+        shell: bash
+        env:
+          _APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          _APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          _APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          _APPLE_ID: ${{ secrets.APPLE_ID }}
+          _APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          _APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          _TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          _TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          forward() {
+            local name="$1"
+            local val="$2"
+            if [ -n "$val" ]; then
+              # Use the file syntax to avoid log-leaking the secret.
+              {
+                echo "${name}<<__END__"
+                echo "$val"
+                echo "__END__"
+              } >> "$GITHUB_ENV"
+              echo "forwarded: $name (set, $(printf %s "$val" | wc -c) bytes)"
+            else
+              echo "skipped:   $name (secret unset)"
+            fi
+          }
+          forward APPLE_CERTIFICATE                   "$_APPLE_CERTIFICATE"
+          forward APPLE_CERTIFICATE_PASSWORD          "$_APPLE_CERTIFICATE_PASSWORD"
+          forward APPLE_SIGNING_IDENTITY              "$_APPLE_SIGNING_IDENTITY"
+          forward APPLE_ID                            "$_APPLE_ID"
+          forward APPLE_PASSWORD                      "$_APPLE_PASSWORD"
+          forward APPLE_TEAM_ID                       "$_APPLE_TEAM_ID"
+          forward TAURI_SIGNING_PRIVATE_KEY           "$_TAURI_SIGNING_PRIVATE_KEY"
+          forward TAURI_SIGNING_PRIVATE_KEY_PASSWORD  "$_TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+
       - name: Build native app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code-signing secrets — empty in CI by default. Set them in
-          # repo Settings -> Secrets when ready to ship signed builds.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Tauri auto-updater signing keys. With these set, the bundler
-          # produces .sig files alongside each installer; the updater
-          # verifies them before applying. Without them the build still
-          # succeeds but the updater won't auto-apply (it asks the user
-          # to download manually).
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Code-signing + Tauri-updater secrets are forwarded to env
+          # by the previous step ONLY when the corresponding repo secret
+          # is non-empty. Empty-secret repos produce unsigned installers
+          # without tripping `security import` / signer errors.
         with:
           projectPath: frontend
           tagName: ${{ steps.version.outputs.tag }}
