@@ -1,6 +1,6 @@
-# GenUp AWS Infrastructure
+# humanovo AWS Infrastructure
 
-Serverless AWS infrastructure for the GenUp Biomedical Discovery Platform.
+Serverless AWS infrastructure for the humanovo Biomedical Discovery Platform.
 
 ## Architecture
 
@@ -97,7 +97,10 @@ cd ../..
 
 ## Current Active Deployment
 
-As of January 2026, the active infrastructure uses:
+As of January 2026, the active infrastructure uses (legacy stack — IDs
+preserved verbatim because these are real AWS resource identifiers we
+do not rename in-place; the rebrand to `humanovo-*` happens in the
+new-account migration tracked by `docs/planning/REBRAND_RUNBOOK.md`):
 
 | Component | ID | URL |
 |-----------|-----|-----|
