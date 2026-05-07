@@ -388,8 +388,6 @@ jobs:
           echo "==================="
 
       - name: Apply (Route 53 ChangeResourceRecordSets)
-        if: inputs.phase == 'apply'
-
         if: env.EFFECTIVE_PHASE == 'apply'
         id: change
         run: |
@@ -403,8 +401,6 @@ jobs:
           echo "change_id=$CHANGE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Wait for INSYNC
-        if: inputs.phase == 'apply'
-
         if: env.EFFECTIVE_PHASE == 'apply'
         run: |
           set -e
@@ -413,8 +409,6 @@ jobs:
           echo "Change is INSYNC across Route 53."
 
       - name: Verify via public DNS resolvers
-        if: inputs.phase == 'apply'
-
         if: env.EFFECTIVE_PHASE == 'apply'
         run: |
           set +e
