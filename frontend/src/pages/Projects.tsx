@@ -515,6 +515,12 @@ export default function Projects() {
 
   useEffect(() => {
     loadProjects()
+    // loadProjects depends on searchQuery which is dynamic, but the
+    // explicit reload-on-search lives in the search-input useEffect
+    // below; the mount-time call here only needs to fire once. Adding
+    // loadProjects to the dep array would re-fire on every searchQuery
+    // change and double-load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

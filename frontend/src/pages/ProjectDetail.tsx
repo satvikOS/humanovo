@@ -276,15 +276,11 @@ export default function ProjectDetail() {
   // Hypothesis chooser modal state
   const [showChooser, setShowChooser] = useState(false)
 
-  // Load project from API
-  useEffect(() => {
-    if (!projectId) return
-    loadProject()
-  }, [projectId])
-
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const loadProject = async () => {
+  // useCallback so the function ref is stable across renders and the
+  // effect below can list it as a dep without re-firing on every render.
+  const loadProject = useCallback(async () => {
     if (!projectId) return
     setLoadingProject(true)
     setLoadError(null)
@@ -307,7 +303,13 @@ export default function ProjectDetail() {
     } finally {
       setLoadingProject(false)
     }
-  }
+  }, [projectId])
+
+  // Load project from API
+  useEffect(() => {
+    if (!projectId) return
+    loadProject()
+  }, [projectId, loadProject])
 
   // Get hypotheses from API project data only
   const uniqueHypotheses = (project?.hypotheses || []).map(h => ({

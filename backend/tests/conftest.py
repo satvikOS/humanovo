@@ -48,9 +48,16 @@ def _ensure_schema() -> None:
         loop.run_until_complete(_setup())
         loop.close()
     except Exception as e:
-        # Surface the failure — without tables the DB tests would
-        # fail anyway, but with a much less obvious error.
-        raise RuntimeError(
-            f"Failed to create test schema: {e}. "
-            "Check DATABASE_URL and that Postgres is reachable."
-        ) from e
+        # Don't fail the whole session here. Pure unit tests that don't
+        # touch the DB (e.g. tests/test_data_sources_registry.py) should
+        # still run when Postgres isn't reachable. The DB-dependent tests
+        # will fail naturally with their own targeted errors at the point
+        # the engine is actually used. Surface a clear marker so the dev
+        # knows the schema setup didn't succeed.
+        import warnings
+        warnings.warn(
+            f"_ensure_schema: Postgres not reachable ({e}). "
+            "DB-dependent tests will fail; pure unit tests will still run. "
+            "Set DATABASE_URL to a live Postgres for the full suite.",
+            stacklevel=2,
+        )

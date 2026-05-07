@@ -401,8 +401,11 @@ class CitationVerifier:
                     return data["title"]
                 if "results" in data and data["results"]:
                     return data["results"][0].get("title")
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as e:
+            logger.debug(
+                "citation_verifier.http_lookup_failed",
+                extra={"event": "http_lookup_failed", "error": str(e)},
+            )
         return None
 
     async def _fetch_europepmc_title(self, vc: VerifiedCitation) -> str | None:
@@ -431,8 +434,11 @@ class CitationVerifier:
                 hits = data.get("resultList", {}).get("result", [])
                 if hits:
                     return hits[0].get("title")
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as e:
+            logger.debug(
+                "citation_verifier.http_lookup_failed",
+                extra={"event": "http_lookup_failed", "error": str(e)},
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -484,8 +490,11 @@ class CitationVerifier:
                         inv = data.get("abstract_inverted_index") or {}
                         if inv:
                             return _reconstruct_abstract(inv)
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as e:
+            logger.debug(
+                "citation_verifier.http_lookup_failed",
+                extra={"event": "http_lookup_failed", "error": str(e)},
+            )
         return None
 
     async def _semantic_similarity(

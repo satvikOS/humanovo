@@ -129,8 +129,15 @@ class PreprintIngestionAgent(IngestionAgent):
                         if part == "total" and i + 2 < len(parts):
                             try:
                                 total_count = int(parts[i + 2])
-                            except ValueError:
-                                pass
+                            except ValueError as e:
+                                self.logger.debug(
+                                    "preprint_agent.total_count_parse_failed",
+                                    extra={
+                                        "event": "total_count_parse_failed",
+                                        "raw": parts[i + 2],
+                                        "error": str(e),
+                                    },
+                                )
 
             return collection, total_count
 
@@ -476,8 +483,15 @@ class PreprintIngestionAgent(IngestionAgent):
                 item = data.get("message", {})
                 if item:
                     return self._crossref_to_record(item)
-        except httpx.HTTPError:
-            pass
+        except httpx.HTTPError as e:
+            self.logger.debug(
+                "preprint_agent.crossref_lookup_failed",
+                extra={
+                    "event": "crossref_lookup_failed",
+                    "doi": doi,
+                    "error": str(e),
+                },
+            )
 
         return None
 

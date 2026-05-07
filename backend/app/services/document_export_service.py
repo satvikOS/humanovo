@@ -1413,8 +1413,11 @@ class DocumentExportService:
             if s is not None:
                 try:
                     scores.append(float(s))
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    logger.debug(
+                        "document_export.score_coerce_failed",
+                        extra={"event": "score_coerce_failed", "raw": s, "error": str(e)},
+                    )
         return sum(scores) / len(scores) if scores else 0.0
 
     @staticmethod

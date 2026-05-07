@@ -2995,9 +2995,18 @@ class DataSourceOrchestrator:
             await source.close()
 
     async def query_all(
-        self, query: str, max_results: int = 10, concurrency: int = 5,
+        self, query: str, max_results: int = 10, concurrency: int = 12,
     ) -> list[DataSourceResult]:
-        """Query all active sources concurrently with limited concurrency."""
+        """Query all active sources concurrently with limited concurrency.
+
+        concurrency=12 keeps per-source rate-limiters as the primary
+        throttle (each source has its own RateLimiter, default 3 req/s)
+        while the global semaphore caps simultaneous in-flight HTTP
+        connections so the event loop and outbound socket pool stay
+        responsive. With ACTIVE_SOURCES at 62, this is roughly 5-6
+        batches of 12 instead of the prior 13 batches of 5 - a ~2x
+        latency reduction without raising per-source pressure.
+        """
         semaphore = asyncio.Semaphore(concurrency)
 
         async def _limited(src: DataSourceBase) -> DataSourceResult:

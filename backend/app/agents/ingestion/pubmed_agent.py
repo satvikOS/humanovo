@@ -301,8 +301,15 @@ class PubMedIngestionAgent(IngestionAgent):
                         month_val = self._parse_month(month.text) if month is not None else 1
                         day_val = int(day.text) if day is not None else 1
                         pub_date = date(year_val, month_val, day_val)
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        self.logger.debug(
+                            "pubmed_agent.pub_date_parse_failed",
+                            extra={
+                                "event": "pub_date_parse_failed",
+                                "year": getattr(year, "text", None),
+                                "error": str(e),
+                            },
+                        )
 
             # DOI
             doi = None

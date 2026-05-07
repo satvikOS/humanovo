@@ -835,7 +835,7 @@ export default function Notebook() {
     } catch (err) {
       console.error('Failed to create notebook page:', err)
     }
-  }, [pendingTemplate, newPageTitle, newPageImportance, newPageTags, pageIndex, activePageId, editor])
+  }, [pendingTemplate, newPageTitle, newPageImportance, newPageTags, activePageId, editor])
 
   // Delete page
   const confirmDelete = useCallback(async () => {
