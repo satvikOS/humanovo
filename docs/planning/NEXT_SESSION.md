@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `a94afda`
+**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `b2fa446`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -150,6 +150,12 @@ the file current.
 ### A1. response_model coverage sweep — DONE (commit `a94afda`)
 * See "Tier-1 follow-up" above. Remaining gap is the heavy paper/
   PDF/save orchestrator endpoints + manuscripts.py (V1-hidden).
+
+### A2. GenomicsAnalysis.tsx react-refresh split — DONE (commit `b2fa446`)
+* Moved the 4 `_compute*` helpers to `frontend/src/pages/genomics/compute.ts`.
+  Project-level eslint warnings dropped 11 → 7 (the 4 GenomicsAnalysis
+  hits cleared exactly as predicted). GenomicsAnalysis.tsx 596 → 414
+  lines. No behaviour change.
 
 ### A2. GenomicsAnalysis.tsx react-refresh split
 * 4 of the remaining 11 frontend lint warnings are here. The file
