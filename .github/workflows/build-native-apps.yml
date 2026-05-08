@@ -11,7 +11,7 @@ name: Build Native Apps (Win/Mac/Linux)
 #
 # Build matrix:
 #   - macos-latest    -> .app + .dmg (universal: x86_64 + aarch64)
-#   - windows-2025    -> .exe + .msi
+#   - windows-2025-vs2026 -> .exe + .msi
 #   - ubuntu-22.04    -> .deb + .AppImage  (22.04 not 24.04 because of
 #                        the libwebkit2gtk-4.1 ABI break)
 #
@@ -74,11 +74,12 @@ jobs:
           - platform: ubuntu-22.04
             args: ''
             label: linux-x86_64
-          # Pinned to windows-2025 explicitly - GitHub announced
-          # windows-latest will redirect to windows-2025-vs2026 starting
-          # 2026-05-12. Pinning avoids surprise toolchain rollover when
-          # the alias flips.
-          - platform: windows-2025
+          # Pinned to windows-2025-vs2026 explicitly. The bare
+          # windows-2025 alias is being redirected to this label on
+          # 2026-05-12 (per GitHub runner notice); pinning the redirect
+          # target now means the toolchain stays consistent before and
+          # after the cutover.
+          - platform: windows-2025-vs2026
             args: ''
             label: windows-x86_64
 
@@ -86,10 +87,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7  # v5
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6
         with:
           node-version: '22'
           cache: 'npm'
@@ -101,7 +102,7 @@ jobs:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Cache Rust deps
-        uses: swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab  # v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
         with:
           workspaces: frontend/src-tauri -> target
 
@@ -334,7 +335,7 @@ jobs:
 
       - name: Upload artifacts (dispatch-only fallback)
         if: steps.version.outputs.mode == 'dispatch-only'
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
         with:
           name: humanovo-${{ matrix.label }}
           path: |
