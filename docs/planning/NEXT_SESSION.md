@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `dbf3e03`
+**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `a94afda`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -126,18 +126,30 @@ the file current.
 * `SECURITY.md`, `CI_GOTCHAS.md`, `CHANGELOG.md`,
   `TENANT_ISOLATION_GAP.md` (closed).
 
+### Tier-1 follow-up (this session)
+* **A1 response_model sweep** (commit `a94afda`) — 84 newly-typed
+  routes across `discovery.py` (+4), `orchestrator.py` (+10),
+  `pipeline_intelligence.py` (+29), `platform_api.py` (+41).
+  Concrete schemas where the shape is well-defined; permissive
+  `extra='allow'` wrappers for routes that pass service-layer dicts
+  through unchanged. Skipped: `manuscripts.py` (V1-hidden); the
+  orchestrator paper/PDF/save endpoints (need service typing first);
+  `/billing/usage/export` (StreamingResponse).
+* **Playwright suite green** (commit `d15a251`) — 0/460 failures down
+  from 67. 76 skips: V1-hidden routes (App.tsx V1Gate), backend-pending
+  write-flows (test.fixme), one stale Settings billing assertion.
+  Real-bug fixes shipped along with the test cleanup: `/agents-chat-mode`
+  route registered in `App.tsx`/`Layout.tsx`; AgentsChatMode header now
+  renders as `<h2>` for a11y; CitationManager consumes-and-cleans
+  `?q=` / `?add=1` / `?import=1`.
+
 ---
 
 ## Outstanding — Tier 1 (autonomous, high-leverage)
 
-### A1. response_model coverage sweep
-* ~80 routes still return raw `dict` and lack `response_model=`.
-* Adds OpenAPI schema clarity + frontend type-safety surface.
-* Mostly in `platform_api.py`, `pipeline_intelligence.py`,
-  `orchestrator.py`, `discovery.py`, `manuscripts.py`.
-* Approach: define one Pydantic schema per route family, attach
-  `response_model=`. Don't try to model every legacy dict-returning
-  endpoint — start with the GETs that already have a typed return.
+### A1. response_model coverage sweep — DONE (commit `a94afda`)
+* See "Tier-1 follow-up" above. Remaining gap is the heavy paper/
+  PDF/save orchestrator endpoints + manuscripts.py (V1-hidden).
 
 ### A2. GenomicsAnalysis.tsx react-refresh split
 * 4 of the remaining 11 frontend lint warnings are here. The file
