@@ -7,6 +7,28 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — fix(ci) rust-toolchain ref-name + actionlint + SECURITY update
+
+* `dtolnay/rust-toolchain@<sha>` was failing every Tauri build leg
+  with `error: invalid toolchain name ''`. Root cause: the action
+  reads its channel (`stable` / `nightly`) from the ref name, not a
+  `with:` input. SHA-pinning replaced the ref with a hash, so the
+  channel inference fell through to an empty string. Fixed by adding
+  `with: toolchain: stable`.
+* New `.github/workflows/actionlint.yml` runs actionlint on every PR
+  that touches a workflow file. Catches input/expression mistakes
+  the SHA verifier doesn't see (invalid action inputs, malformed
+  matrices, shell-injection in `run:` interpolating
+  `${{ github.event.* }}`, the ref-name-as-config gotcha).
+* Audit: of the 13 SHA-pinned third-party actions, only
+  `dtolnay/rust-toolchain` reads config from the ref name. All
+  others take their config from `with:` inputs and are
+  SHA-pin-safe. Documented in SECURITY.md § Build pipeline.
+* `SECURITY.md` updated with the SHA-pinning gotcha + the
+  `actionlint` audit layer.
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — CI fix + Node 20 deprecation + windows alias + SECURITY.md
 
 * Fixed three failing native-build jobs caused by a hallucinated

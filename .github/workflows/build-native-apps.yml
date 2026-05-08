@@ -99,6 +99,13 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b  # stable
         with:
+          # `dtolnay/rust-toolchain` normally reads the channel from the
+          # ref name (`@stable` / `@nightly` / `@1.75`). SHA-pinning makes
+          # the ref a 40-char hash, so the channel inference falls
+          # through to an empty string and rustup runs with no toolchain
+          # name -> "invalid toolchain name ''". The `toolchain` input is
+          # required whenever the ref is a SHA.
+          toolchain: stable
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Cache Rust deps

@@ -173,6 +173,12 @@ that ships.
   tags) for every third-party action. `scripts/verify-action-shas.py`
   + `verify-action-shas.yml` workflow run on every PR + nightly to
   catch hallucinated or deleted SHAs.
+* **Workflow contract** — `.github/workflows/actionlint.yml` runs
+  actionlint on every PR. Catches the input/expression mistakes the
+  SHA verifier doesn't see: invalid action inputs, malformed
+  matrices, shell-injection risk in `run:` blocks that interpolate
+  `${{ github.event.* }}`, and the SHA-pin-loses-ref-name pitfall
+  documented below.
 * **Secret scanning** runs via `mcp__github__run_secret_scanning` on
   the repo. Pre-commit hook (`scripts/precommit-secret-scan.sh` —
   TODO if not present) blocks `aws_*_key`, `sk_*_*` (Stripe), `eyJ`
@@ -221,6 +227,39 @@ via `TIER_MONTHLY_CAP_CENTS`; per-user overrides are admin-only.
 * **Reproducible builds (in progress).** `--locked` flag on `cargo
   build`; `package-lock.json` is checked in. Goal: identical bytes
   from identical source on identical runner image.
+
+### SHA-pinning gotcha: ref-name-as-config
+
+A small subset of GitHub Actions reads its primary configuration
+from the *ref* (`@stable`, `@nightly`, `@1.75`) rather than from a
+`with:` input. SHA-pinning replaces the ref with a 40-char hash, so
+the inference falls through to an empty string and the action runs
+with a missing required parameter.
+
+The canonical example is `dtolnay/rust-toolchain` — `@stable` /
+`@nightly` is the ref-encoded toolchain channel. SHA-pinned, the
+action reports `error: invalid toolchain name ''` mid-build.
+
+The fix is to pass the value explicitly via `with:`:
+
+```yaml
+- uses: dtolnay/rust-toolchain@<sha>
+  with:
+    toolchain: stable
+    targets: aarch64-apple-darwin
+```
+
+Audited 2026-05-08: of the 13 SHA-pinned third-party actions in
+this repo, only `dtolnay/rust-toolchain` reads config from the ref
+name. All others (`actions/*`, `aws-actions/*`, `azure/*`,
+`google-github-actions/*`, `hashicorp/*`, `Swatinem/rust-cache`,
+`tauri-apps/tauri-action`) take their config exclusively from
+`with:` inputs and are SHA-pin-safe. Re-audit any newly-introduced
+action against this list before SHA-pinning it.
+
+`actionlint` (`.github/workflows/actionlint.yml`) catches the
+ref-name-as-config mistake at PR-time when the action's metadata
+declares the input as required.
 
 ## Incident response
 

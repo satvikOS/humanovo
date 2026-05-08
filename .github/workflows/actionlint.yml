@@ -1,0 +1,59 @@
+name: actionlint
+
+# Static analysis on every workflow file. Catches the common GitHub
+# Actions pitfalls that fail at runtime instead of PR-time:
+#
+#   - SHA-pinned actions whose channel/version is normally read from
+#     the ref name (dtolnay/rust-toolchain) and now silently inherits
+#     an empty string -> "invalid toolchain name ''" mid-build.
+#   - Misuse of ${{ }} in `if:` conditions.
+#   - Invalid matrix axes / fail-fast typos.
+#   - Shell-injection risk in run: blocks that interpolate
+#     untrusted ${{ github.event.* }} values.
+#
+# Pairs with verify-action-shas.yml (which checks SHA validity);
+# actionlint catches the *contract* of each action's inputs, while
+# the SHA verifier catches references that won't resolve.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches: [humanovo, main]
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Install actionlint
+        run: |
+          # Pin to v1.7.9; download via the rhysd-published script which
+          # picks the right OS/arch binary and verifies the checksum.
+          # The script accepts a version arg as $1.
+          set -euo pipefail
+          VERSION=1.7.9
+          curl -fsSL \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${VERSION}/scripts/download-actionlint.bash" \
+            -o /tmp/download-actionlint.bash
+          # Sanity: the script should be small and start with the expected shebang.
+          head -1 /tmp/download-actionlint.bash | grep -q "^#!/" \
+            || { echo "downloader script malformed"; exit 1; }
+          bash /tmp/download-actionlint.bash "${VERSION}" /tmp/bin
+          echo "/tmp/bin" >> "$GITHUB_PATH"
+          /tmp/bin/actionlint -version
+
+      - name: Lint workflows
+        run: |
+          # -color always so the CI log is readable. -ignore filters out
+          # known-noisy rules; tighten as we clean up.
+          actionlint -color always

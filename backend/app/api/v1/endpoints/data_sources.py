@@ -43,6 +43,53 @@ class DataSourceQueryResponse(BaseModel):
     errors: list[dict[str, str]] = []
 
 
+class SourceInfo(BaseModel):
+    """Listing-row shape for /available."""
+    name: str
+    base_url: str
+    category: str
+    phase: int
+    description: str
+
+
+class AvailableSourcesResponse(BaseModel):
+    """Response from /available."""
+    sources: list[SourceInfo]
+
+
+class SourceStatsResponse(BaseModel):
+    """Response from /stats."""
+    total_active: int
+    by_category: dict[str, int]
+    by_phase: dict[str, int]
+    source_names: list[str]
+
+
+class SourceHealthSummary(BaseModel):
+    """Roll-up counts in /health."""
+    healthy: int
+    degraded: int
+    unknown: int
+
+
+class SourceHealthEntry(BaseModel):
+    """Per-source detail in /health.sources."""
+    name: str
+    category: str
+    phase: int
+    status: str  # healthy | degraded | unknown
+    last_success_age_seconds: float | None = None
+    last_error_age_seconds: float | None = None
+    last_error: str | None = None
+
+
+class SourceHealthResponse(BaseModel):
+    """Response from /health."""
+    total_active: int
+    summary: SourceHealthSummary
+    sources: list[SourceHealthEntry]
+
+
 @router.post("/query", response_model=DataSourceQueryResponse)
 async def query_data_sources(request: DataSourceQueryRequest):
     """
@@ -121,13 +168,15 @@ async def query_data_sources(request: DataSourceQueryRequest):
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 
-@router.get("/available")
-async def get_available_sources():
+@router.get("/available", response_model=AvailableSourcesResponse)
+async def get_available_sources() -> AvailableSourcesResponse:
     """List all available data sources and their categories."""
     try:
         from app.services.data_sources import DataSourceOrchestrator
         orchestrator = DataSourceOrchestrator()
-        return {"sources": orchestrator.get_available_sources()}
+        return AvailableSourcesResponse(
+            sources=[SourceInfo(**s) for s in orchestrator.get_available_sources()]
+        )
     except ImportError:
         raise HTTPException(status_code=503, detail="Data sources service not yet initialized")
     except Exception as e:
@@ -135,13 +184,21 @@ async def get_available_sources():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/stats")
-async def get_source_stats():
+@router.get("/stats", response_model=SourceStatsResponse)
+async def get_source_stats() -> SourceStatsResponse:
     """Get statistics about data source usage."""
     try:
         from app.services.data_sources import DataSourceOrchestrator
         orchestrator = DataSourceOrchestrator()
-        return orchestrator.get_source_stats()
+        stats = orchestrator.get_source_stats()
+        # Coerce by_phase keys to str for JSON-friendly output (Pydantic
+        # rejects int-keyed dicts in the schema layer).
+        return SourceStatsResponse(
+            total_active=stats["total_active"],
+            by_category=stats["by_category"],
+            by_phase={str(k): v for k, v in stats["by_phase"].items()},
+            source_names=stats["source_names"],
+        )
     except ImportError:
         raise HTTPException(status_code=503, detail="Data sources service not yet initialized")
     except Exception as e:
@@ -158,8 +215,8 @@ async def get_source_stats():
 # ---------------------------------------------------------------------------
 
 
-@router.get("/health")
-async def get_data_sources_health():
+@router.get("/health", response_model=SourceHealthResponse)
+async def get_data_sources_health() -> SourceHealthResponse:
     """Per-source liveness snapshot.
 
     Returns:
@@ -184,7 +241,7 @@ async def get_data_sources_health():
         STALE_AFTER = 3600  # 1 hour
 
         healthy = degraded = unknown = 0
-        sources_detail = []
+        sources_detail: list[SourceHealthEntry] = []
 
         for src_info in orchestrator.get_available_sources():
             name = src_info["name"]
@@ -203,25 +260,27 @@ async def get_data_sources_health():
             else:
                 unknown += 1
 
-            sources_detail.append({
-                "name": name,
-                "category": src_info["category"],
-                "phase": src_info["phase"],
-                "status": status,
-                "last_success_age_seconds": last_success_age,
-                "last_error_age_seconds": last_error_age,
-                "last_error": last_error,
-            })
+            sources_detail.append(
+                SourceHealthEntry(
+                    name=name,
+                    category=src_info["category"],
+                    phase=src_info["phase"],
+                    status=status,
+                    last_success_age_seconds=last_success_age,
+                    last_error_age_seconds=last_error_age,
+                    last_error=last_error,
+                )
+            )
 
-        return {
-            "total_active": len(sources_detail),
-            "summary": {
-                "healthy": healthy,
-                "degraded": degraded,
-                "unknown": unknown,
-            },
-            "sources": sources_detail,
-        }
+        return SourceHealthResponse(
+            total_active=len(sources_detail),
+            summary=SourceHealthSummary(
+                healthy=healthy,
+                degraded=degraded,
+                unknown=unknown,
+            ),
+            sources=sources_detail,
+        )
     except ImportError:
         raise HTTPException(
             status_code=503, detail="Data sources service not yet initialized"
