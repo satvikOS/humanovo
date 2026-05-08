@@ -7,6 +7,36 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — fix(ci) actionlint mkdir + windows-2025 revert + Makefile
+
+* `actionlint` workflow was failing because the `download-actionlint.bash`
+  script requires the target dir to exist before it'll write to it.
+  Fixed by `mkdir -p` ahead of the call, plus moved the download
+  destination to `$RUNNER_TEMP` (cleaner than `/tmp` on Windows
+  runners) and added `--retry 3` to the curl in case the raw.github
+  endpoint is briefly unavailable.
+* Ran actionlint locally against every workflow. One finding:
+  `windows-2025-vs2026` was an unknown runner label (actionlint's
+  database hasn't picked up GitHub's 2026-05-12 transitional alias).
+  Reverted to bare `windows-2025` — the redirect on May 12 will carry
+  the build to the new VS-2026-bundled image automatically, and Tauri
+  is toolchain-version-tolerant. Comment on the matrix row explains.
+* New top-level `Makefile` consolidating local dev commands:
+    `make lint`        - ruff + tsc/eslint + actionlint + verify-shas
+    `make test`        - pytest (offline-tolerant)
+    `make format`      - ruff --fix + eslint --fix
+    `make ci`          - everything CI runs, in order
+    `make ci-actions`  - workflow-only checks
+  Per-tree targets surface the underlying tool: `lint-backend`,
+  `lint-frontend`, `lint-actions`, etc. Single canonical place that
+  knows what CI sees, so a dev running `make ci` locally gets the
+  same signal a PR will get.
+* `scripts/install-actionlint.sh` for one-shot local install of the
+  pinned v1.7.9 binary into `~/.local/bin`. Keeps the version in
+  lockstep with `verify-action-shas.yml`.
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — fix(ci) rust-toolchain ref-name + actionlint + SECURITY update
 
 * `dtolnay/rust-toolchain@<sha>` was failing every Tauri build leg

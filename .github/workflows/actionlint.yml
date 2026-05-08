@@ -39,18 +39,21 @@ jobs:
         run: |
           # Pin to v1.7.9; download via the rhysd-published script which
           # picks the right OS/arch binary and verifies the checksum.
-          # The script accepts a version arg as $1.
+          # The script accepts (version, dir) as positional args and
+          # requires the directory to already exist.
           set -euo pipefail
           VERSION=1.7.9
-          curl -fsSL \
+          BIN_DIR="$RUNNER_TEMP/actionlint-bin"
+          mkdir -p "$BIN_DIR"
+          curl -fsSL --retry 3 --retry-delay 2 \
             "https://raw.githubusercontent.com/rhysd/actionlint/v${VERSION}/scripts/download-actionlint.bash" \
-            -o /tmp/download-actionlint.bash
-          # Sanity: the script should be small and start with the expected shebang.
-          head -1 /tmp/download-actionlint.bash | grep -q "^#!/" \
+            -o "$RUNNER_TEMP/download-actionlint.bash"
+          # Sanity: the downloaded script should start with a shebang.
+          head -1 "$RUNNER_TEMP/download-actionlint.bash" | grep -q "^#!/" \
             || { echo "downloader script malformed"; exit 1; }
-          bash /tmp/download-actionlint.bash "${VERSION}" /tmp/bin
-          echo "/tmp/bin" >> "$GITHUB_PATH"
-          /tmp/bin/actionlint -version
+          bash "$RUNNER_TEMP/download-actionlint.bash" "${VERSION}" "$BIN_DIR"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+          "$BIN_DIR/actionlint" -version
 
       - name: Lint workflows
         run: |
