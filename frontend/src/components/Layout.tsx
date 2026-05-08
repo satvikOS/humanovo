@@ -1392,6 +1392,7 @@ export default function Layout() {
     if (path.startsWith('/projects/')) return 'Project'
     if (path === '/evidence') return 'Evidence'
     if (path === '/agents') return 'Discovery'
+    if (path === '/agents-chat-mode') return 'Discovery (Chat Mode)'
     // /hypotheses itself redirects to /projects so the title label
     // for it would only ever show mid-redirect. The per-id detail
     // route still has a page.

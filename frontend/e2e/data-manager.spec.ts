@@ -79,10 +79,15 @@ test.describe('Data Manager', () => {
 
     // Filter out benign errors: favicon, missing resources, backend/network failures.
     // This test targets real runtime/JS errors, not upstream 5xx/4xx from API or CDN.
+    // [API] tagged messages come from src/services/api.ts when the staging
+    // backend is unreachable in dev; these are infra not JS bugs.
     const realErrors = errors.filter(e =>
       !e.includes('favicon') &&
       !e.includes('404') &&
-      !e.includes('Failed to load resource')
+      !e.includes('Failed to load resource') &&
+      !e.includes('[API]') &&
+      !e.includes('ECONNREFUSED') &&
+      !e.includes('Network Error')
     );
     expect(realErrors.length).toBe(0);
   });

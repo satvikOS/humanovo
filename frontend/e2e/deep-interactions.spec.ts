@@ -243,8 +243,17 @@ test.describe('Navigation — deep link every major page', () => {
     '/experiment-tracker', '/clinical-trials', '/manuscripts', '/biobank',
     '/collaboration', '/regulatory', '/settings', '/anatomy',
   ]
+  // Routes short-circuited to /dashboard by App.tsx V1Gate (isHiddenInV1).
+  // Skipped here so the parameterized loop doesn't claim a route is broken
+  // when the redirect is intentional. Re-enable in v1.1.
+  const V1_HIDDEN_PATHS = new Set<string>([
+    '/workbench', '/anatomy', '/experiment-tracker', '/collaboration',
+    '/clinical-trials', '/manuscripts', '/regulatory', '/imaging',
+    '/biobank', '/ml-models',
+  ])
   for (const p of paths) {
     test(`direct-load ${p} has no critical JS error`, async ({ page }) => {
+      test.skip(V1_HIDDEN_PATHS.has(p), 'V1-hidden route — see App.tsx V1Gate')
       const errs: string[] = []; attachErrorCapture(page, errs)
       await page.goto(p)
       await page.waitForLoadState('domcontentloaded')

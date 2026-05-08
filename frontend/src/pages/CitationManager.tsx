@@ -18,6 +18,7 @@
 // queried by the agents. DOI-based dedupe runs on every create so
 // re-importing a paper never creates a twin.
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FiStar, FiSearch, FiDownload, FiX, FiFolder, FiFilter,
   FiExternalLink, FiLink, FiTrash2, FiBookOpen, FiEdit3, FiCheck,
@@ -33,6 +34,13 @@ import { EmptyState } from '../components/EmptyState'
 type SmartFilter = 'all' | 'starred' | 'unread' | 'recent'
 
 export default function CitationManager() {
+  // Deep-link query params consumed on mount and stripped from the URL
+  // so the canonical citation-manager URL stays clean for sharing:
+  //   ?q=<text>     → seeds the search query input
+  //   ?import=1     → opens the drag-drop import dialog
+  //   ?add=1        → opens the import dialog (alias of ?import=1)
+  const [searchParams] = useSearchParams()
+
   // ── Data ──
   const [citations, setCitations] = useState<LibraryCitation[]>([])
   const [folders, setFolders] = useState<LibraryFolder[]>([])
@@ -41,7 +49,7 @@ export default function CitationManager() {
   const [highlights, setHighlights] = useState<LibraryHighlight[]>([])
 
   // ── Filters ──
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(() => searchParams.get('q') ?? '')
   const [smart, setSmart] = useState<SmartFilter>('all')
   const [folderId, setFolderId] = useState<string | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
@@ -54,7 +62,25 @@ export default function CitationManager() {
   // ── UI mode ──
   const [rightPane, setRightPane] = useState<'detail' | 'pdf'>('detail')
   const [loading, setLoading] = useState(false)
-  const [showImport, setShowImport] = useState(false)
+  const [showImport, setShowImport] = useState(
+    () => searchParams.get('import') === '1' || searchParams.get('add') === '1'
+  )
+
+  // Strip consumed params from the URL so the canonical /citation-manager
+  // URL stays clean. window.history.replaceState avoids re-rendering the
+  // route, which would otherwise reset focus state on the search input.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    let dirty = false
+    for (const k of ['q', 'import', 'add']) {
+      if (sp.has(k)) { sp.delete(k); dirty = true }
+    }
+    if (dirty) {
+      const qs = sp.toString()
+      const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+      window.history.replaceState(window.history.state, '', newUrl)
+    }
+  }, [])
 
   const focused = useMemo(() => citations.find(c => c.id === focusedId) || null, [citations, focusedId])
 

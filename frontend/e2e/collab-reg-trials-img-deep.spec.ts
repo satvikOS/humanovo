@@ -6,6 +6,14 @@
  */
 import { test, expect, Page } from '@playwright/test'
 
+// All routes covered here (/collaboration, /regulatory, /clinical-trials,
+// /imaging) are short-circuited to /dashboard by the V1Gate in App.tsx
+// (isHiddenInV1). Re-enable when VITE_V1_HIDDEN_ROUTES_ENABLED=true ships
+// in v1.1.
+test.beforeEach(async () => {
+  test.skip(true, 'V1-hidden route — see App.tsx V1Gate')
+})
+
 function attachErrorCapture(page: Page, bag: string[]) {
   page.on('pageerror', e => bag.push('PAGEERROR: ' + e.message))
   page.on('console', m => {

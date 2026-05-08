@@ -101,6 +101,14 @@ for (const page of PAGES) {
  */
 for (const page of PAGES) {
   test(`clickable-audit: ${page.name}`, async ({ page: pw }) => {
+    // compute-lab eagerly imports plotly + recharts + the MATLAB-style
+    // numeric engine — under 7-worker headless contention initial paint
+    // can creep past the default 30 s page-test timeout. Headed single-
+    // worker runs land at ~26 s, so we give the heavy pages 60 s before
+    // calling them broken. Other pages keep the default.
+    if (page.name === 'compute-lab' || page.name === 'workbench') {
+      test.setTimeout(60_000)
+    }
     const { pageErrors } = watchConsole(pw, page.name)
 
     await pw.goto(page.path)

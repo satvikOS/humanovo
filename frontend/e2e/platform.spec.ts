@@ -5,6 +5,15 @@ import { test, expect } from '@playwright/test';
  * Tests every major page loads, key features are clickable, and no crash errors occur.
  */
 
+// Routes short-circuited to /dashboard by V1Gate in App.tsx (isHiddenInV1).
+// Tests for these paths are skipped until v1.1 enables
+// VITE_V1_HIDDEN_ROUTES_ENABLED=true.
+const V1_HIDDEN_PATHS = new Set<string>([
+  '/workbench', '/anatomy', '/experiment-tracker', '/collaboration',
+  '/clinical-trials', '/manuscripts', '/regulatory', '/imaging',
+  '/biobank', '/ml-models',
+]);
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('genup-theme', 'dark'));
 });
@@ -37,6 +46,7 @@ const pages = [
 
 for (const pg of pages) {
   test(`${pg.name} page loads without crash`, async ({ page }) => {
+    test.skip(V1_HIDDEN_PATHS.has(pg.path), 'V1-hidden route — see App.tsx V1Gate');
     const errors: string[] = [];
     page.on('pageerror', err => errors.push(err.message));
     page.on('console', msg => {
@@ -128,6 +138,10 @@ test.describe('Compute Lab', () => {
 // ─── Imaging Tests ───────────────────────────────────────────────────
 
 test.describe('Research Imaging', () => {
+  test.beforeEach(async () => {
+    test.skip(true, 'V1-hidden route — see App.tsx V1Gate');
+  });
+
   test('renders without stack overflow', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', err => errors.push(err.message));

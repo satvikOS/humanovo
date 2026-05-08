@@ -12,6 +12,13 @@ import { test, expect } from '@playwright/test';
  * the minimum study data the page needs via localStorage init scripts.
  */
 
+// /imaging is short-circuited to /dashboard by the V1Gate in App.tsx
+// (isHiddenInV1). Re-enable when VITE_V1_HIDDEN_ROUTES_ENABLED=true ships
+// in v1.1.
+test.beforeEach(async () => {
+  test.skip(true, 'V1-hidden route — see App.tsx V1Gate')
+});
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('genup-theme', 'dark');

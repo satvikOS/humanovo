@@ -365,9 +365,11 @@ export default function Agents() {
         <div className="px-5 py-3 border-b border-[var(--color-border)] flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xxs uppercase tracking-wider text-[var(--color-text-muted)]">Discovery</div>
-            <div className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>
+            {/* h2 (not a styled div) so screen readers and the persona
+                e2e harness can locate the page heading via h1/h2/h3 */}
+            <h2 className="text-sm font-semibold truncate m-0 p-0" style={{ color: 'var(--color-text)' }}>
               {current?.title || 'New conversation'}
-            </div>
+            </h2>
           </div>
           <div className="flex items-center gap-1.5">
             {/* Active project pill */}

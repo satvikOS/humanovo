@@ -35,6 +35,7 @@ const RegulatoryCompliance = lazy(() => import('./pages/RegulatoryCompliance'))
 const ResearchImaging = lazy(() => import('./pages/ResearchImaging'))
 const BiobankManager = lazy(() => import('./pages/BiobankManager'))
 const ComputeLab = lazy(() => import('./pages/compute'))
+const AgentsChatMode = lazy(() => import('./pages/AgentsChatMode'))
 
 // the v2 platform — integrated project workspace routes.
 const ProjectWorkspace = lazy(() => import('./pages/ProjectWorkspace'))
@@ -117,6 +118,7 @@ function App() {
         <Route path="anatomy" element={<V1Gate path="/anatomy"><LazyPageWrapper><HumanAnatomy /></LazyPageWrapper></V1Gate>} />
         <Route path="notebook" element={<PageWrapper><Notebook /></PageWrapper>} />
         <Route path="agents" element={<PageWrapper><Agents /></PageWrapper>} />
+        <Route path="agents-chat-mode" element={<LazyPageWrapper><AgentsChatMode /></LazyPageWrapper>} />
         <Route path="timeline" element={<PageWrapper><Timeline /></PageWrapper>} />
         <Route path="search" element={<PageWrapper><Search /></PageWrapper>} />
         <Route path="settings" element={<PageWrapper><Settings /></PageWrapper>} />
