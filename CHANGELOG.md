@@ -7,6 +7,26 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — Round 11 commit 2: public status page
+
+* New `/status` route on the landing site (`landing/src/app/status/
+  page.tsx`). Reads `/api/v1/health/full` (shipped earlier this
+  session) every 30s, renders DB + vector_store + billing config +
+  62-source liveness summary in the same Renaissance editorial
+  register as `/manifesto` / `/provenance`.
+* Headline status is colour-coded: rust for `healthy`, gold for
+  `degraded`, deep red for `unhealthy`, ink-3 for `unknown`. The
+  page falls back gracefully when the API is unreachable - shows
+  the network error and continues retrying.
+* `Colophon.tsx` adds a Status link between Provenance and Privacy.
+* `docs/page.tsx` Chapter XVI flipped from "in-progress" to
+  "shipped" and the body rewritten to point at the new route.
+* API base URL configurable via `NEXT_PUBLIC_HUMANOVO_API`; defaults
+  to `https://api.humanovo.net`.
+* `next build` passes with all 11 routes prerendered (was 10).
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — Round 11 commit 1: trace UI wired into ProjectDetail
 
 * Closes the deferred integration from Round 10 commit 3. Per-paper

@@ -178,10 +178,10 @@ const CHAPTERS: { group: string; chapters: Chapter[] }[] = [
       },
       {
         numeral: "XVI",
-        title: "Status & SLA",
-        body: "Public status page (status.humanovo.net) with real uptime, p50/p95/p99 pipeline latency, and incident history. Institution-tier SLA terms detailed here once the SLA contract template is finalised.",
-        href: "/docs",
-        status: "in-progress",
+        title: "Status",
+        body: "Live platform status, refreshed every 30 seconds: database, vector store, billing, and the 62-source biomedical orchestrator. Reads /api/v1/health/full directly. Institution-tier SLA terms remain in the contract; the status page itself is everyone's view of operational health.",
+        href: "/status",
+        status: "shipped",
       },
       {
         numeral: "XVII",

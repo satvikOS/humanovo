@@ -60,6 +60,8 @@ export default function Colophon() {
           <span aria-hidden className="footer-sep">&middot;</span>
           <Link href="/provenance" className="footer-link">Provenance</Link>
           <span aria-hidden className="footer-sep">&middot;</span>
+          <Link href="/status" className="footer-link">Status</Link>
+          <span aria-hidden className="footer-sep">&middot;</span>
           <Link href="/privacy" className="footer-link">Privacy</Link>
           <span aria-hidden className="footer-sep">&middot;</span>
           <Link href="/terms" className="footer-link">Terms</Link>
