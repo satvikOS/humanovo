@@ -2,6 +2,10 @@
 Biobank / Sample Management API Endpoints
 
 Sample registry, chain of custody, checkout workflow, storage management.
+
+Tenant isolation (Round 10): every read/write filters by owner_id =
+current_user.id via fetch_owned_directly_or_404 / filter_by_owner.
+Cross-tenant access returns 404 (not 403) to avoid existence leak.
 """
 
 import logging
@@ -14,9 +18,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints._bulk import attach_bulk_archive, attach_bulk_delete
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
+from app.core.ownership import fetch_owned_directly_or_404, filter_by_owner
 from app.models.platform_entities import BiobankSample, StorageLocation
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -58,8 +64,10 @@ async def list_samples(
     project: str | None = None,
     search: str | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     query = select(BiobankSample)
+    query = filter_by_owner(query, BiobankSample, current_user)
     if sample_type:
         query = query.where(BiobankSample.sample_type == sample_type)
     if status:
@@ -80,10 +88,15 @@ async def list_samples(
 
 
 @router.post("/samples")
-async def create_sample(data: SampleCreate, db: AsyncSession = Depends(get_db)):
+async def create_sample(
+    data: SampleCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     barcode = data.barcode or f"BIO-{str(uuid4())[:6].upper()}"
     now = datetime.now(UTC)
     sample = BiobankSample(
+        owner_id=current_user.id,
         barcode=barcode,
         sample_type=data.sample_type,
         status="available",
@@ -98,7 +111,7 @@ async def create_sample(data: SampleCreate, db: AsyncSession = Depends(get_db)):
         chain_of_custody=[
             {
                 "action": "registered",
-                "by": "Current User",
+                "by": current_user.email,
                 "date": now.strftime("%Y-%m-%d"),
                 "notes": "Sample registered",
             }
@@ -110,18 +123,23 @@ async def create_sample(data: SampleCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/samples/{sample_id}")
-async def get_sample(sample_id: UUID, db: AsyncSession = Depends(get_db)):
-    sample = await db.get(BiobankSample, sample_id)
-    if not sample:
-        raise HTTPException(status_code=404, detail="Sample not found")
+async def get_sample(
+    sample_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    sample = await fetch_owned_directly_or_404(db, BiobankSample, sample_id, current_user)
     return sample.to_dict()
 
 
 @router.patch("/samples/{sample_id}")
-async def update_sample(sample_id: UUID, data: SampleUpdate, db: AsyncSession = Depends(get_db)):
-    sample = await db.get(BiobankSample, sample_id)
-    if not sample:
-        raise HTTPException(status_code=404, detail="Sample not found")
+async def update_sample(
+    sample_id: UUID,
+    data: SampleUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    sample = await fetch_owned_directly_or_404(db, BiobankSample, sample_id, current_user)
     if data.status is not None:
         sample.status = data.status
     if data.project is not None:
@@ -135,10 +153,12 @@ async def update_sample(sample_id: UUID, data: SampleUpdate, db: AsyncSession = 
 
 
 @router.delete("/samples/{sample_id}")
-async def delete_sample(sample_id: UUID, db: AsyncSession = Depends(get_db)):
-    sample = await db.get(BiobankSample, sample_id)
-    if not sample:
-        raise HTTPException(status_code=404, detail="Sample not found")
+async def delete_sample(
+    sample_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    sample = await fetch_owned_directly_or_404(db, BiobankSample, sample_id, current_user)
     await db.delete(sample)
     await db.flush()
     return {"status": "deleted"}
@@ -146,11 +166,12 @@ async def delete_sample(sample_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.post("/samples/{sample_id}/checkout")
 async def checkout_sample(
-    sample_id: UUID, data: CheckoutRequest, db: AsyncSession = Depends(get_db)
+    sample_id: UUID,
+    data: CheckoutRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    sample = await db.get(BiobankSample, sample_id)
-    if not sample:
-        raise HTTPException(status_code=404, detail="Sample not found")
+    sample = await fetch_owned_directly_or_404(db, BiobankSample, sample_id, current_user)
     if sample.status != "available":
         raise HTTPException(
             status_code=400, detail=f"Sample is {sample.status}, cannot checkout"
@@ -176,10 +197,9 @@ async def checkin_sample(
     sample_id: UUID,
     condition: str = Query("good"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    sample = await db.get(BiobankSample, sample_id)
-    if not sample:
-        raise HTTPException(status_code=404, detail="Sample not found")
+    sample = await fetch_owned_directly_or_404(db, BiobankSample, sample_id, current_user)
     if sample.status != "checked_out":
         raise HTTPException(
             status_code=400, detail=f"Sample is {sample.status}, cannot checkin"
@@ -189,7 +209,7 @@ async def checkin_sample(
     custody.append(
         {
             "action": "returned",
-            "by": "Current User",
+            "by": current_user.email,
             "date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "notes": f"Condition: {condition}",
         }
@@ -203,19 +223,27 @@ async def checkin_sample(
 
 
 @router.get("/storage")
-async def list_storage(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(StorageLocation).order_by(StorageLocation.name)
-    )
+async def list_storage(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    query = select(StorageLocation)
+    query = filter_by_owner(query, StorageLocation, current_user)
+    query = query.order_by(StorageLocation.name)
+    result = await db.execute(query)
     items = result.scalars().all()
     return {"items": [loc.to_dict() for loc in items], "total": len(items)}
 
 
 @router.get("/storage/{location_id}")
-async def get_storage(location_id: UUID, db: AsyncSession = Depends(get_db)):
-    location = await db.get(StorageLocation, location_id)
-    if not location:
-        raise HTTPException(status_code=404, detail="Location not found")
+async def get_storage(
+    location_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    location = await fetch_owned_directly_or_404(
+        db, StorageLocation, location_id, current_user
+    )
     return location.to_dict()
 
 
@@ -223,8 +251,12 @@ async def get_storage(location_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/inventory")
-async def get_inventory(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(BiobankSample))
+async def get_inventory(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    sample_query = filter_by_owner(select(BiobankSample), BiobankSample, current_user)
+    result = await db.execute(sample_query)
     samples = result.scalars().all()
 
     by_type: dict[str, int] = {}
@@ -256,7 +288,10 @@ async def get_inventory(db: AsyncSession = Depends(get_db)):
             }
         )
 
-    storage_result = await db.execute(select(StorageLocation))
+    storage_query = filter_by_owner(
+        select(StorageLocation), StorageLocation, current_user
+    )
+    storage_result = await db.execute(storage_query)
     locations = storage_result.scalars().all()
 
     return {

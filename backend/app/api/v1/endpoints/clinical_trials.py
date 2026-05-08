@@ -3,6 +3,10 @@ Clinical Trial Management API Endpoints
 
 Protocol registry, subject enrollment, visit scheduling,
 regulatory documents, and budget tracking.
+
+Tenant isolation (Round 10): trial-level rows filter by owner_id =
+current_user.id; child rows (subjects, documents) inherit ownership
+through the parent trial. Cross-tenant access returns 404.
 """
 
 import logging
@@ -15,9 +19,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints._bulk import attach_bulk_archive, attach_bulk_delete
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
+from app.core.ownership import fetch_owned_directly_or_404, filter_by_owner
 from app.models.platform_entities import ClinicalTrial, TrialDocument, TrialSubject
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -77,18 +83,25 @@ class BudgetUpdate(BaseModel):
 
 @router.get("", include_in_schema=False)
 @router.get("/")
-async def list_trials(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(ClinicalTrial).order_by(ClinicalTrial.created_at.desc())
-    )
+async def list_trials(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    query = filter_by_owner(select(ClinicalTrial), ClinicalTrial, current_user)
+    result = await db.execute(query.order_by(ClinicalTrial.created_at.desc()))
     items = result.scalars().all()
     return {"items": [t.to_dict() for t in items], "total": len(items)}
 
 
 @router.post("", include_in_schema=False)
 @router.post("/")
-async def create_trial(data: TrialCreate, db: AsyncSession = Depends(get_db)):
+async def create_trial(
+    data: TrialCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     trial = ClinicalTrial(
+        owner_id=current_user.id,
         protocol_number=data.protocol_number,
         title=data.title,
         phase=data.phase,
@@ -109,18 +122,23 @@ async def create_trial(data: TrialCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{trial_id}")
-async def get_trial(trial_id: UUID, db: AsyncSession = Depends(get_db)):
-    trial = await db.get(ClinicalTrial, trial_id)
-    if not trial:
-        raise HTTPException(status_code=404, detail="Trial not found")
+async def get_trial(
+    trial_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    trial = await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     return trial.to_dict()
 
 
 @router.patch("/{trial_id}")
-async def update_trial(trial_id: UUID, data: TrialUpdate, db: AsyncSession = Depends(get_db)):
-    trial = await db.get(ClinicalTrial, trial_id)
-    if not trial:
-        raise HTTPException(status_code=404, detail="Trial not found")
+async def update_trial(
+    trial_id: UUID,
+    data: TrialUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    trial = await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     updates = data.model_dump(exclude_unset=True)
     trial.update_from_dict(updates)
     await db.flush()
@@ -128,20 +146,28 @@ async def update_trial(trial_id: UUID, data: TrialUpdate, db: AsyncSession = Dep
 
 
 @router.delete("/{trial_id}")
-async def delete_trial(trial_id: UUID, db: AsyncSession = Depends(get_db)):
-    trial = await db.get(ClinicalTrial, trial_id)
-    if not trial:
-        raise HTTPException(status_code=404, detail="Trial not found")
+async def delete_trial(
+    trial_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    trial = await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     await db.delete(trial)
     await db.flush()
     return {"status": "deleted"}
 
 
-# ── Subjects ────────────────────────────────────────────────────
+# ── Subjects (transitive ownership through parent trial) ──────────
 
 
 @router.get("/{trial_id}/subjects")
-async def list_subjects(trial_id: UUID, db: AsyncSession = Depends(get_db)):
+async def list_subjects(
+    trial_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    # Verify the parent trial is owned by the caller before listing children.
+    await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     result = await db.execute(
         select(TrialSubject)
         .where(TrialSubject.trial_id == trial_id)
@@ -152,10 +178,13 @@ async def list_subjects(trial_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{trial_id}/subjects")
-async def enroll_subject(trial_id: UUID, data: SubjectCreate, db: AsyncSession = Depends(get_db)):
-    trial = await db.get(ClinicalTrial, trial_id)
-    if not trial:
-        raise HTTPException(status_code=404, detail="Trial not found")
+async def enroll_subject(
+    trial_id: UUID,
+    data: SubjectCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    trial = await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     subject = TrialSubject(
         trial_id=trial_id,
         subject_number=data.subject_number,
@@ -187,23 +216,28 @@ async def update_subject(
     subject_id: UUID,
     status: str = Query(...),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    subject = await db.get(TrialSubject, subject_id)
-    if not subject:
+    # Parent-trial ownership gates the child mutation.
+    trial = await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
+    subject_q = (
+        select(TrialSubject)
+        .where(TrialSubject.id == subject_id, TrialSubject.trial_id == trial_id)
+    )
+    subject = (await db.execute(subject_q)).scalar_one_or_none()
+    if subject is None:
         raise HTTPException(status_code=404, detail="Subject not found")
     subject.status = status
     await db.flush()
 
     # Update current enrollment count on the trial
-    trial = await db.get(ClinicalTrial, trial_id)
-    if trial:
-        count_result = await db.execute(
-            select(func.count())
-            .select_from(TrialSubject)
-            .where(TrialSubject.trial_id == trial_id, TrialSubject.status == "active")
-        )
-        trial.current_enrollment = count_result.scalar() or 0
-        await db.flush()
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(TrialSubject)
+        .where(TrialSubject.trial_id == trial_id, TrialSubject.status == "active")
+    )
+    trial.current_enrollment = count_result.scalar() or 0
+    await db.flush()
 
     return subject.to_dict()
 
@@ -216,12 +250,20 @@ async def list_visits(
     trial_id: UUID,
     subject_id: str | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
+    await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     return {"items": [], "total": 0}
 
 
 @router.post("/{trial_id}/visits")
-async def create_visit(trial_id: UUID, data: VisitCreate, db: AsyncSession = Depends(get_db)):
+async def create_visit(
+    trial_id: UUID,
+    data: VisitCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     raise HTTPException(
         status_code=501,
         detail="Visit storage not yet implemented; no dedicated table exists.",
@@ -232,7 +274,12 @@ async def create_visit(trial_id: UUID, data: VisitCreate, db: AsyncSession = Dep
 
 
 @router.get("/{trial_id}/documents")
-async def list_documents(trial_id: UUID, db: AsyncSession = Depends(get_db)):
+async def list_documents(
+    trial_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     result = await db.execute(
         select(TrialDocument).where(TrialDocument.trial_id == trial_id)
     )
@@ -241,17 +288,20 @@ async def list_documents(trial_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{trial_id}/documents")
-async def add_document(trial_id: UUID, data: DocumentCreate, db: AsyncSession = Depends(get_db)):
-    trial = await db.get(ClinicalTrial, trial_id)
-    if not trial:
-        raise HTTPException(status_code=404, detail="Trial not found")
+async def add_document(
+    trial_id: UUID,
+    data: DocumentCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     doc = TrialDocument(
         trial_id=trial_id,
         document_type=data.document_type,
         name=data.name,
         status="pending",
         version=data.version,
-        uploaded_by="Current User",
+        uploaded_by=current_user.email,
     )
     db.add(doc)
     await db.flush()
@@ -262,18 +312,23 @@ async def add_document(trial_id: UUID, data: DocumentCreate, db: AsyncSession = 
 
 
 @router.get("/{trial_id}/budget")
-async def get_budget(trial_id: UUID, db: AsyncSession = Depends(get_db)):
-    trial = await db.get(ClinicalTrial, trial_id)
-    if not trial:
-        raise HTTPException(status_code=404, detail="Trial not found")
+async def get_budget(
+    trial_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    trial = await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     return trial.to_dict().get("budget", {})
 
 
 @router.patch("/{trial_id}/budget")
-async def update_budget(trial_id: UUID, data: BudgetUpdate, db: AsyncSession = Depends(get_db)):
-    trial = await db.get(ClinicalTrial, trial_id)
-    if not trial:
-        raise HTTPException(status_code=404, detail="Trial not found")
+async def update_budget(
+    trial_id: UUID,
+    data: BudgetUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    trial = await fetch_owned_directly_or_404(db, ClinicalTrial, trial_id, current_user)
     budget = dict(trial.budget) if trial.budget else {}
     budget["categories"] = data.categories
     budget["total"] = sum(c.get("budgeted", 0) for c in data.categories)

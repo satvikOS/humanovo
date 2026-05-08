@@ -3,6 +3,9 @@ Alembic Environment Configuration
 
 This module configures Alembic for database migrations.
 """
+# ruff: noqa: E402
+# The pre-flight DDL block below has to run before app.* imports load
+# Base.metadata, so the import-vs-side-effect ordering is intentional.
 
 import asyncio
 from logging.config import fileConfig
@@ -23,18 +26,10 @@ _REQUIRED_EXTENSIONS = ("pg_trgm", "uuid-ossp", "vector")
 # Import all models so Alembic can detect them via Base.metadata.
 # Importing `app.models` triggers app/models/__init__.py which pulls in every
 # ORM class (including AuditRecord and the full platform-entities set).
-from app.models import (
-    AgentTask,
-    AuditRecord,
-    Base,
-    Evidence,
-    Hypothesis,
-    IngestionJob,
-    Project,
-    Simulation,
-    User,
-)
 from app.core.config import settings
+from app.models import (
+    Base,
+)
 
 # Alembic Config object
 config = context.config

@@ -19,10 +19,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.ownership import fetch_owned_directly_or_404, filter_by_owner
 from app.models.platform_entities import ImagingStudy
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -49,8 +51,13 @@ class AnnotationCreate(BaseModel):
 
 
 @router.get("/studies")
-async def list_studies(modality: str | None = None, db: AsyncSession = Depends(get_db)):
-    stmt = select(ImagingStudy).order_by(ImagingStudy.created_at.desc())
+async def list_studies(
+    modality: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    stmt = filter_by_owner(select(ImagingStudy), ImagingStudy, current_user)
+    stmt = stmt.order_by(ImagingStudy.created_at.desc())
     if modality:
         stmt = stmt.where(ImagingStudy.modality == modality)
     result = await db.execute(stmt)
@@ -59,8 +66,13 @@ async def list_studies(modality: str | None = None, db: AsyncSession = Depends(g
 
 
 @router.post("/studies")
-async def create_study(data: StudyCreate, db: AsyncSession = Depends(get_db)):
+async def create_study(
+    data: StudyCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     study = ImagingStudy(
+        owner_id=current_user.id,
         title=data.title,
         modality=data.modality,
         body_part=data.body_part,
@@ -78,28 +90,35 @@ async def create_study(data: StudyCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/studies/{study_id}")
-async def get_study(study_id: UUID, db: AsyncSession = Depends(get_db)):
-    study = await db.get(ImagingStudy, study_id)
-    if not study:
-        raise HTTPException(status_code=404, detail="Study not found")
+async def get_study(
+    study_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    study = await fetch_owned_directly_or_404(db, ImagingStudy, study_id, current_user)
     return study.to_dict()
 
 
 @router.delete("/studies/{study_id}")
-async def delete_study(study_id: UUID, db: AsyncSession = Depends(get_db)):
-    study = await db.get(ImagingStudy, study_id)
-    if not study:
-        raise HTTPException(status_code=404, detail="Study not found")
+async def delete_study(
+    study_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    study = await fetch_owned_directly_or_404(db, ImagingStudy, study_id, current_user)
     await db.delete(study)
     await db.flush()
     return {"status": "deleted"}
 
 
 @router.post("/studies/{study_id}/annotate")
-async def add_annotation(study_id: UUID, data: AnnotationCreate, db: AsyncSession = Depends(get_db)):
-    study = await db.get(ImagingStudy, study_id)
-    if not study:
-        raise HTTPException(status_code=404, detail="Study not found")
+async def add_annotation(
+    study_id: UUID,
+    data: AnnotationCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    study = await fetch_owned_directly_or_404(db, ImagingStudy, study_id, current_user)
     annotation = {
         "id": str(uuid4()),
         "type": data.type,
@@ -120,20 +139,25 @@ async def add_annotation(study_id: UUID, data: AnnotationCreate, db: AsyncSessio
 
 
 @router.delete("/studies/{study_id}/annotations/{annotation_id}")
-async def delete_annotation(study_id: UUID, annotation_id: UUID, db: AsyncSession = Depends(get_db)):
-    study = await db.get(ImagingStudy, study_id)
-    if not study:
-        raise HTTPException(status_code=404, detail="Study not found")
+async def delete_annotation(
+    study_id: UUID,
+    annotation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    study = await fetch_owned_directly_or_404(db, ImagingStudy, study_id, current_user)
     study.annotations = [a for a in (study.annotations or []) if a["id"] != annotation_id]
     await db.flush()
     return {"status": "deleted"}
 
 
 @router.get("/studies/{study_id}/analysis")
-async def get_ai_analysis(study_id: UUID, db: AsyncSession = Depends(get_db)):
-    study = await db.get(ImagingStudy, study_id)
-    if not study:
-        raise HTTPException(status_code=404, detail="Study not found")
+async def get_ai_analysis(
+    study_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    study = await fetch_owned_directly_or_404(db, ImagingStudy, study_id, current_user)
     return {"study_id": study_id, "ai_analysis": study.ai_analysis}
 
 

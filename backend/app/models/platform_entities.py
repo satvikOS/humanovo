@@ -5,6 +5,17 @@ SQLAlchemy ORM models for all platform entities that were previously
 stored in-memory: clinical trials, biobank, IRB, compliance, ML,
 imaging, manuscripts, datasets, knowledge graph, collaboration,
 audit logs, and billing budgets.
+
+Owner-scoping: clinical / research models that contain per-tenant
+data carry an `owner_id` FK to users(id) (added in migration
+021_owner_id_on_platform_entities). The column is nullable=True at
+the schema layer for transitional pre-launch rows; the application
+layer enforces the filter on every read/write path via
+fetch_owned_directly_or_404 + filter_by_owner. Models that are
+intentionally globally-shared (KG nodes, KG edges, audit log
+entries, collaboration comments) do NOT carry owner_id - their
+sharing model is governed by the per-document KG permission table
+or the comment's own user_id field.
 """
 
 from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, String, Text
@@ -12,6 +23,23 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from app.models.base import BaseModel
+
+
+def _owner_id_column():
+    """owner_id FK shared by every per-tenant clinical/research model.
+
+    Nullable=True at the schema layer so pre-launch rows without an
+    owner aren't blocked by the constraint; the application layer's
+    fetch_owned_directly_or_404 filters those rows out at read time
+    (rendering them unreachable). Future migration tightens to NOT
+    NULL after a backfill pass.
+    """
+    return Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
 # ---------------------------------------------------------------------------
 # Clinical Trials
@@ -22,6 +50,7 @@ class ClinicalTrial(BaseModel):
 
     __tablename__ = "clinical_trials"
 
+    owner_id = _owner_id_column()
     protocol_number = Column(String, unique=True, nullable=False)
     title = Column(String(500), nullable=False)
     phase = Column(String(50), nullable=True)
@@ -84,6 +113,7 @@ class StorageLocation(BaseModel):
 
     __tablename__ = "storage_locations"
 
+    owner_id = _owner_id_column()
     name = Column(String(255), nullable=False)
     temperature = Column(String(50), nullable=True)
     type = Column(String(50), nullable=True)
@@ -97,6 +127,7 @@ class BiobankSample(BaseModel):
 
     __tablename__ = "biobank_samples"
 
+    owner_id = _owner_id_column()
     barcode = Column(String(50), unique=True, nullable=False)
     sample_type = Column(String(50), nullable=False)
     status = Column(String(50), default="available", nullable=False)
@@ -125,6 +156,7 @@ class IRBSubmission(BaseModel):
 
     __tablename__ = "irb_submissions"
 
+    owner_id = _owner_id_column()
     protocol_title = Column(String(500), nullable=False)
     irb_number = Column(String(100), unique=True, nullable=False)
     status = Column(String(50), default="pending", nullable=False)
@@ -142,6 +174,7 @@ class DataUseAgreement(BaseModel):
 
     __tablename__ = "data_use_agreements"
 
+    owner_id = _owner_id_column()
     title = Column(String(500), nullable=False)
     agreement_type = Column(String(50), nullable=False)
     status = Column(String(50), default="draft", nullable=False)
@@ -157,6 +190,7 @@ class ConsentForm(BaseModel):
 
     __tablename__ = "consent_forms"
 
+    owner_id = _owner_id_column()
     title = Column(String(500), nullable=False)
     version = Column(String(50), nullable=True)
     status = Column(String(50), default="draft", nullable=False)
@@ -170,6 +204,7 @@ class ComplianceChecklist(BaseModel):
 
     __tablename__ = "compliance_checklists"
 
+    owner_id = _owner_id_column()
     framework = Column(String(100), nullable=False)
     items = Column(JSONB, default=list, nullable=False)
     completion_pct = Column(Integer, default=0, nullable=False)
@@ -185,6 +220,7 @@ class MLModel(BaseModel):
 
     __tablename__ = "ml_models"
 
+    owner_id = _owner_id_column()
     name = Column(String(500), nullable=False)
     model_type = Column(String(100), nullable=True)
     status = Column(String(50), default="draft", nullable=False)
@@ -208,6 +244,7 @@ class ImagingStudy(BaseModel):
 
     __tablename__ = "imaging_studies"
 
+    owner_id = _owner_id_column()
     title = Column(String(500), nullable=False)
     modality = Column(String(100), nullable=True)
     body_part = Column(String(255), nullable=True)
@@ -229,6 +266,7 @@ class Manuscript(BaseModel):
 
     __tablename__ = "manuscripts"
 
+    owner_id = _owner_id_column()
     title = Column(String(500), nullable=False)
     status = Column(String(50), default="draft", nullable=False)
     journal_target = Column(String(255), nullable=True)
@@ -248,6 +286,7 @@ class ResearchDataset(BaseModel):
 
     __tablename__ = "research_datasets"
 
+    owner_id = _owner_id_column()
     name = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
     format = Column(String(50), default="csv", nullable=False)
@@ -402,6 +441,7 @@ class SavedAnalysis(BaseModel):
 
     __tablename__ = "saved_analyses"
 
+    owner_id = _owner_id_column()
     title = Column(String(500), nullable=False)
     analysis_type = Column(String(100), nullable=False)
     input_data = Column(JSONB, default=dict, nullable=False)

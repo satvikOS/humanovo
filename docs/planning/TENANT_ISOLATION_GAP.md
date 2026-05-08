@@ -1,6 +1,35 @@
 # Tenant Isolation Gap — Platform-Shared Models
 
-**Status:** open · **Severity:** medium-high · **First flagged:** Round 8, May 2026
+**Status:** **closed (code-side)** · pending production migration apply
+**First flagged:** Round 8, May 2026 · **Closed:** Round 10, May 2026
+
+## Closure summary
+
+* Migration `021_owner_id_on_platform_entities.py` adds `owner_id UUID`
+  + FK + index on 12 platform-shared tables: `clinical_trials`,
+  `biobank_samples`, `storage_locations`, `irb_submissions`,
+  `data_use_agreements`, `consent_forms`, `compliance_checklists`,
+  `ml_models`, `imaging_studies`, `manuscripts`, `research_datasets`,
+  `saved_analyses`. ON DELETE SET NULL on the FK so user deletion
+  doesn't cascade-drop the row.
+* ORM (`app/models/platform_entities.py`) declares `owner_id` via
+  the shared `_owner_id_column()` helper.
+* New helpers in `app/core/ownership.py`:
+  - `fetch_owned_directly_or_404(db, Model, row_id, user)` — for
+    models with a direct `owner_id` (no transitive Project).
+  - `filter_by_owner(query, Model, user)` — adds the WHERE clause.
+* All ~50 read/write endpoints across `biobank.py`, `clinical_trials.py`,
+  `regulatory.py`, `ml_models.py`, `imaging.py`, `manuscripts.py`,
+  `datasets.py`, `statistics.py` rewired to use the new helpers.
+  List endpoints filter by owner_id; create endpoints set
+  `owner_id=current_user.id`; R/U/D paths route through
+  `fetch_owned_directly_or_404` which 404s on cross-tenant access.
+
+The doc stays in the repo as a closure record. Reopen only if a new
+platform-shared model is introduced without `owner_id`.
+
+## Original report (kept for context)
+
 
 ## What
 

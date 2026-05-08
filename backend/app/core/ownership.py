@@ -166,3 +166,40 @@ async def fetch_owned_or_global_or_404(
             detail=f"{model_with_nullable_project_id.__name__} not found",
         )
     return row
+
+
+async def fetch_owned_directly_or_404(
+    db: AsyncSession,
+    model_with_owner_id,
+    row_id: UUID,
+    user: User,
+):
+    """Fetch a row by `id` only if the caller is its direct owner.
+
+    For platform-shared models that carry an `owner_id` FK directly
+    (no transitive ownership through a Project): clinical trials,
+    biobank samples, IRB submissions, ML models, imaging studies,
+    manuscripts, regulatory documents, datasets, saved analyses.
+
+    Returns the row on success; raises 404 (not 403) on absent /
+    cross-tenant. The 404 is intentional: it prevents probing for
+    the existence of someone else's row IDs.
+    """
+    query = select(model_with_owner_id).where(
+        model_with_owner_id.id == row_id,
+        model_with_owner_id.owner_id == user.id,
+    )
+    result = await db.execute(query)
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail=f"{model_with_owner_id.__name__} not found"
+        )
+    return row
+
+
+def filter_by_owner(query: Select[T], model_with_owner_id, user: User) -> Select[T]:
+    """Augment `query` so it only returns rows whose `owner_id` is the
+    caller. For platform-shared models with a direct owner_id column.
+    """
+    return query.where(model_with_owner_id.owner_id == user.id)

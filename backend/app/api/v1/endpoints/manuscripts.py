@@ -8,16 +8,18 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints._bulk import attach_bulk_archive, attach_bulk_delete
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
+from app.core.ownership import fetch_owned_directly_or_404, filter_by_owner
 from app.models.platform_entities import Manuscript
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -61,16 +63,25 @@ class SubmissionCreate(BaseModel):
 
 @router.get("", include_in_schema=False)
 @router.get("/")
-async def list_manuscripts(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Manuscript).order_by(Manuscript.updated_at.desc()))
+async def list_manuscripts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    query = filter_by_owner(select(Manuscript), Manuscript, current_user)
+    result = await db.execute(query.order_by(Manuscript.updated_at.desc()))
     items = result.scalars().all()
     return {"items": [m.to_dict() for m in items], "total": len(items)}
 
 
 @router.post("", include_in_schema=False)
 @router.post("/")
-async def create_manuscript(data: ManuscriptCreate, db: AsyncSession = Depends(get_db)):
+async def create_manuscript(
+    data: ManuscriptCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     ms = Manuscript(
+        owner_id=current_user.id,
         title=data.title,
         status="draft",
         journal_target=data.journal_target,
@@ -91,18 +102,23 @@ async def list_journal_templates():
 
 
 @router.get("/{manuscript_id}")
-async def get_manuscript(manuscript_id: UUID, db: AsyncSession = Depends(get_db)):
-    ms = await db.get(Manuscript, manuscript_id)
-    if not ms:
-        raise HTTPException(status_code=404, detail="Manuscript not found")
+async def get_manuscript(
+    manuscript_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ms = await fetch_owned_directly_or_404(db, Manuscript, manuscript_id, current_user)
     return ms.to_dict()
 
 
 @router.patch("/{manuscript_id}")
-async def update_manuscript(manuscript_id: UUID, data: ManuscriptUpdate, db: AsyncSession = Depends(get_db)):
-    ms = await db.get(Manuscript, manuscript_id)
-    if not ms:
-        raise HTTPException(status_code=404, detail="Manuscript not found")
+async def update_manuscript(
+    manuscript_id: UUID,
+    data: ManuscriptUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ms = await fetch_owned_directly_or_404(db, Manuscript, manuscript_id, current_user)
     if data.title is not None:
         ms.title = data.title
     if data.status is not None:
@@ -121,28 +137,35 @@ async def update_manuscript(manuscript_id: UUID, data: ManuscriptUpdate, db: Asy
 
 
 @router.delete("/{manuscript_id}")
-async def delete_manuscript(manuscript_id: UUID, db: AsyncSession = Depends(get_db)):
-    ms = await db.get(Manuscript, manuscript_id)
-    if not ms:
-        raise HTTPException(status_code=404, detail="Manuscript not found")
+async def delete_manuscript(
+    manuscript_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ms = await fetch_owned_directly_or_404(db, Manuscript, manuscript_id, current_user)
     await db.delete(ms)
     await db.flush()
     return {"status": "deleted"}
 
 
 @router.get("/{manuscript_id}/authors")
-async def list_authors(manuscript_id: UUID, db: AsyncSession = Depends(get_db)):
-    ms = await db.get(Manuscript, manuscript_id)
-    if not ms:
-        raise HTTPException(status_code=404, detail="Manuscript not found")
+async def list_authors(
+    manuscript_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ms = await fetch_owned_directly_or_404(db, Manuscript, manuscript_id, current_user)
     return {"authors": ms.authors or []}
 
 
 @router.post("/{manuscript_id}/authors")
-async def add_author(manuscript_id: UUID, data: AuthorCreate, db: AsyncSession = Depends(get_db)):
-    ms = await db.get(Manuscript, manuscript_id)
-    if not ms:
-        raise HTTPException(status_code=404, detail="Manuscript not found")
+async def add_author(
+    manuscript_id: UUID,
+    data: AuthorCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ms = await fetch_owned_directly_or_404(db, Manuscript, manuscript_id, current_user)
     current_authors = list(ms.authors or [])
     author = {
         "id": str(uuid4()),
@@ -159,10 +182,13 @@ async def add_author(manuscript_id: UUID, data: AuthorCreate, db: AsyncSession =
 
 
 @router.delete("/{manuscript_id}/authors/{author_id}")
-async def remove_author(manuscript_id: UUID, author_id: UUID, db: AsyncSession = Depends(get_db)):
-    ms = await db.get(Manuscript, manuscript_id)
-    if not ms:
-        raise HTTPException(status_code=404, detail="Manuscript not found")
+async def remove_author(
+    manuscript_id: UUID,
+    author_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ms = await fetch_owned_directly_or_404(db, Manuscript, manuscript_id, current_user)
     filtered = [a for a in (ms.authors or []) if a["id"] != author_id]
     for i, a in enumerate(filtered):
         a["order"] = i + 1
@@ -172,10 +198,13 @@ async def remove_author(manuscript_id: UUID, author_id: UUID, db: AsyncSession =
 
 
 @router.get("/{manuscript_id}/export")
-async def export_manuscript(manuscript_id: UUID, format: str = Query("markdown"), db: AsyncSession = Depends(get_db)):
-    ms = await db.get(Manuscript, manuscript_id)
-    if not ms:
-        raise HTTPException(status_code=404, detail="Manuscript not found")
+async def export_manuscript(
+    manuscript_id: UUID,
+    format: str = Query("markdown"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ms = await fetch_owned_directly_or_404(db, Manuscript, manuscript_id, current_user)
 
     authors = ms.authors or []
     sections = ms.sections or {}
@@ -195,10 +224,13 @@ async def export_manuscript(manuscript_id: UUID, format: str = Query("markdown")
 
 
 @router.post("/{manuscript_id}/submit")
-async def submit_manuscript(manuscript_id: UUID, data: SubmissionCreate, db: AsyncSession = Depends(get_db)):
-    ms = await db.get(Manuscript, manuscript_id)
-    if not ms:
-        raise HTTPException(status_code=404, detail="Manuscript not found")
+async def submit_manuscript(
+    manuscript_id: UUID,
+    data: SubmissionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ms = await fetch_owned_directly_or_404(db, Manuscript, manuscript_id, current_user)
     submission = {
         "id": str(uuid4()),
         "journal": data.journal,

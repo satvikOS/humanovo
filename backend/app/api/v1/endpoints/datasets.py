@@ -18,9 +18,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
+from app.core.ownership import filter_by_owner
 from app.models.platform_entities import ResearchDataset
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -85,9 +87,19 @@ def _parse_value(v: str):
     return v
 
 
-async def _get_dataset_or_404(db: AsyncSession, dataset_id: UUID) -> ResearchDataset:
+async def _get_dataset_or_404(
+    db: AsyncSession, dataset_id: UUID, current_user: User
+) -> ResearchDataset:
+    """Fetch a dataset by id only when the caller owns it.
+
+    Cross-tenant access returns 404 (not 403) to avoid leaking the
+    existence of someone else's dataset IDs.
+    """
     result = await db.execute(
-        select(ResearchDataset).where(ResearchDataset.id == dataset_id)
+        select(ResearchDataset).where(
+            ResearchDataset.id == dataset_id,
+            ResearchDataset.owner_id == current_user.id,
+        )
     )
     ds = result.scalar_one_or_none()
     if ds is None:
@@ -103,15 +115,19 @@ async def list_datasets(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    # Count
-    count_result = await db.execute(select(func.count(ResearchDataset.id)))
+    # Count owned only
+    count_query = filter_by_owner(
+        select(func.count(ResearchDataset.id)), ResearchDataset, current_user
+    )
+    count_result = await db.execute(count_query)
     total = count_result.scalar_one()
 
-    # Fetch page
+    # Fetch page owned only
+    list_query = filter_by_owner(select(ResearchDataset), ResearchDataset, current_user)
     result = await db.execute(
-        select(ResearchDataset)
-        .order_by(ResearchDataset.updated_at.desc())
+        list_query.order_by(ResearchDataset.updated_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -126,8 +142,13 @@ async def list_datasets(
 
 @router.post("", include_in_schema=False)
 @router.post("/")
-async def create_dataset(data: DatasetCreate, db: AsyncSession = Depends(get_db)):
+async def create_dataset(
+    data: DatasetCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     ds = ResearchDataset(
+        owner_id=current_user.id,
         name=data.name,
         description=data.description,
         format=data.format,
@@ -143,16 +164,23 @@ async def create_dataset(data: DatasetCreate, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/{dataset_id}")
-async def get_dataset(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
-    ds = await _get_dataset_or_404(db, dataset_id)
+async def get_dataset(
+    dataset_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     return ds.to_dict()
 
 
 @router.patch("/{dataset_id}")
 async def update_dataset(
-    dataset_id: UUID, data: DatasetUpdate, db: AsyncSession = Depends(get_db)
+    dataset_id: UUID,
+    data: DatasetUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    ds = await _get_dataset_or_404(db, dataset_id)
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     if data.name is not None:
         ds.name = data.name
     if data.description is not None:
@@ -165,8 +193,12 @@ async def update_dataset(
 
 
 @router.delete("/{dataset_id}")
-async def delete_dataset(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
-    ds = await _get_dataset_or_404(db, dataset_id)
+async def delete_dataset(
+    dataset_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     await db.delete(ds)
     await db.flush()
     return {"status": "deleted"}
@@ -177,8 +209,9 @@ async def upload_data(
     dataset_id: UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    ds = await _get_dataset_or_404(db, dataset_id)
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     content = await file.read()
     text = content.decode("utf-8")
 
@@ -216,8 +249,9 @@ async def preview_data(
     dataset_id: UUID,
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    ds = await _get_dataset_or_404(db, dataset_id)
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     rows = ds.rows or []
     return {
         "columns": ds.columns or [],
@@ -227,8 +261,12 @@ async def preview_data(
 
 
 @router.get("/{dataset_id}/profile")
-async def profile_data(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
-    ds = await _get_dataset_or_404(db, dataset_id)
+async def profile_data(
+    dataset_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     rows = ds.rows or []
     columns = ds.columns or []
     n = len(rows)
@@ -278,8 +316,12 @@ async def profile_data(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{dataset_id}/dictionary")
-async def get_dictionary(dataset_id: UUID, db: AsyncSession = Depends(get_db)):
-    ds = await _get_dataset_or_404(db, dataset_id)
+async def get_dictionary(
+    dataset_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     return {"columns": ds.columns or []}
 
 
@@ -288,8 +330,9 @@ async def update_dictionary(
     dataset_id: UUID,
     columns: list[ColumnUpdate],
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    ds = await _get_dataset_or_404(db, dataset_id)
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     col_map = {c["name"]: c for c in (ds.columns or [])}
     for update in columns:
         if update.name in col_map:
@@ -309,8 +352,9 @@ async def export_data(
     dataset_id: UUID,
     format: str = Query("csv"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
-    ds = await _get_dataset_or_404(db, dataset_id)
+    ds = await _get_dataset_or_404(db, dataset_id, current_user)
     rows = ds.rows or []
     columns = ds.columns or []
 
@@ -335,8 +379,12 @@ async def export_data(
 
 
 @router.post("/cohort")
-async def build_cohort(request: CohortRequest, db: AsyncSession = Depends(get_db)):
-    ds = await _get_dataset_or_404(db, request.dataset_id)
+async def build_cohort(
+    request: CohortRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    ds = await _get_dataset_or_404(db, request.dataset_id, current_user)
     filtered = list(ds.rows or [])
 
     for f in request.filters:

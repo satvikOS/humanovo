@@ -14,8 +14,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -823,21 +824,29 @@ def _get_saved_model():
 
 
 @router.get("/saved")
-async def list_saved_analyses(db: AsyncSession = Depends(get_db)):
-    """List all saved analyses."""
+async def list_saved_analyses(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """List all saved analyses owned by the caller."""
+    from app.core.ownership import filter_by_owner
     SavedAnalysis = _get_saved_model()
-    result = await db.execute(
-        select(SavedAnalysis).order_by(SavedAnalysis.created_at.desc())
-    )
+    query = filter_by_owner(select(SavedAnalysis), SavedAnalysis, current_user)
+    result = await db.execute(query.order_by(SavedAnalysis.created_at.desc()))
     items = result.scalars().all()
     return {"items": [a.to_dict() for a in items], "total": len(items)}
 
 
 @router.post("/saved")
-async def save_analysis(request: SaveAnalysisRequest, db: AsyncSession = Depends(get_db)):
+async def save_analysis(
+    request: SaveAnalysisRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     """Save an analysis result."""
     SavedAnalysis = _get_saved_model()
     analysis = SavedAnalysis(
+        owner_id=current_user.id,
         title=request.title,
         analysis_type=request.analysis_type,
         input_data=request.input_data,
@@ -849,30 +858,32 @@ async def save_analysis(request: SaveAnalysisRequest, db: AsyncSession = Depends
 
 
 @router.get("/saved/{analysis_id}")
-async def get_saved_analysis(analysis_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Get a saved analysis."""
+async def get_saved_analysis(
+    analysis_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get a saved analysis owned by the caller."""
+    from app.core.ownership import fetch_owned_directly_or_404
     SavedAnalysis = _get_saved_model()
-    try:
-        uid = UUID(analysis_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    analysis = await db.get(SavedAnalysis, uid)
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = await fetch_owned_directly_or_404(
+        db, SavedAnalysis, analysis_id, current_user
+    )
     return analysis.to_dict()
 
 
 @router.delete("/saved/{analysis_id}")
-async def delete_saved_analysis(analysis_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Delete a saved analysis."""
+async def delete_saved_analysis(
+    analysis_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Delete a saved analysis owned by the caller."""
+    from app.core.ownership import fetch_owned_directly_or_404
     SavedAnalysis = _get_saved_model()
-    try:
-        uid = UUID(analysis_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    analysis = await db.get(SavedAnalysis, uid)
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = await fetch_owned_directly_or_404(
+        db, SavedAnalysis, analysis_id, current_user
+    )
     await db.delete(analysis)
     await db.flush()
     return {"status": "deleted"}

@@ -7,6 +7,30 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — Round 10 commit 1: tenant-isolation gap closed
+
+* Migration 021_owner_id_on_platform_entities.py adds `owner_id UUID`
+  + FK + index to 12 platform-shared tables (clinical_trials,
+  biobank_samples, storage_locations, irb_submissions,
+  data_use_agreements, consent_forms, compliance_checklists,
+  ml_models, imaging_studies, manuscripts, research_datasets,
+  saved_analyses). Idempotent — re-runnable after partial
+  application.
+* ORM models updated to declare owner_id via a shared helper.
+* New helpers in app/core/ownership.py:
+  - `fetch_owned_directly_or_404` for models with a direct owner_id
+  - `filter_by_owner` for list-endpoint WHERE clauses
+* ~50 endpoints across biobank, clinical_trials, regulatory,
+  ml_models, imaging, manuscripts, datasets, statistics rewired:
+  list filters by owner_id; create sets owner_id=current_user.id;
+  R/U/D routes through fetch_owned_directly_or_404 (404-not-403 on
+  cross-tenant).
+* TENANT_ISOLATION_GAP.md status flipped from open → closed
+  (pending production migration apply).
+
+Commits: bundle to be created.
+
+
 ## 2026-05-08 — fix(ci) actionlint -color flag + CI_GOTCHAS.md catalogue
 
 * `actionlint -color always` invocation made actionlint treat

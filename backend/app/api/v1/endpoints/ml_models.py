@@ -13,9 +13,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import AUTH_REQUIRED
+from app.core.auth import AUTH_REQUIRED, get_current_active_user
 from app.core.database import get_db
+from app.core.ownership import fetch_owned_directly_or_404, filter_by_owner
 from app.models.platform_entities import MLModel
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=AUTH_REQUIRED)
@@ -50,16 +52,25 @@ class EvaluateRequest(BaseModel):
 
 @router.get("", include_in_schema=False)
 @router.get("/")
-async def list_models(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(MLModel).order_by(MLModel.updated_at.desc()))
+async def list_models(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    query = filter_by_owner(select(MLModel), MLModel, current_user)
+    result = await db.execute(query.order_by(MLModel.updated_at.desc()))
     items = result.scalars().all()
     return {"items": [m.to_dict() for m in items], "total": len(items)}
 
 
 @router.post("", include_in_schema=False)
 @router.post("/")
-async def create_model(data: ModelCreate, db: AsyncSession = Depends(get_db)):
+async def create_model(
+    data: ModelCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     model = MLModel(
+        owner_id=current_user.id,
         name=data.name,
         model_type=data.model_type,
         status="draft",
@@ -79,18 +90,23 @@ async def create_model(data: ModelCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{model_id}")
-async def get_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
-    model = await db.get(MLModel, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+async def get_model(
+    model_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    model = await fetch_owned_directly_or_404(db, MLModel, model_id, current_user)
     return model.to_dict()
 
 
 @router.patch("/{model_id}")
-async def update_model(model_id: UUID, data: ModelUpdate, db: AsyncSession = Depends(get_db)):
-    model = await db.get(MLModel, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+async def update_model(
+    model_id: UUID,
+    data: ModelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    model = await fetch_owned_directly_or_404(db, MLModel, model_id, current_user)
     if data.name is not None:
         model.name = data.name
     if data.status is not None:
@@ -104,20 +120,24 @@ async def update_model(model_id: UUID, data: ModelUpdate, db: AsyncSession = Dep
 
 
 @router.delete("/{model_id}")
-async def delete_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
-    model = await db.get(MLModel, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+async def delete_model(
+    model_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    model = await fetch_owned_directly_or_404(db, MLModel, model_id, current_user)
     await db.delete(model)
     await db.flush()
     return {"status": "deleted"}
 
 
 @router.get("/{model_id}/metrics")
-async def get_metrics(model_id: UUID, db: AsyncSession = Depends(get_db)):
-    model = await db.get(MLModel, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+async def get_metrics(
+    model_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    model = await fetch_owned_directly_or_404(db, MLModel, model_id, current_user)
     metrics = model.metrics or {}
     confusion_matrix = None
     roc_curve = None
@@ -210,10 +230,13 @@ def _compute_roc_curve(metrics: dict) -> list[dict] | None:
 
 
 @router.post("/{model_id}/evaluate")
-async def evaluate_model(model_id: UUID, data: EvaluateRequest, db: AsyncSession = Depends(get_db)):
-    model = await db.get(MLModel, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+async def evaluate_model(
+    model_id: UUID,
+    data: EvaluateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    model = await fetch_owned_directly_or_404(db, MLModel, model_id, current_user)
 
     n = min(len(data.y_true), len(data.y_pred))
     if n == 0:
@@ -254,10 +277,13 @@ async def evaluate_model(model_id: UUID, data: EvaluateRequest, db: AsyncSession
 
 
 @router.post("/{model_id}/predict")
-async def predict(model_id: UUID, data: PredictRequest, db: AsyncSession = Depends(get_db)):
-    model = await db.get(MLModel, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+async def predict(
+    model_id: UUID,
+    data: PredictRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    model = await fetch_owned_directly_or_404(db, MLModel, model_id, current_user)
     if model.status != "deployed":
         raise HTTPException(
             status_code=422,
@@ -267,10 +293,12 @@ async def predict(model_id: UUID, data: PredictRequest, db: AsyncSession = Depen
 
 
 @router.get("/{model_id}/explain")
-async def explain_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
-    model = await db.get(MLModel, model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+async def explain_model(
+    model_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    model = await fetch_owned_directly_or_404(db, MLModel, model_id, current_user)
     feature_importance = model.feature_importance or []
     features = model.features or []
     interpretation = f"The model uses {len(features)} features to predict {model.target}."
