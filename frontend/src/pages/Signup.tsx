@@ -16,7 +16,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { FiUserPlus, FiAlertCircle } from 'react-icons/fi'
 import HumanovoGlyph from '../components/HumanovoGlyph'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 
 function passwordIssue(pw: string): string | null {
   if (pw.length < 8) return 'Password must be at least 8 characters.'

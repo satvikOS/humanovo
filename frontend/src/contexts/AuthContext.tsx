@@ -1,5 +1,5 @@
 /**
- * AuthContext — current-user state + login/logout actions.
+ * AuthContext - current-user state + login/logout actions.
  *
  * Lifecycle:
  *   1. On mount: if a token exists in localStorage, call /auth/me to
@@ -12,12 +12,15 @@
  * Loading state: `loading` is true ONLY during the initial bootstrap
  * fetch on app mount. Subsequent login/logout actions don't toggle it
  * (they have their own per-action local state in the consuming page).
+ *
+ * The context object + value type live in `auth-context-internal.ts`
+ * and the `useAuth` hook in `useAuth.ts`. This file exports only
+ * `AuthProvider` so React Refresh's "components-only" rule is
+ * satisfied (no fast-refresh warnings).
  */
 
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -34,18 +37,7 @@ import {
   logout as logoutApi,
   register as registerApi,
 } from '../services/auth'
-
-interface AuthContextValue {
-  user: AuthUser | null
-  loading: boolean  // initial bootstrap only
-  isAuthenticated: boolean
-  login: (req: LoginRequest) => Promise<AuthUser>
-  register: (req: RegisterRequest) => Promise<AuthUser>
-  logout: () => Promise<void>
-  refresh: () => Promise<void>  // re-fetch /auth/me (e.g. after profile edit)
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null)
+import { AuthContext, type AuthContextValue } from './auth-context-internal'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -67,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const me = await getMe()
         if (!cancelled) setUser(me)
       } catch {
-        // /me failed — token invalid or expired server-side. Clear
+        // /me failed - token invalid or expired server-side. Clear
         // local state; the response interceptor in services/api.ts
         // already cleared the token on the 401.
         if (!cancelled) setUser(null)
@@ -122,12 +114,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }), [user, loading, login, register, logout, refresh])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext)
-  if (!ctx) {
-    throw new Error('useAuth() must be used inside <AuthProvider>')
-  }
-  return ctx
 }

@@ -7,6 +7,31 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — Round 11 commit 3: AuthContext react-refresh split
+
+* `AuthContext.tsx` previously exported both a component
+  (`AuthProvider`) and a hook (`useAuth`), which violates React
+  Refresh's "components-only" rule and produced a fast-refresh
+  warning that broke hot-reload during development.
+* Split into three files:
+    - `contexts/auth-context-internal.ts` — the bare `createContext`
+      object + the value type. Internal; consumers don't import this
+      directly.
+    - `contexts/useAuth.ts` — the `useAuth()` hook.
+    - `contexts/AuthContext.tsx` — `AuthProvider` only (the
+      component file now satisfies the React Refresh rule).
+* Three call sites migrated to `import { useAuth } from
+  '../contexts/useAuth'`: `RequireAuth.tsx`, `Login.tsx`,
+  `Signup.tsx`.
+* eslint warnings: 12 → 11 (the fast-refresh warning on
+  AuthContext.tsx is gone). The remaining 4 fast-refresh warnings
+  are all in `pages/GenomicsAnalysis.tsx`, deferred to a future
+  split (one file ships four section components plus shared
+  constants - bigger refactor).
+* tsc clean. No behaviour change for any caller.
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — Round 11 commit 2: public status page
 
 * New `/status` route on the landing site (`landing/src/app/status/

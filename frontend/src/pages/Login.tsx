@@ -14,7 +14,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { FiLogIn, FiAlertCircle } from 'react-icons/fi'
 import HumanovoGlyph from '../components/HumanovoGlyph'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 
 export default function Login() {
   const navigate = useNavigate()
