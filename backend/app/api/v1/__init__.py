@@ -31,6 +31,7 @@ from app.api.v1.endpoints import (
     experiments,
     genomics,
     hypotheses,
+    hypothesis_trace,
     imaging,
     ingestion,
     ingestion_ws,
@@ -66,6 +67,11 @@ router = APIRouter()
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(projects.router, prefix="/projects", tags=["projects"])
 router.include_router(hypotheses.router, prefix="/hypotheses", tags=["hypotheses"])
+# Hypothesis trace + Merkle-anchored audit log replay (the /provenance
+# product surface). The router carries its own /hypotheses prefix so it
+# attaches as /api/v1/hypotheses/{id}/{trace,audit-log} alongside the
+# core CRUD routes from hypotheses.router above.
+router.include_router(hypothesis_trace.router)
 router.include_router(evidence.router, prefix="/evidence", tags=["evidence"])
 router.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
 router.include_router(agents.router, prefix="/agents", tags=["agents"])

@@ -24,12 +24,12 @@ import pytest
 from app.services.data_sources import (
     ACTIVE_SOURCES,
     ALL_SOURCE_CLASSES,
-    DataSourceBase,
-    DataSourceOrchestrator,
     PHASE_1_SOURCES,
     PHASE_2_SOURCES,
     PHASE_3_SOURCES,
     PHASE_4_SOURCES,
+    DataSourceBase,
+    DataSourceOrchestrator,
     get_source_liveness_snapshot,
 )
 

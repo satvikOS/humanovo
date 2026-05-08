@@ -7,6 +7,45 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — Round 10 commit 2: hypothesis trace + audit-log replay endpoints
+
+* New `app/api/v1/endpoints/hypothesis_trace.py` registers two
+  product-surface routes that turn the marketing claims on
+  `/provenance` into real APIs:
+
+  - `GET /api/v1/hypotheses/{id}/trace` — per-claim citation chain
+    walking `evidence_refs` for the hypothesis, returning each linked
+    Evidence row as a `CitationChainEntry` with title / DOI / PMID /
+    URL / publication_date + `(citation_verified, verification_status)`
+    pair (`verified` / `unsupported` / `retracted` / `unknown`).
+    Eager-loads via `selectinload` to avoid N+1 round-trips.
+
+  - `GET /api/v1/hypotheses/{id}/audit-log` — Merkle-anchored event
+    log replay. Filters AuditRecord by `resource_id == hypothesis_id`,
+    runs the existing `AuditService.verify_chain()` on the loaded
+    subset, and returns each entry plus a top-level `chain_intact`
+    boolean + `chain_issues` list for tamper-evidence rendering.
+
+* Both endpoints route through `fetch_owned_or_404` (the parent
+  Project must be owned by the caller). Cross-tenant access returns
+  404 — same pattern as the rest of the project-scoped CRUD surface.
+
+* Pydantic v2 schemas with `model_config = ConfigDict(from_attributes=True)`
+  for ORM-row interop.
+
+* New `tests/test_hypothesis_trace_smoke.py` (4 tests, all passing
+  offline) verifies router registration + schema instantiation +
+  the `_classify_verification` heuristic.
+
+* Round 6 phase 5 sweep evaluated: the remaining ~70 swallowed-
+  exception sites in `app/compute/*` are all graceful-degradation
+  paths (math fallbacks for sphericity / GLCM texture, KDE
+  estimation in plots) where silent-pass is the correct behaviour.
+  Adding `logger.debug` to math fallbacks would just be noise. No
+  changes shipped.
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — Round 10 commit 1: tenant-isolation gap closed
 
 * Migration 021_owner_id_on_platform_entities.py adds `owner_id UUID`
