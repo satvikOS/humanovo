@@ -1,0 +1,33 @@
+name: verify-action-shas
+
+# Catches hallucinated / corrupted SHA pins on third-party actions before
+# the next workflow run dies with "Unable to resolve action ... unable to
+# find version <sha>". Runs on every PR that touches a workflow file +
+# nightly to catch deletions of upstream commits.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/verify-action-shas.py"
+  push:
+    branches: [humanovo, main]
+    paths:
+      - ".github/workflows/**"
+      - "scripts/verify-action-shas.py"
+  schedule:
+    # Daily at 13:17 UTC - off-peak, off the hour.
+    - cron: "17 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5
+      - name: Verify SHA-pinned actions resolve
+        run: python3 scripts/verify-action-shas.py

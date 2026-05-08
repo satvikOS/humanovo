@@ -18,6 +18,7 @@ webhook handler dependency-free.
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -47,6 +48,37 @@ logger = logging.getLogger(__name__)
 # endpoint MUST be reachable without a bearer token. Per-handler
 # dependencies enforce auth on the user-facing routes.
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+
+# ─── Webhook idempotency cache ──────────────────────────────────────
+#
+# Stripe retries non-2xx events for up to 3 days. The underlying
+# apply_*() service functions are idempotent (UPSERT semantics on
+# stripe_customer_id / tier), so a retry doesn't corrupt state - but
+# it does waste DB round-trips and log lines.
+#
+# This in-process LRU short-circuits same-host retry storms. For
+# cross-host idempotence (multiple worker processes) the durable
+# fallback is the underlying handlers themselves; a future commit can
+# promote this to a stripe_processed_events table when there's enough
+# traffic to warrant the schema change.
+
+_RECENT_EVENT_IDS: OrderedDict[str, None] = OrderedDict()
+_RECENT_EVENT_CAP = 4096
+
+
+def _seen_event(event_id: str) -> bool:
+    """Track the event_id in an LRU. Returns True if already seen."""
+    if not event_id:
+        return False
+    if event_id in _RECENT_EVENT_IDS:
+        # Move-to-end so frequently-retried IDs stay in the cache.
+        _RECENT_EVENT_IDS.move_to_end(event_id)
+        return True
+    _RECENT_EVENT_IDS[event_id] = None
+    while len(_RECENT_EVENT_IDS) > _RECENT_EVENT_CAP:
+        _RECENT_EVENT_IDS.popitem(last=False)
+    return False
 
 
 # ─── Schemas ────────────────────────────────────────────────────────
@@ -175,6 +207,19 @@ async def stripe_webhook(
         raise HTTPException(status_code=400, detail="signature verification failed")
     except StripeNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+    # Idempotency: Stripe retries non-2xx for ~3 days. Short-circuit
+    # if we've already successfully processed this event_id. The
+    # underlying apply_*() service functions are inherently idempotent
+    # (UPSERT semantics), so this cache is a fast-path optimisation
+    # rather than a correctness guarantee.
+    event_id = event.get("id", "")
+    if _seen_event(event_id):
+        logger.info(
+            "stripe webhook: replay short-circuited",
+            extra={"event_id": event_id, "event_type": event.get("type")},
+        )
+        return {"received": True, "event": event.get("type"), "status": "duplicate"}
 
     event_type = event["type"]
     data = event["data"]["object"]

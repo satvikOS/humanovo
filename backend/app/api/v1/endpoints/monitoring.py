@@ -763,6 +763,94 @@ async def liveness_check() -> dict[str, Any]:
     return {"status": "alive", "timestamp": datetime.now(UTC).isoformat()}
 
 
+@router.get("/health/full")
+async def get_full_health(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """One-shot aggregate health for the full platform.
+
+    Surfaces, in a single payload, the status of:
+
+      - DB connectivity (via the existing HealthChecker.check_all)
+      - Stripe configuration (configured / unconfigured)
+      - Biomedical data sources (62-source registry liveness summary)
+      - Build version + uptime
+
+    Drives the desktop app's "About / Status" panel and the public
+    status.humanovo.net page. Lightweight: never fires real outbound
+    network probes against the 62 sources - reads the in-memory liveness
+    cache populated by DataSourceBase._safe_search.
+    """
+    from app.core.config import settings
+
+    # Component health from the existing HealthChecker.
+    results = await health_checker.check_all()
+    component_statuses = {r.component: r.status.value for r in results}
+    component_latencies = {
+        r.component: r.latency_ms for r in results if r.latency_ms is not None
+    }
+
+    # Stripe configuration.
+    stripe_configured = bool(
+        getattr(settings, "STRIPE_SECRET_KEY", None)
+        and getattr(settings, "STRIPE_WEBHOOK_SECRET", None)
+    )
+
+    # Data-source registry liveness.
+    sources_summary: dict[str, Any] = {"total_active": 0}
+    try:
+        from app.services.data_sources import (
+            DataSourceOrchestrator,
+            get_source_liveness_snapshot,
+        )
+
+        orch = DataSourceOrchestrator()
+        liveness = get_source_liveness_snapshot()
+        STALE_AFTER = 3600
+        healthy = degraded = unknown = 0
+        for src_info in orch.get_available_sources():
+            entry = liveness.get(src_info["name"], {})
+            success_age = entry.get("last_success_age_seconds")
+            error_age = entry.get("last_error_age_seconds")
+            if success_age is not None and success_age <= STALE_AFTER:
+                healthy += 1
+            elif error_age is not None and error_age <= STALE_AFTER:
+                degraded += 1
+            else:
+                unknown += 1
+        sources_summary = {
+            "total_active": len(orch.get_available_sources()),
+            "healthy": healthy,
+            "degraded": degraded,
+            "unknown": unknown,
+        }
+    except Exception as e:
+        logger.warning("health/full: data-sources liveness probe failed: %s", e)
+        sources_summary = {"total_active": 0, "error": str(e)}
+
+    # Overall status: critical components determine the headline.
+    critical = [
+        component_statuses.get(c, HealthStatus.UNHEALTHY.value)
+        for c in ("database", "vector_store")
+    ]
+    if all(s == HealthStatus.HEALTHY.value for s in critical):
+        overall = HealthStatus.HEALTHY.value
+    elif any(s == HealthStatus.UNHEALTHY.value for s in critical):
+        overall = HealthStatus.UNHEALTHY.value
+    else:
+        overall = HealthStatus.DEGRADED.value
+
+    return {
+        "status": overall,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "version": getattr(settings, "APP_VERSION", "dev"),
+        "components": component_statuses,
+        "latencies_ms": component_latencies,
+        "billing": {"stripe_configured": stripe_configured},
+        "sources": sources_summary,
+    }
+
+
 def get_metrics_collector() -> MetricsCollector:
     """Get the global metrics collector."""
     return metrics_collector

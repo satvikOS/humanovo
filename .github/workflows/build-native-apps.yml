@@ -11,7 +11,7 @@ name: Build Native Apps (Win/Mac/Linux)
 #
 # Build matrix:
 #   - macos-latest    -> .app + .dmg (universal: x86_64 + aarch64)
-#   - windows-latest  -> .exe + .msi
+#   - windows-2025    -> .exe + .msi
 #   - ubuntu-22.04    -> .deb + .AppImage  (22.04 not 24.04 because of
 #                        the libwebkit2gtk-4.1 ABI break)
 #
@@ -74,7 +74,11 @@ jobs:
           - platform: ubuntu-22.04
             args: ''
             label: linux-x86_64
-          - platform: windows-latest
+          # Pinned to windows-2025 explicitly - GitHub announced
+          # windows-latest will redirect to windows-2025-vs2026 starting
+          # 2026-05-12. Pinning avoids surprise toolchain rollover when
+          # the alias flips.
+          - platform: windows-2025
             args: ''
             label: windows-x86_64
 
@@ -260,7 +264,7 @@ jobs:
           forward TAURI_SIGNING_PRIVATE_KEY_PASSWORD  "$_TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
 
       - name: Build native app
-        uses: tauri-apps/tauri-action@2a55bea9ef3e4b04b07a8b5f8ffeed5a5a48ace1  # v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5  # action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Code-signing + Tauri-updater secrets are forwarded to env
