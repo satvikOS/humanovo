@@ -7,6 +7,48 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — Round 10 commit 3: frontend trace UI + audit log viewer
+
+* `services/api.ts` adds two API client methods + four TypeScript
+  interfaces backing the Round 10 commit 2 endpoints:
+
+      api.getHypothesisTrace(id) -> HypothesisTraceResponse
+      api.getHypothesisAuditLog(id, params?) -> AuditLogResponse
+
+  Types: `CitationVerificationStatus`, `CitationChainEntry`,
+  `HypothesisTraceResponse`, `AuditLogEntry`, `AuditLogResponse`.
+
+* `components/HypothesisTrace.tsx` — per-claim citation chip UI.
+  Renders one row per CitationChainEntry with a colour-coded status
+  pill (verified / unsupported / retracted / unknown), the cited
+  paper's title, DOI/PMID/URL link-out, relevance score, and the
+  passage snippet. Shows `N of M citations verified` summary at the
+  top + a "Replay audit log" button that surfaces the parent
+  AuditLogViewer.
+
+* `components/AuditLogViewer.tsx` — Merkle-anchored event log modal.
+  Top-line integrity banner (green if `chain_intact`, red with
+  issue count otherwise), chronological table with sequence /
+  timestamp / event_type / action / duration / cost / truncated
+  record hash. Full hash + previous_hash exposed on hover for
+  byte-for-byte verification against an external snapshot.
+
+* Both components are self-contained and read-only - no edit /
+  replay-execute paths. They render the /provenance promise
+  ("every citation passes a roundtrip" + "every event is in a
+  tamper-evident log") as actual UI a researcher can click through.
+
+* ProjectDetail.tsx integration deferred - the two components are
+  standalone-renderable and the integration point (per-hypothesis
+  drill-down panel? a dedicated /provenance/{id} route?) needs a
+  UX decision before wiring. The components are ready to attach the
+  moment that decision lands.
+
+* tsc clean. eslint clean on the two new components + the api.ts
+  diff. No new lint warnings.
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — Round 10 commit 2: hypothesis trace + audit-log replay endpoints
 
 * New `app/api/v1/endpoints/hypothesis_trace.py` registers two

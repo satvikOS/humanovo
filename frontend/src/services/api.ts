@@ -710,6 +710,67 @@ export interface ProjectDocumentUploadFields {
   knowledge_base?: 'private' | 'common'
 }
 
+// ── Hypothesis trace + audit log replay (Round 10 commit 2) ────────
+//
+// Backend lives in app/api/v1/endpoints/hypothesis_trace.py.
+// /trace returns one CitationChainEntry per evidence_ref on the
+// hypothesis; /audit-log returns the Merkle-anchored event log plus
+// chain integrity flags.
+
+export type CitationVerificationStatus =
+  | 'verified'
+  | 'unsupported'
+  | 'retracted'
+  | 'unknown'
+
+export interface CitationChainEntry {
+  evidence_id: string
+  evidence_type: 'supporting' | 'contradicting' | 'neutral' | string
+  relevance_score: number
+  snippet: string | null
+  title: string | null
+  doi: string | null
+  pmid: string | null
+  url: string | null
+  publication_date: string | null
+  citation_verified: boolean
+  verification_status: CitationVerificationStatus
+}
+
+export interface HypothesisTraceResponse {
+  hypothesis_id: string
+  project_id: string
+  statement: string
+  confidence_score: number
+  supporting_count: number
+  contradiction_count: number
+  citation_chain: CitationChainEntry[]
+  audit_log_url: string
+}
+
+export interface AuditLogEntry {
+  sequence: number
+  timestamp: string
+  event_type: string
+  severity: string
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  details: Record<string, unknown> | null
+  duration_ms: number | null
+  cost_usd: number | null
+  record_hash: string
+  previous_hash: string | null
+}
+
+export interface AuditLogResponse {
+  hypothesis_id: string
+  total_records: number
+  entries: AuditLogEntry[]
+  chain_intact: boolean
+  chain_issues: Array<Record<string, unknown>>
+}
+
 // ── Discovery Sessions (conversational Discovery persistence) ──
 export interface DiscoveryMessageCard {
   kind: 'hypothesis' | 'evidence' | 'entity' | 'kg_subgraph' | 'citation' | string
@@ -977,6 +1038,25 @@ export const api = {
   },
   async deleteProjectDocument(id: string): Promise<void> {
     await apiClient.delete(`/project-documents/${id}`)
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Hypothesis trace + Merkle-anchored audit log replay (the /provenance
+  // product surface, shipped Round 10 commit 2).
+  //   GET /v1/hypotheses/{id}/trace      → per-claim citation chain
+  //   GET /v1/hypotheses/{id}/audit-log  → Merkle event log + chain check
+  // ═══════════════════════════════════════════════════════════════════════
+
+  async getHypothesisTrace(id: string): Promise<HypothesisTraceResponse> {
+    const { data } = await apiClient.get(`/hypotheses/${id}/trace`)
+    return data
+  },
+  async getHypothesisAuditLog(
+    id: string,
+    params?: { limit?: number },
+  ): Promise<AuditLogResponse> {
+    const { data } = await apiClient.get(`/hypotheses/${id}/audit-log`, { params })
+    return data
   },
 
   // ═══════════════════════════════════════════════════════════════════════
