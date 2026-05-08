@@ -7,6 +7,21 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — session close: NEXT_SESSION.md continuation map
+
+* New `docs/planning/NEXT_SESSION.md` is the canonical "where we
+  left off" document for the next agent session.
+* Contents: context + conventions, what's blocked on user, what
+  was completed this session (13 commits, ~9k lines net), Tier 1
+  / 2 / 3 outstanding work with effort estimates, the file map of
+  every module that matters, and a recommended order for picking
+  up cold.
+* Supersedes any older planning docs with overlapping scope. To
+  keep current: when work ships, move items from "Outstanding"
+  to "Completed" + update the **Last commit** header.
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — Round 11 commit 3: AuthContext react-refresh split
 
 * `AuthContext.tsx` previously exported both a component
