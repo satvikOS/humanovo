@@ -7,6 +7,23 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — Round 11 commit 1: trace UI wired into ProjectDetail
+
+* Closes the deferred integration from Round 10 commit 3. Per-paper
+  rows in `ProjectDetail.tsx` now expose a clock icon button between
+  Regenerate and Remove that opens a modal hosting `HypothesisTrace`.
+* `HypothesisTrace`'s `onOpenAuditLog` callback surfaces
+  `AuditLogViewer` on top of the trace modal (nested-modal pattern):
+  user goes from the paper row to the citation chain to the
+  Merkle-anchored event log without leaving the page.
+* New state in ProjectDetail: `traceHypothesisId` +
+  `auditLogHypothesisId`. Modal close reverts cleanly; the
+  AuditLogViewer overlay sits z-50, the trace modal z-40.
+* tsc clean. ESLint 0 errors on ProjectDetail.tsx (pre-existing
+  hooks-deps warning on `_saveResearchPaper` unchanged).
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — Round 10 commit 3: frontend trace UI + audit log viewer
 
 * `services/api.ts` adds two API client methods + four TypeScript

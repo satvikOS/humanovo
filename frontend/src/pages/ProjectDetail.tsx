@@ -5,11 +5,14 @@ import {
   FiChevronRight, FiFileText, FiRefreshCw,
   FiTrash2, FiBook, FiX, FiPrinter,
   FiUpload, FiFile, FiEye, FiEdit2, FiCheck,
+  FiClock,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import api, { Project, apiClient, type ProjectDocumentSummary } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
 import HypothesisDocViewer, { type TranslationalRoadmapDoc } from '../components/HypothesisDocViewer'
+import HypothesisTrace from '../components/HypothesisTrace'
+import AuditLogViewer from '../components/AuditLogViewer'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { useEscapeKey } from '../utils/clickable'
 import { useSavedPapers } from '../hooks/useSavedPapers'
@@ -183,6 +186,14 @@ export default function ProjectDetail() {
   const [paperError, setPaperError] = useState<string | null>(null)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
   const [deletePaperId, setDeletePaperId] = useState<string | null>(null)
+
+  // Hypothesis-trace + audit-log modal state. Both modals are
+  // independently controllable: opening the trace modal sets
+  // traceHypothesisId; the trace modal's "Replay audit log" button
+  // sets auditLogHypothesisId, opening the second modal on top of
+  // the first.
+  const [traceHypothesisId, setTraceHypothesisId] = useState<string | null>(null)
+  const [auditLogHypothesisId, setAuditLogHypothesisId] = useState<string | null>(null)
 
   // Documents state - sourced from /api/v1/project-documents (Round 4f).
   // Project-scoped: load on mount, mutate optimistically on upload/delete,
@@ -1257,6 +1268,13 @@ export default function ProjectDetail() {
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
+                          onClick={(e) => { e.stopPropagation(); setTraceHypothesisId(paper.hypothesis_id) }}
+                          className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                          title="View citation trace + audit log"
+                        >
+                          <FiClock className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={(e) => { e.stopPropagation(); if (hyp) generateHypothesisPaper(hyp) }}
                           disabled={generatingPaper}
                           className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
@@ -1585,6 +1603,50 @@ export default function ProjectDetail() {
           message="This will permanently delete this document. This action cannot be undone."
           onConfirm={confirmDeleteDoc}
           onCancel={() => setDeleteDocId(null)}
+        />
+      )}
+
+      {/* Hypothesis trace modal - opens from the per-paper "Trace" button.
+          Renders the HypothesisTrace component inside a dialog frame; the
+          component's "Replay audit log" button surfaces AuditLogViewer
+          on top of this modal (nested-modal pattern). */}
+      {traceHypothesisId && !auditLogHypothesisId && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-40"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => { if (e.target === e.currentTarget) setTraceHypothesisId(null) }}
+        >
+          <div className="glass-card w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col p-0">
+            <header className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)]">
+              <div>
+                <h2 className="text-base font-semibold text-white">Citation trace</h2>
+                <p className="text-xxs text-[var(--color-text-muted)]">
+                  Per-claim verification chain for hypothesis {traceHypothesisId.slice(0, 8)}&hellip;
+                </p>
+              </div>
+              <button
+                onClick={() => setTraceHypothesisId(null)}
+                aria-label="Close"
+                className="p-1.5 rounded hover:bg-white/5 text-[var(--color-text-muted)] hover:text-white"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </header>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <HypothesisTrace
+                hypothesisId={traceHypothesisId}
+                onOpenAuditLog={() => setAuditLogHypothesisId(traceHypothesisId)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {auditLogHypothesisId && (
+        <AuditLogViewer
+          hypothesisId={auditLogHypothesisId}
+          onClose={() => setAuditLogHypothesisId(null)}
         />
       )}
     </div>
