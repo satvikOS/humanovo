@@ -4,6 +4,7 @@ Discovery API Endpoints
 API endpoints for the disease discovery service.
 """
 
+from typing import Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
@@ -61,6 +62,52 @@ class ComparisonRequest(BaseModel):
     discoveries: list[DiscoveryResult]
 
 
+# ── Response schemas for previously-untyped routes ────────────────────
+# Defined here (not in app/schemas/) to stay local to the endpoint until
+# a router-cross-cutting schema package is established.
+
+class QuickDiscoveryItem(BaseModel):
+    """Trimmed view of `DiscoveryResult` for the quick-discovery list."""
+    title: str
+    description: str
+    confidence: float
+    evidence_strength: str
+    mechanism: str | None = None
+    next_steps: list[str] = []
+
+
+class QuickDiscoveryResponse(BaseModel):
+    disease: str
+    discovery_type: str
+    discoveries: list[QuickDiscoveryItem]
+
+
+class ExplainDiscoveryResponse(BaseModel):
+    discovery_id: str
+    discovery_title: str
+    explanation: str
+    detail_level: str
+
+
+class CompareDiscoveriesResponse(BaseModel):
+    """Comparison output. `analysis` keeps a flexible shape because the
+    service's compare_discoveries() returns a free-form LLM dict; locking
+    it down belongs in a follow-up that types the service layer first."""
+    discoveries_compared: int
+    analysis: dict[str, Any]
+
+
+class DiscoveryTypeInfo(BaseModel):
+    id: str
+    name: str
+    description: str
+    default: bool | None = None
+
+
+class ListDiscoveryTypesResponse(BaseModel):
+    types: list[DiscoveryTypeInfo]
+
+
 # Service instance (lazy initialization)
 _service: DiseaseDiscoveryService | None = None
 
@@ -113,7 +160,7 @@ async def discover_disease_treatments(request: DiscoveryRequest):
         )
 
 
-@router.get("/quick/{disease}")
+@router.get("/quick/{disease}", response_model=QuickDiscoveryResponse)
 async def quick_discovery(
     disease: str,
     discovery_type: DiscoveryType = Query(default=DiscoveryType.TREATMENT),
@@ -157,7 +204,7 @@ async def quick_discovery(
         )
 
 
-@router.post("/explain")
+@router.post("/explain", response_model=ExplainDiscoveryResponse)
 async def explain_discovery(request: ExplanationRequest):
     """
     Get a detailed explanation of a discovery.
@@ -188,7 +235,7 @@ async def explain_discovery(request: ExplanationRequest):
         raise safe_error(exc, code=ErrorCode.PIPELINE_FAILED)
 
 
-@router.post("/compare")
+@router.post("/compare", response_model=CompareDiscoveriesResponse)
 async def compare_discoveries(request: ComparisonRequest):
     """
     Compare multiple discoveries and get recommendations.
@@ -222,7 +269,7 @@ async def compare_discoveries(request: ComparisonRequest):
 # stage based on internal config.
 
 
-@router.get("/discovery-types")
+@router.get("/discovery-types", response_model=ListDiscoveryTypesResponse)
 async def list_discovery_types():
     """List available discovery types."""
     return {

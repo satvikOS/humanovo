@@ -95,10 +95,33 @@ class OptimizationApplyRequest(BaseModel):
     expected_improvement: str = ""
 
 
+# ── Permissive response wrappers ──────────────────────────────────────
+# Many endpoints in this file return whatever the service layer
+# (LearningMemory, CostTracker, BenchmarkRunner) hands back. Those
+# services expose dicts, not Pydantic models, so locking down a tight
+# schema here would lie about the contract. These two wrappers give
+# OpenAPI clients *some* signal — "this returns JSON, fields are flexible
+# and documented in the service" — without forcing a fake schema.
+# Replace with concrete shapes when the underlying services are typed.
+
+class PipelineIntelligencePayload(BaseModel):
+    """Generic data payload from pipeline-intelligence services."""
+    model_config = {"extra": "allow"}
+
+
+class MutationConfirmation(BaseModel):
+    """Generic mutation acknowledgement returned by POST/PUT/DELETE
+    routes that don't ship a richer entity back."""
+    model_config = {"extra": "allow"}
+    status: str | None = None
+    message: str | None = None
+    id: str | None = None
+
+
 # ============== Learning Memory Endpoints ==============
 
 
-@router.get("/learning/stats")
+@router.get("/learning/stats", response_model=PipelineIntelligencePayload)
 async def get_learning_stats():
     """Get comprehensive learning memory statistics."""
     from app.services.learning_memory_service import get_learning_memory
@@ -106,7 +129,7 @@ async def get_learning_stats():
     return await lm.get_learning_stats()
 
 
-@router.get("/learning/model-profiles")
+@router.get("/learning/model-profiles", response_model=PipelineIntelligencePayload)
 async def get_model_profiles(
     stage_number: int | None = None,
     disease: str | None = None,
@@ -132,7 +155,7 @@ async def get_model_profiles(
     ]
 
 
-@router.get("/learning/recommendations")
+@router.get("/learning/recommendations", response_model=PipelineIntelligencePayload)
 async def get_optimization_recommendations():
     """Get learning-based optimization recommendations for the pipeline."""
     from app.services.learning_memory_service import get_learning_memory
@@ -154,7 +177,7 @@ async def get_optimization_recommendations():
     ]
 
 
-@router.post("/learning/feedback")
+@router.post("/learning/feedback", response_model=MutationConfirmation)
 async def submit_feedback(request: FeedbackRequest):
     """Submit feedback on a hypothesis to feed learning memory."""
     from app.services.learning_memory_service import get_learning_memory
@@ -163,7 +186,7 @@ async def submit_feedback(request: FeedbackRequest):
     return {"feedback_id": feedback_id, "status": "recorded"}
 
 
-@router.get("/learning/export")
+@router.get("/learning/export", response_model=PipelineIntelligencePayload)
 async def export_learning_memory():
     """Export learning memory state (backward-compatible with in-memory format)."""
     from app.services.learning_memory_service import get_learning_memory
@@ -174,7 +197,7 @@ async def export_learning_memory():
 # ============== Cost Tracking Endpoints ==============
 
 
-@router.get("/costs/summary")
+@router.get("/costs/summary", response_model=PipelineIntelligencePayload)
 async def get_cost_summary():
     """Get cumulative cost summary across all time with period breakdowns.
 
@@ -186,7 +209,7 @@ async def get_cost_summary():
     return await tracker.get_cumulative_cost()
 
 
-@router.get("/costs/run/{run_id}")
+@router.get("/costs/run/{run_id}", response_model=PipelineIntelligencePayload)
 async def get_run_cost_breakdown(run_id: UUID):
     """Get complete cost breakdown for a discovery run.
 
@@ -198,7 +221,7 @@ async def get_run_cost_breakdown(run_id: UUID):
     return await tracker.get_run_cost_breakdown(run_id)
 
 
-@router.get("/costs/time-series")
+@router.get("/costs/time-series", response_model=PipelineIntelligencePayload)
 async def get_cost_time_series(
     days: int = Query(30, ge=1, le=365),
     granularity: str = Query("day", pattern="^(hour|day|week)$"),
@@ -212,7 +235,7 @@ async def get_cost_time_series(
     return await tracker.get_cost_time_series(days, granularity)
 
 
-@router.get("/costs/model-comparison")
+@router.get("/costs/model-comparison", response_model=PipelineIntelligencePayload)
 async def get_model_cost_comparison():
     """Get cost comparison across all models.
 
@@ -224,7 +247,7 @@ async def get_model_cost_comparison():
     return await tracker.get_model_cost_comparison()
 
 
-@router.get("/costs/stage-heatmap")
+@router.get("/costs/stage-heatmap", response_model=PipelineIntelligencePayload)
 async def get_stage_cost_heatmap():
     """Get stage x model cost heatmap data.
 
@@ -236,7 +259,7 @@ async def get_stage_cost_heatmap():
     return await tracker.get_stage_cost_heatmap()
 
 
-@router.get("/costs/recent")
+@router.get("/costs/recent", response_model=PipelineIntelligencePayload)
 async def get_recent_api_calls(
     limit: int = Query(50, ge=1, le=500),
     run_id: str | None = None,
@@ -250,7 +273,7 @@ async def get_recent_api_calls(
     return await tracker.get_recent_calls(limit, run_id)
 
 
-@router.get("/costs/pricing")
+@router.get("/costs/pricing", response_model=PipelineIntelligencePayload)
 async def get_current_pricing():
     """Get current model pricing configuration."""
     from app.services.cost_tracking_service import BIOMEDICAL_API_PRICING, CURRENT_PRICING
@@ -267,7 +290,7 @@ async def get_current_pricing():
     }
 
 
-@router.post("/costs/sync-pricing")
+@router.post("/costs/sync-pricing", response_model=MutationConfirmation)
 async def sync_pricing_to_db():
     """Sync current pricing to database for audit trail."""
     from app.services.cost_tracking_service import get_cost_tracker
@@ -279,7 +302,7 @@ async def sync_pricing_to_db():
 # ============== Benchmark Endpoints ==============
 
 
-@router.post("/benchmarks/test-cases")
+@router.post("/benchmarks/test-cases", response_model=PipelineIntelligencePayload)
 async def create_benchmark_test_case(request: BenchmarkTestCaseRequest):
     """Create a new benchmark test case.
 
@@ -292,7 +315,7 @@ async def create_benchmark_test_case(request: BenchmarkTestCaseRequest):
     return {"test_case_id": tc_id, "status": "created"}
 
 
-@router.get("/benchmarks/test-cases")
+@router.get("/benchmarks/test-cases", response_model=PipelineIntelligencePayload)
 async def list_benchmark_test_cases(
     disease: str | None = None,
     status: str = "active",
@@ -304,7 +327,7 @@ async def list_benchmark_test_cases(
     return await svc.list_test_cases(disease, status, limit)
 
 
-@router.get("/benchmarks/test-cases/{test_case_id}")
+@router.get("/benchmarks/test-cases/{test_case_id}", response_model=PipelineIntelligencePayload)
 async def get_benchmark_test_case(test_case_id: UUID):
     """Get a benchmark test case with full details."""
     from app.services.benchmark_service import get_benchmark_service
@@ -315,7 +338,7 @@ async def get_benchmark_test_case(test_case_id: UUID):
     return tc
 
 
-@router.put("/benchmarks/test-cases/{test_case_id}")
+@router.put("/benchmarks/test-cases/{test_case_id}", response_model=PipelineIntelligencePayload)
 async def update_benchmark_test_case(test_case_id: UUID, updates: dict):
     """Update a benchmark test case."""
     from app.services.benchmark_service import get_benchmark_service
@@ -326,7 +349,7 @@ async def update_benchmark_test_case(test_case_id: UUID, updates: dict):
     return {"status": "updated"}
 
 
-@router.delete("/benchmarks/test-cases/{test_case_id}")
+@router.delete("/benchmarks/test-cases/{test_case_id}", response_model=MutationConfirmation)
 async def delete_benchmark_test_case(test_case_id: UUID):
     """Delete a benchmark test case."""
     from app.services.benchmark_service import get_benchmark_service
@@ -337,7 +360,7 @@ async def delete_benchmark_test_case(test_case_id: UUID):
     return {"status": "deleted"}
 
 
-@router.post("/benchmarks/runs")
+@router.post("/benchmarks/runs", response_model=PipelineIntelligencePayload)
 async def start_benchmark_run(request: BenchmarkRunRequest):
     """Start a new benchmark run.
 
@@ -359,7 +382,7 @@ async def start_benchmark_run(request: BenchmarkRunRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/benchmarks/runs")
+@router.get("/benchmarks/runs", response_model=PipelineIntelligencePayload)
 async def list_benchmark_runs(limit: int = Query(20, ge=1, le=100)):
     """List recent benchmark runs."""
     from app.services.benchmark_service import get_benchmark_service
@@ -367,7 +390,7 @@ async def list_benchmark_runs(limit: int = Query(20, ge=1, le=100)):
     return await svc.list_benchmark_runs(limit)
 
 
-@router.get("/benchmarks/runs/{run_id}")
+@router.get("/benchmarks/runs/{run_id}", response_model=PipelineIntelligencePayload)
 async def get_benchmark_run(run_id: UUID):
     """Get a benchmark run with all results."""
     from app.services.benchmark_service import get_benchmark_service
@@ -378,7 +401,7 @@ async def get_benchmark_run(run_id: UUID):
     return run
 
 
-@router.get("/benchmarks/trend")
+@router.get("/benchmarks/trend", response_model=PipelineIntelligencePayload)
 async def get_benchmark_trend():
     """Get benchmark score trend over time for line chart visualization."""
     from app.services.benchmark_service import get_benchmark_service
@@ -389,7 +412,7 @@ async def get_benchmark_trend():
 # ============== Pipeline Optimization Endpoints ==============
 
 
-@router.get("/optimization/analysis")
+@router.get("/optimization/analysis", response_model=PipelineIntelligencePayload)
 async def analyze_pipeline():
     """Comprehensive pipeline analysis using all historical data.
 
@@ -401,7 +424,7 @@ async def analyze_pipeline():
     return await opt.analyze_pipeline()
 
 
-@router.get("/optimization/recommendations")
+@router.get("/optimization/recommendations", response_model=PipelineIntelligencePayload)
 async def get_pipeline_optimizations():
     """Generate concrete optimization recommendations based on data analysis.
 
@@ -413,7 +436,7 @@ async def get_pipeline_optimizations():
     return await opt.generate_optimizations()
 
 
-@router.post("/optimization/apply")
+@router.post("/optimization/apply", response_model=MutationConfirmation)
 async def apply_optimization(request: OptimizationApplyRequest):
     """Record an applied optimization for tracking and impact measurement."""
     from app.services.pipeline_optimizer_service import get_pipeline_optimizer
@@ -422,7 +445,7 @@ async def apply_optimization(request: OptimizationApplyRequest):
     return {"optimization_id": opt_id, "status": "applied"}
 
 
-@router.get("/optimization/history")
+@router.get("/optimization/history", response_model=PipelineIntelligencePayload)
 async def get_optimization_history(limit: int = Query(50, ge=1, le=200)):
     """Get optimization history with impact tracking."""
     from app.services.pipeline_optimizer_service import get_pipeline_optimizer
@@ -430,7 +453,7 @@ async def get_optimization_history(limit: int = Query(50, ge=1, le=200)):
     return await opt.get_optimization_history(limit)
 
 
-@router.post("/optimization/{optimization_id}/revert")
+@router.post("/optimization/{optimization_id}/revert", response_model=MutationConfirmation)
 async def revert_optimization(optimization_id: UUID, reason: str = ""):
     """Revert an applied optimization."""
     from app.services.pipeline_optimizer_service import get_pipeline_optimizer
@@ -441,7 +464,7 @@ async def revert_optimization(optimization_id: UUID, reason: str = ""):
     return {"status": "reverted"}
 
 
-@router.get("/optimization/stage-model-matrix")
+@router.get("/optimization/stage-model-matrix", response_model=PipelineIntelligencePayload)
 async def get_stage_model_matrix():
     """Get full stage x model performance matrix for heatmap/table visualization.
 
@@ -456,7 +479,7 @@ async def get_stage_model_matrix():
 # ============== Dashboard Composite Endpoint ==============
 
 
-@router.get("/dashboard")
+@router.get("/dashboard", response_model=PipelineIntelligencePayload)
 async def get_pipeline_intelligence_dashboard():
     """Composite endpoint returning all data needed for the full pipeline intelligence dashboard.
 

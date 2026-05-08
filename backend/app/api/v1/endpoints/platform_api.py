@@ -38,6 +38,29 @@ from app.models.user import User
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=AUTH_REQUIRED)
+
+
+# ── Permissive response wrappers ──────────────────────────────────────
+# Many endpoints in this module return free-form dicts assembled inline
+# from ORM rows. Locking them down to tight schemas would lie about the
+# contract until the underlying read-models are typed. These two
+# permissive wrappers give OpenAPI clients a discoverable schema (the
+# route returns JSON, fields flexible) without forcing premature shape.
+# Replace with concrete schemas as each surface stabilises (the file
+# header notes a planned per-domain split).
+
+class PlatformPayload(BaseModel):
+    """Generic JSON payload from platform-API services."""
+    model_config = {"extra": "allow"}
+
+
+class PlatformMutationConfirmation(BaseModel):
+    """Generic mutation acknowledgement returned by POST/PUT/DELETE
+    routes that don't return a richer entity back."""
+    model_config = {"extra": "allow"}
+    status: str | None = None
+    message: str | None = None
+    id: str | None = None
 # ---------------------------------------------------------------------------
 # In-memory run tracking (will be persisted to DB via learning_memory_service)
 # ---------------------------------------------------------------------------
@@ -570,7 +593,7 @@ async def _load_discovery_runs_from_db(
     return items[offset:offset + limit], len(items)
 
 
-@router.get("/projects/{project_id}/discovery-runs")
+@router.get("/projects/{project_id}/discovery-runs", response_model=PlatformPayload)
 async def list_discovery_runs(
     project_id: UUID,
     status: str | None = Query(None),
@@ -588,7 +611,7 @@ async def list_discovery_runs(
     }
 
 
-@router.get("/discovery-runs")
+@router.get("/discovery-runs", response_model=PlatformPayload)
 async def list_all_discovery_runs(
     status: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
@@ -605,7 +628,7 @@ async def list_all_discovery_runs(
     }
 
 
-@router.post("/projects/{project_id}/discover", status_code=202)
+@router.post("/projects/{project_id}/discover", status_code=202, response_model=PlatformPayload)
 async def start_discovery(
     project_id: UUID,
     body: DiscoverRequest,
@@ -671,7 +694,7 @@ async def start_discovery(
     }
 
 
-@router.get("/discovery-runs/{run_id}")
+@router.get("/discovery-runs/{run_id}", response_model=PlatformPayload)
 async def get_discovery_run(run_id: UUID) -> dict:
     """Get status of a discovery run."""
     run = _active_discovery_runs.get(run_id)
@@ -682,7 +705,7 @@ async def get_discovery_run(run_id: UUID) -> dict:
     return result
 
 
-@router.post("/projects/{project_id}/synthesize", status_code=202)
+@router.post("/projects/{project_id}/synthesize", status_code=202, response_model=PlatformPayload)
 async def start_synthesis(
     project_id: UUID,
     body: SynthesizeRequest,
@@ -741,7 +764,7 @@ async def start_synthesis(
     }
 
 
-@router.delete("/discovery-runs/{run_id}")
+@router.delete("/discovery-runs/{run_id}", response_model=PlatformMutationConfirmation)
 async def cancel_discovery_run(run_id: UUID) -> dict:
     """Cancel a running discovery run."""
     run = _active_discovery_runs.get(run_id)
@@ -764,7 +787,7 @@ async def cancel_discovery_run(run_id: UUID) -> dict:
 # ===================================================================
 
 
-@router.get("/projects/{project_id}/hypotheses")
+@router.get("/projects/{project_id}/hypotheses", response_model=PlatformPayload)
 async def list_project_hypotheses(
     project_id: UUID,
     limit: int = Query(20, ge=1, le=100),
@@ -793,7 +816,7 @@ async def list_project_hypotheses(
     }
 
 
-@router.get("/projects/{project_id}/hypotheses/{hypothesis_id}")
+@router.get("/projects/{project_id}/hypotheses/{hypothesis_id}", response_model=PlatformPayload)
 async def get_project_hypothesis(project_id: UUID, hypothesis_id: UUID) -> dict:
     """Get a specific hypothesis by ID."""
     for run_id, hypotheses in _completed_hypotheses.items():
@@ -807,7 +830,7 @@ async def get_project_hypothesis(project_id: UUID, hypothesis_id: UUID) -> dict:
     raise HTTPException(status_code=404, detail=f"Hypothesis {hypothesis_id} not found")
 
 
-@router.post("/hypotheses/{hypothesis_id}/feedback", status_code=201)
+@router.post("/hypotheses/{hypothesis_id}/feedback", status_code=201, response_model=PlatformMutationConfirmation)
 async def submit_hypothesis_feedback(hypothesis_id: UUID, body: FeedbackRequest) -> dict:
     """Submit feedback on a hypothesis."""
     feedback_id = str(uuid4())
@@ -844,7 +867,7 @@ async def submit_hypothesis_feedback(hypothesis_id: UUID, body: FeedbackRequest)
     }
 
 
-@router.post("/hypotheses/{hypothesis_id}/generate-paper", status_code=202)
+@router.post("/hypotheses/{hypothesis_id}/generate-paper", status_code=202, response_model=PlatformMutationConfirmation)
 async def generate_hypothesis_paper(
     hypothesis_id: UUID, background_tasks: BackgroundTasks
 ) -> dict:
@@ -863,7 +886,7 @@ async def generate_hypothesis_paper(
 # ===================================================================
 
 
-@router.get("/projects/{project_id}/synthesis-runs")
+@router.get("/projects/{project_id}/synthesis-runs", response_model=PlatformPayload)
 async def list_synthesis_runs(
     project_id: UUID,
     limit: int = Query(20, ge=1, le=100),
@@ -892,7 +915,7 @@ async def list_synthesis_runs(
     }
 
 
-@router.get("/projects/{project_id}/synthesis-runs/{run_id}")
+@router.get("/projects/{project_id}/synthesis-runs/{run_id}", response_model=PlatformPayload)
 async def get_synthesis_run(project_id: UUID, run_id: UUID) -> dict:
     run = _active_synthesis_runs.get(run_id)
     if not run:
@@ -910,7 +933,7 @@ async def get_synthesis_run(project_id: UUID, run_id: UUID) -> dict:
     }
 
 
-@router.post("/projects/{project_id}/synthesis-runs/{run_id}/reformat")
+@router.post("/projects/{project_id}/synthesis-runs/{run_id}/reformat", response_model=PlatformPayload)
 async def reformat_synthesis(
     project_id: UUID, run_id: UUID, body: ReformatRequest
 ) -> dict:
@@ -929,7 +952,7 @@ async def reformat_synthesis(
     }
 
 
-@router.post("/projects/{project_id}/synthesis-runs/{run_id}/export")
+@router.post("/projects/{project_id}/synthesis-runs/{run_id}/export", response_model=PlatformPayload)
 async def export_synthesis(
     project_id: UUID, run_id: UUID, body: ExportRequest
 ) -> JSONResponse:
@@ -949,7 +972,7 @@ async def export_synthesis(
 # ===================================================================
 
 
-@router.post("/projects/{project_id}/imaging/upload", status_code=201)
+@router.post("/projects/{project_id}/imaging/upload", status_code=201, response_model=PlatformPayload)
 async def upload_imaging(
     project_id: UUID, file: UploadFile = File(...)
 ) -> dict:
@@ -974,7 +997,7 @@ async def upload_imaging(
     }
 
 
-@router.get("/projects/{project_id}/imaging")
+@router.get("/projects/{project_id}/imaging", response_model=PlatformPayload)
 async def list_imaging_records(
     project_id: UUID,
     limit: int = Query(20, ge=1, le=100),
@@ -1026,7 +1049,7 @@ async def list_imaging_records(
     }
 
 
-@router.get("/projects/{project_id}/imaging/{record_id}")
+@router.get("/projects/{project_id}/imaging/{record_id}", response_model=PlatformPayload)
 async def get_imaging_record(
     project_id: UUID, record_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> dict:
@@ -1061,7 +1084,7 @@ async def get_imaging_record(
     }
 
 
-@router.post("/projects/{project_id}/imaging/{record_id}/link-hypothesis")
+@router.post("/projects/{project_id}/imaging/{record_id}/link-hypothesis", response_model=PlatformMutationConfirmation)
 async def link_hypothesis_to_imaging(
     project_id: UUID, record_id: UUID, body: LinkHypothesisRequest,
     db: AsyncSession = Depends(get_db),
@@ -1104,7 +1127,7 @@ async def link_hypothesis_to_imaging(
     }
 
 
-@router.delete("/projects/{project_id}/imaging/{record_id}")
+@router.delete("/projects/{project_id}/imaging/{record_id}", response_model=PlatformMutationConfirmation)
 async def delete_imaging_record(
     project_id: UUID, record_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> dict:
@@ -1125,7 +1148,7 @@ async def delete_imaging_record(
 # ===================================================================
 
 
-@router.get("/dev/pgvector/stats")
+@router.get("/dev/pgvector/stats", response_model=PlatformPayload)
 async def pgvector_stats() -> dict:
     try:
         from app.knowledge.vector_store import get_vector_store
@@ -1146,7 +1169,7 @@ async def pgvector_stats() -> dict:
         }
 
 
-@router.post("/dev/pgvector/search")
+@router.post("/dev/pgvector/search", response_model=PlatformPayload)
 async def pgvector_search(body: PgvectorSearchRequest) -> list:
     try:
         from app.knowledge.vector_store import get_vector_store
@@ -1158,7 +1181,7 @@ async def pgvector_search(body: PgvectorSearchRequest) -> list:
         return []
 
 
-@router.post("/dev/pgvector/similarity-test")
+@router.post("/dev/pgvector/similarity-test", response_model=PlatformPayload)
 async def pgvector_similarity_test(body: PgvectorSimilarityTestRequest) -> dict:
     """Run similarity search using both Cohere and OpenAI embeddings and compare results.
 
@@ -1217,7 +1240,7 @@ async def pgvector_similarity_test(body: PgvectorSimilarityTestRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Similarity test failed: {e}")
 
 
-@router.delete("/dev/pgvector/entries")
+@router.delete("/dev/pgvector/entries", response_model=PlatformMutationConfirmation)
 async def pgvector_delete_entries(body: PgvectorDeleteRequest) -> dict:
     """Delete specific vector entries by their IDs."""
     try:
@@ -1233,7 +1256,7 @@ async def pgvector_delete_entries(body: PgvectorDeleteRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
 
 
-@router.post("/dev/pgvector/entries/re-embed")
+@router.post("/dev/pgvector/entries/re-embed", response_model=PlatformMutationConfirmation)
 async def pgvector_reembed(body: PgvectorDeleteRequest) -> dict:
     """Re-embed specified entries by regenerating their embeddings."""
     try:
@@ -1295,7 +1318,7 @@ async def pgvector_reembed(body: PgvectorDeleteRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Re-embed failed: {e}")
 
 
-@router.post("/dev/pgvector/entries/refresh-ttl")
+@router.post("/dev/pgvector/entries/refresh-ttl", response_model=PlatformMutationConfirmation)
 async def pgvector_refresh_ttl(body: PgvectorDeleteRequest) -> dict:
     """Refresh TTL timestamps for specified entries by updating their created_at."""
     try:
@@ -1317,7 +1340,7 @@ async def pgvector_refresh_ttl(body: PgvectorDeleteRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Refresh TTL failed: {e}")
 
 
-@router.post("/dev/pgvector/maintenance/ttl-cleanup")
+@router.post("/dev/pgvector/maintenance/ttl-cleanup", response_model=PlatformMutationConfirmation)
 async def pgvector_ttl_cleanup() -> dict:
     """Delete vector entries whose TTL has expired (older than 90 days by default)."""
     try:
@@ -1338,7 +1361,7 @@ async def pgvector_ttl_cleanup() -> dict:
         raise HTTPException(status_code=500, detail=f"TTL cleanup failed: {e}")
 
 
-@router.post("/dev/pgvector/maintenance/reindex")
+@router.post("/dev/pgvector/maintenance/reindex", response_model=PlatformMutationConfirmation)
 async def pgvector_reindex() -> dict:
     """Run REINDEX on the vector embedding indexes."""
     try:
@@ -1365,7 +1388,7 @@ async def pgvector_reindex() -> dict:
         raise HTTPException(status_code=500, detail=f"Reindex failed: {e}")
 
 
-@router.post("/dev/pgvector/maintenance/purge-source")
+@router.post("/dev/pgvector/maintenance/purge-source", response_model=PlatformMutationConfirmation)
 async def pgvector_purge_source(body: PgvectorPurgeSourceRequest) -> dict:
     """Delete all vector entries matching a given source name."""
     try:
@@ -1387,7 +1410,7 @@ async def pgvector_purge_source(body: PgvectorPurgeSourceRequest) -> dict:
         raise HTTPException(status_code=500, detail=f"Purge source failed: {e}")
 
 
-@router.post("/dev/pgvector/maintenance/vacuum")
+@router.post("/dev/pgvector/maintenance/vacuum", response_model=PlatformMutationConfirmation)
 async def pgvector_vacuum() -> dict:
     """Run VACUUM ANALYZE on the vector_embeddings table."""
     try:
@@ -1406,7 +1429,7 @@ async def pgvector_vacuum() -> dict:
         raise HTTPException(status_code=500, detail=f"Vacuum failed: {e}")
 
 
-@router.get("/dev/pgvector/maintenance/status")
+@router.get("/dev/pgvector/maintenance/status", response_model=PlatformPayload)
 async def pgvector_maintenance_status() -> dict:
     """Query actual maintenance history from PostgreSQL system catalogs."""
     try:
@@ -1462,7 +1485,7 @@ async def pgvector_maintenance_status() -> dict:
 # ===================================================================
 
 
-@router.get("/billing/summary")
+@router.get("/billing/summary", response_model=PlatformPayload)
 async def billing_summary(
     project_id: str | None = Query(None),
 ) -> dict:
@@ -1471,7 +1494,7 @@ async def billing_summary(
     return await tracker.get_summary(project_id=project_id)
 
 
-@router.get("/billing/daily")
+@router.get("/billing/daily", response_model=PlatformPayload)
 async def billing_daily(
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
@@ -1488,7 +1511,7 @@ async def billing_daily(
     )
 
 
-@router.get("/billing/breakdown")
+@router.get("/billing/breakdown", response_model=PlatformPayload)
 async def billing_breakdown(
     period: str = Query("30d"),
     group_by: str = Query("model"),
@@ -1498,7 +1521,7 @@ async def billing_breakdown(
     return await tracker.get_model_breakdown(period=period)
 
 
-@router.get("/billing/projects")
+@router.get("/billing/projects", response_model=PlatformPayload)
 async def billing_projects(
     period: str = Query("30d"),
 ) -> list:
@@ -1507,7 +1530,7 @@ async def billing_projects(
     return await tracker.get_project_costs(period=period)
 
 
-@router.get("/billing/usage")
+@router.get("/billing/usage", response_model=PlatformPayload)
 async def billing_usage(
     db: AsyncSession = Depends(get_db),
     project_id: str | None = Query(None),
@@ -1598,7 +1621,7 @@ async def billing_usage_export(
     )
 
 
-@router.get("/billing/budgets")
+@router.get("/billing/budgets", response_model=PlatformPayload)
 async def list_budgets(db: AsyncSession = Depends(get_db)) -> list:
     from app.models.platform_entities import BillingBudget
     result = await db.execute(
@@ -1608,7 +1631,7 @@ async def list_budgets(db: AsyncSession = Depends(get_db)) -> list:
     return [b.to_dict() for b in budgets]
 
 
-@router.post("/billing/budgets", status_code=201)
+@router.post("/billing/budgets", status_code=201, response_model=PlatformPayload)
 async def create_budget(body: BudgetCreate, db: AsyncSession = Depends(get_db)) -> dict:
     from app.models.platform_entities import BillingBudget
     budget = BillingBudget(
@@ -1625,7 +1648,7 @@ async def create_budget(body: BudgetCreate, db: AsyncSession = Depends(get_db)) 
     return budget.to_dict()
 
 
-@router.put("/billing/budgets/{budget_id}")
+@router.put("/billing/budgets/{budget_id}", response_model=PlatformPayload)
 async def update_budget(
     budget_id: UUID, body: BudgetCreate, db: AsyncSession = Depends(get_db)
 ) -> dict:
@@ -1646,7 +1669,7 @@ async def update_budget(
     return budget.to_dict()
 
 
-@router.delete("/billing/budgets/{budget_id}")
+@router.delete("/billing/budgets/{budget_id}", response_model=PlatformMutationConfirmation)
 async def delete_budget(budget_id: UUID, db: AsyncSession = Depends(get_db)) -> dict:
     from app.models.platform_entities import BillingBudget
     result = await db.execute(
@@ -1659,7 +1682,7 @@ async def delete_budget(budget_id: UUID, db: AsyncSession = Depends(get_db)) -> 
     return {"id": budget_id, "deleted": True}
 
 
-@router.get("/billing/notifications")
+@router.get("/billing/notifications", response_model=PlatformPayload)
 async def list_billing_notifications(
     db: AsyncSession = Depends(get_db),
     unread_only: bool = Query(False),
@@ -1678,7 +1701,7 @@ async def list_billing_notifications(
     }
 
 
-@router.post("/billing/notifications/{notification_id}/read")
+@router.post("/billing/notifications/{notification_id}/read", response_model=PlatformMutationConfirmation)
 async def mark_notification_read(
     notification_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> dict:

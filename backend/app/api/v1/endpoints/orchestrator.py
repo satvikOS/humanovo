@@ -95,6 +95,73 @@ class DiscoveryStatusResponse(BaseModel):
     top_hypotheses: list[dict] = []
 
 
+# ── Response schemas for previously-untyped routes ────────────────────
+# Kept inline to minimise churn — promote to app/schemas/ when a third
+# router needs the same shapes.
+
+class StatusMessageResponse(BaseModel):
+    """Generic { status, message } payload for control transitions
+    (/pause, /resume, /stop, /paper/generate, /save-to-project)."""
+    status: str
+    message: str
+
+
+class HypothesisListItem(BaseModel):
+    """One row from /hypotheses. Mirrors the dict the orchestrator
+    serialises today; widening this requires touching the Hypothesis
+    model on the agent side, not the API."""
+    id: str
+    disease: str
+    hypothesis_type: str
+    title: str
+    description: str
+    mechanism: str | None = None
+    confidence: float
+    contributing_agents: list[str] = []
+    model_used: str | None = None
+    external_factors: list[dict[str, Any]] = []
+    created_at: str
+    validated: bool = False
+    evidence_summary: list[Any] = []
+
+
+class HypothesesListResponse(BaseModel):
+    hypotheses: list[HypothesisListItem]
+
+
+class PaperStatusResponse(BaseModel):
+    """Async paper-generation status. `paper_html` is set on done,
+    `error` on failed; both unset while generating/idle."""
+    status: str
+    paper_html: str | None = None
+    error: str | None = None
+
+
+class CancelPaperResponse(BaseModel):
+    status: str
+
+
+class StatsBag(BaseModel):
+    """Permissive wrapper for service-layer stats dicts whose concrete
+    schema lives in the underlying service (LearningMemory, TokenPool).
+    `extra='allow'` keeps the payload intact through Pydantic so we
+    don't need to mirror those services here."""
+    model_config = {"extra": "allow"}
+    error: str | None = None
+
+
+class OrchestratorHealthResponse(BaseModel):
+    status: str
+    models: dict[str, Any]
+    connected_count: int
+    total_models: int
+    orchestrator_initialized: bool
+
+
+class ChatResponse(BaseModel):
+    response: str
+
+
 # Track auto-created project per discovery run
 _auto_project_id: str | None = None
 _auto_project_name: str | None = None
@@ -275,7 +342,7 @@ async def start_discovery_endpoint(request: StartDiscoveryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/pause")
+@router.post("/pause", response_model=StatusMessageResponse)
 async def pause_discovery():
     """Pause the current discovery process."""
     global _current_orchestrator
@@ -299,7 +366,7 @@ async def pause_discovery():
     return {"status": "paused", "message": "Discovery paused"}
 
 
-@router.post("/resume")
+@router.post("/resume", response_model=StatusMessageResponse)
 async def resume_discovery():
     """Resume a paused discovery process."""
     global _current_orchestrator
@@ -323,7 +390,7 @@ async def resume_discovery():
     return {"status": "running", "message": "Discovery resumed"}
 
 
-@router.post("/stop")
+@router.post("/stop", response_model=StatusMessageResponse)
 async def stop_discovery():
     """Stop the current discovery process."""
     global _current_orchestrator
@@ -391,7 +458,7 @@ async def get_discovery_status():
         return DiscoveryStatusResponse(state="idle")
 
 
-@router.get("/hypotheses")
+@router.get("/hypotheses", response_model=HypothesesListResponse)
 async def get_hypotheses(
     min_confidence: float = 0.0,
     limit: int = 100,
@@ -578,8 +645,8 @@ async def generate_research_paper_markdown():
 
 
 # Frontend (api.ts) hits /paper/status — keep both shapes alive.
-@router.get("/paper/status")
-@router.get("/paper-status")
+@router.get("/paper/status", response_model=PaperStatusResponse)
+@router.get("/paper-status", response_model=PaperStatusResponse)
 async def get_paper_status():
     """Check the status of async paper generation."""
     global _paper_status, _paper_result, _paper_error
@@ -594,7 +661,7 @@ async def get_paper_status():
     return response
 
 
-@router.post("/cancel-paper")
+@router.post("/cancel-paper", response_model=CancelPaperResponse)
 async def cancel_paper_generation():
     """Cancel the in-flight async paper generation task, if any.
 
@@ -752,7 +819,7 @@ async def save_discovery_to_project(project_name: str = None):
     }
 
 
-@router.get("/learning-stats")
+@router.get("/learning-stats", response_model=StatsBag)
 async def get_learning_stats():
     """Get learning memory statistics."""
     global _current_orchestrator
@@ -763,7 +830,7 @@ async def get_learning_stats():
     return _current_orchestrator.memory.get_stats()
 
 
-@router.get("/token-pool-stats")
+@router.get("/token-pool-stats", response_model=StatsBag)
 async def get_token_pool_stats():
     """Get token pool statistics across all models."""
     global _current_orchestrator
@@ -774,7 +841,7 @@ async def get_token_pool_stats():
     return _current_orchestrator.token_pool.get_stats()
 
 
-@router.get("/health")
+@router.get("/health", response_model=OrchestratorHealthResponse)
 async def orchestrator_health():
     """
     Health check for the AI pipeline.
@@ -1060,7 +1127,7 @@ async def _retrieve_rag_context(query: str) -> str:
     return "\n\n".join(rag_chunks[:10]) if rag_chunks else ""
 
 
-@router.post("/chat")
+@router.post("/chat", response_model=ChatResponse)
 async def constant_chat(request: ChatRequest):
     """
     Constant AI chat assistant — uses AWS Bedrock Claude Opus 4.6 (primary)
