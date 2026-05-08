@@ -57,6 +57,10 @@ jobs:
 
       - name: Lint workflows
         run: |
-          # -color always so the CI log is readable. -ignore filters out
-          # known-noisy rules; tighten as we clean up.
-          actionlint -color always
+          # actionlint's -color flag is a boolean (no value). The
+          # earlier `-color always` invocation made actionlint treat
+          # `always` as a workflow file path and fail. GitHub Actions
+          # already strips ANSI on its log viewer when needed; -color
+          # with no argument forces colour output for terminal-side
+          # debugging.
+          actionlint -color

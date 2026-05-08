@@ -179,6 +179,11 @@ that ships.
   matrices, shell-injection risk in `run:` blocks that interpolate
   `${{ github.event.* }}`, and the SHA-pin-loses-ref-name pitfall
   documented below.
+* **CI failure catalogue** — `docs/planning/CI_GOTCHAS.md` records
+  every CI failure we've hit, the root cause, and the durable fix.
+  When a failure happens, the first thing to check is whether the
+  symptom matches one of the entries there before re-deriving the
+  fix from the runner log.
 * **Secret scanning** runs via `mcp__github__run_secret_scanning` on
   the repo. Pre-commit hook (`scripts/precommit-secret-scan.sh` —
   TODO if not present) blocks `aws_*_key`, `sk_*_*` (Stripe), `eyJ`

@@ -32,11 +32,12 @@ help:
 	@echo "  make test        # backend pytest (offline-tolerant)"
 	@echo "  make format      # auto-fix backend + frontend formatting"
 	@echo "  make ci          # everything CI runs, in order"
+	@echo "  make ci-full     # ci + landing build"
 	@echo "  make ci-actions  # SHA-pin verifier + actionlint only"
 	@echo "  make build-landing # next build for the landing page"
 	@echo ""
 	@echo "Per-tree targets: lint-backend, lint-frontend, lint-actions,"
-	@echo "test-backend, format-backend, format-frontend"
+	@echo "test-backend, format-backend, format-frontend, lint-landing"
 
 # ─── Composite targets ──────────────────────────────────────────────
 
@@ -55,6 +56,10 @@ format: format-backend format-frontend
 .PHONY: ci
 ci: lint test
 	@echo "✓ CI suite passed."
+
+.PHONY: ci-full
+ci-full: lint test build-landing
+	@echo "✓ Full CI suite (incl. landing build) passed."
 
 .PHONY: ci-actions
 ci-actions: lint-actions

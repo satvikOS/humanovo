@@ -7,6 +7,25 @@ project continuity: a future engineer (or a future agent session)
 should be able to read this file and reconstruct what's been audited,
 what's been fixed, and what's deliberately left as follow-up.
 
+## 2026-05-08 — fix(ci) actionlint -color flag + CI_GOTCHAS.md catalogue
+
+* `actionlint -color always` invocation made actionlint treat
+  `always` as a workflow-file path argument (the flag is a boolean,
+  not a string-valued option). Fixed to `actionlint -color`.
+* New `docs/planning/CI_GOTCHAS.md` records every CI failure we've
+  hit, the root cause, and the durable fix. Seven entries to date:
+  hallucinated SHA, ref-name-as-config, cache 400, annotated-tag
+  SHA vs commit SHA, hallucinated runner label, download-script
+  mkdir, boolean-flag mistaken argument. Future agent sessions
+  should check this file before re-deriving a fix from a runner
+  log.
+* SECURITY.md cross-references CI_GOTCHAS.md under § Build pipeline
+  ▸ workflow contract.
+* `Makefile` gains `make ci-full` (CI suite + landing build) and the
+  help text reflects the new target.
+
+Commits: bundle to be created.
+
 ## 2026-05-08 — fix(ci) actionlint mkdir + windows-2025 revert + Makefile
 
 * `actionlint` workflow was failing because the `download-actionlint.bash`
