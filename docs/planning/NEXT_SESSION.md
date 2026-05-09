@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `136beb9`
+**Last touched:** 2026-05-09 · **Branch:** `humanovo` · **Last commit:** `0835393`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -174,6 +174,26 @@ the file current.
   `pages/genomics/{Variants,Expression,Pathway,Drug}.tsx` plus a
   shared `pages/genomics/constants.ts`. Keep `GenomicsAnalysis.tsx`
   as the orchestrator/router.
+
+### A3 Phase 1 + Visual KG — DONE (commit `0835393`)
+* PostgresGraphStore mirroring the GraphStore interface against the
+  existing `knowledge_graph_nodes` / `knowledge_graph_edges` tables;
+  recursive CTE for neighbourhoods + shortest-path search.
+* Migration 023 adds `embedding VECTOR(1024)` + HNSW(cosine) index on
+  KG nodes, plus `owner_id` to both KG tables (NULL=common,
+  set=private) with FK ON DELETE SET NULL.
+* Compact `<KnowledgeGraphView>` component (canvas + circular
+  layout) embeddable via `fetchScope` / `fetchHypothesisId` /
+  `fetchPaperId` / direct `{nodes,edges}` props.
+* Wired into 3 places: ScopedKnowledgeGraphPanel at the top of
+  /knowledge-graph (Private/Common/All toggle), HypothesisReview's
+  new "Knowledge Graph" section, ProjectDetail paper viewer's
+  collapsible KG strip above the iframe.
+* 4 new endpoints: `/knowledge-graph/scope/{scope}`, `.../hypothesis/{id}`,
+  `.../paper/{id}`. Subgraph endpoints use a regex tokeniser as a
+  stand-in for NER; proper extraction pipeline lands in Phase 2.
+* No existing callers switched yet — Phase 2 of the A3 plan
+  (dual-write + backfill) is the next move.
 
 ### A3. Round 5: Neo4j → pgvector + Postgres relations refactor
 * ~3 days of work. Removes Neo4j from the deploy entirely.
