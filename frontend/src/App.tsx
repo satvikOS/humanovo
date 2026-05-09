@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
 import RouteGatePlaceholder from './components/RouteGatePlaceholder'
 import DeepLinkRouter from './components/DeepLinkRouter'
+import UpdateChecker from './components/UpdateChecker'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import { isHiddenInV1 } from './utils/featureFlags'
@@ -117,6 +118,10 @@ function App() {
           (Stripe redirects, in-app links, etc.) and navigates the
           React Router accordingly. Renderless; web-mode no-op. */}
       <DeepLinkRouter />
+      {/* Checks for app updates ~3 s after launch; renders a small
+          bottom-right banner when one is available with a Restart-
+          to-install CTA. Native-only via isNativeApp(). */}
+      <UpdateChecker />
       <Routes>
       {/* Marketing lives at https://www.humanovo.net/ — the in-app /welcome,
           /pricing, /docs routes were removed (commit following this one)
