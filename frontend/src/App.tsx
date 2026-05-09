@@ -6,18 +6,26 @@ import ErrorBoundary from './components/ErrorBoundary'
 import RouteGatePlaceholder from './components/RouteGatePlaceholder'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
-import ProjectDetail from './pages/ProjectDetail'
 import { isHiddenInV1 } from './utils/featureFlags'
 
-// Eagerly-loaded pages: landing surfaces users hit on cold-start. Keeping
-// them in the main bundle avoids a network round-trip on first paint.
+// Eagerly-loaded pages: cold-start surfaces users hit immediately
+// (Dashboard, Projects, Search, Agents, Evidence). Keeping them in
+// the main bundle avoids a network round-trip on first paint.
 import Evidence from './pages/Evidence'
-import Settings from './pages/Settings'
-import Notebook from './pages/Notebook'
 import Search from './pages/Search'
-import Timeline from './pages/Timeline'
 import Agents from './pages/Agents'
-import DataManager from './pages/DataManager'
+
+// Stage 4 bundle audit (PATH_TO_100_PERCENT.md): pages users only
+// reach via deep navigation move to React.lazy so they don't block
+// first paint. ProjectDetail, Settings, Notebook, Timeline, and
+// DataManager were eagerly imported pre-Stage-4 even though most
+// sessions never touch them — collectively a sizeable fraction of
+// the 2 MB main bundle.
+const ProjectDetail = lazy(() => import('./pages/ProjectDetail'))
+const SettingsPage = lazy(() => import('./pages/Settings'))
+const Notebook = lazy(() => import('./pages/Notebook'))
+const Timeline = lazy(() => import('./pages/Timeline'))
+const DataManager = lazy(() => import('./pages/DataManager'))
 
 // Lazy-loaded pages: heavy (recharts, canvas, MATLAB interpreter, 3D),
 // or rarely the entry point. Split into their own chunks so we don't
@@ -111,7 +119,7 @@ function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
         <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />
-        <Route path="projects/:projectId" element={<PageWrapper><ProjectDetail /></PageWrapper>} />
+        <Route path="projects/:projectId" element={<LazyPageWrapper><ProjectDetail /></LazyPageWrapper>} />
         {/* the v2 platform — integrated project workspace routes */}
         <Route path="projects/:projectId/workspace" element={<LazyPageWrapper><ProjectWorkspace /></LazyPageWrapper>} />
         <Route path="projects/:projectId/discover" element={<LazyPageWrapper><DiscoveryRunner /></LazyPageWrapper>} />
@@ -126,17 +134,17 @@ function App() {
         <Route path="matlab-compute" element={<LegacyComputeRedirect />} />
         <Route path="workbench" element={<V1Gate path="/workbench"><LazyPageWrapper><Workbench /></LazyPageWrapper></V1Gate>} />
         <Route path="anatomy" element={<V1Gate path="/anatomy"><LazyPageWrapper><HumanAnatomy /></LazyPageWrapper></V1Gate>} />
-        <Route path="notebook" element={<PageWrapper><Notebook /></PageWrapper>} />
+        <Route path="notebook" element={<LazyPageWrapper><Notebook /></LazyPageWrapper>} />
         <Route path="agents" element={<PageWrapper><Agents /></PageWrapper>} />
         <Route path="agents-chat-mode" element={<LazyPageWrapper><AgentsChatMode /></LazyPageWrapper>} />
-        <Route path="timeline" element={<PageWrapper><Timeline /></PageWrapper>} />
+        <Route path="timeline" element={<LazyPageWrapper><Timeline /></LazyPageWrapper>} />
         <Route path="search" element={<PageWrapper><Search /></PageWrapper>} />
-        <Route path="settings" element={<PageWrapper><Settings /></PageWrapper>} />
+        <Route path="settings" element={<LazyPageWrapper><SettingsPage /></LazyPageWrapper>} />
         <Route path="literature-review" element={<LazyPageWrapper><LiteratureReview /></LazyPageWrapper>} />
         <Route path="citation-manager" element={<LazyPageWrapper><CitationManager /></LazyPageWrapper>} />
         <Route path="experiment-tracker" element={<V1Gate path="/experiment-tracker"><LazyPageWrapper><ExperimentTracker /></LazyPageWrapper></V1Gate>} />
         <Route path="data-visualization" element={<LazyPageWrapper><DataVisualization /></LazyPageWrapper>} />
-        <Route path="data-manager" element={<PageWrapper><DataManager /></PageWrapper>} />
+        <Route path="data-manager" element={<LazyPageWrapper><DataManager /></LazyPageWrapper>} />
         <Route path="collaboration" element={<V1Gate path="/collaboration"><LazyPageWrapper><Collaboration /></LazyPageWrapper></V1Gate>} />
         <Route path="clinical-trials" element={<V1Gate path="/clinical-trials"><LazyPageWrapper><ClinicalTrials /></LazyPageWrapper></V1Gate>} />
         <Route path="genomics" element={<LazyPageWrapper><GenomicsAnalysis /></LazyPageWrapper>} />
