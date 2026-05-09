@@ -27,6 +27,22 @@ export default function CloseGuardManager() {
     let cancelled = false
     let unlisten: (() => void) | null = null
 
+    // Force-exit helper. Lazy-imported so web-only builds don't pull
+    // it in. Calling exit(0) here is a renderer-side belt over the
+    // Rust-side CloseRequested/Destroyed handlers in lib.rs — users
+    // reported humanovo hanging in the tray after X click on Windows;
+    // adding a JS exit guarantees the process terminates the moment
+    // the close-guard's prevention chain falls through to "let it
+    // close".
+    const forceExit = async () => {
+      try {
+        const { exit } = await import('@tauri-apps/plugin-process')
+        await exit(0)
+      } catch (err) {
+        console.warn('CloseGuardManager: forceExit failed', err)
+      }
+    }
+
     void (async () => {
       try {
         const winMod = await import('@tauri-apps/api/window')
@@ -34,10 +50,14 @@ export default function CloseGuardManager() {
         const handler = await w.onCloseRequested(async (event) => {
           const reasons = currentGuards()
           if (reasons.length === 0) {
-            // Nothing to guard. Stamp the clean-shutdown marker so the
-            // next launch's diagnostics doesn't claim an unclean exit,
-            // then let the close go through.
+            // Nothing to guard. Stamp the clean-shutdown marker, then
+            // explicitly exit the process. Don't rely on Tauri's
+            // default destroy chain to terminate the runtime — the
+            // single-instance plugin keeps the runtime alive after
+            // window destroy on Windows, which left users with a
+            // zombie humanovo that only Task Manager could end.
             markClean()
+            await forceExit()
             return
           }
 
@@ -58,11 +78,12 @@ export default function CloseGuardManager() {
             cancelLabel: 'Stay',
           })
           if (ok && !cancelled) {
-            // User confirmed. Re-issue the close — the handler reads
-            // currentGuards() afresh, but since they explicitly said
-            // "quit anyway" we just trigger destroy directly.
+            // User confirmed. Force-exit (don't bother with destroy +
+            // wait — the plugin-process exit terminates the runtime
+            // immediately, which is what the user just signalled they
+            // wanted by clicking "Quit anyway").
             markClean()
-            await w.destroy()
+            await forceExit()
           }
         })
         if (cancelled) {

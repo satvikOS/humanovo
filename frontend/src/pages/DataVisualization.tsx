@@ -3,9 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiX,
-  FiMaximize2, FiMinimize2, FiEdit3, FiCopy, FiDroplet,
+  FiMaximize2, FiMinimize2, FiCopy,
   FiClipboard, FiCheck, FiChevronDown,
-  FiZoomIn, FiCrosshair,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -514,12 +513,18 @@ interface ThemeStyle {
 const THEMES: Record<PublicationTheme, ThemeStyle> = {
   // Interactive in-app theme. Larger baselines + dashed gridlines so
   // the chart reads at viewport distance, not column-width distance.
+  // Concrete hex values (no CSS vars) because SVG `fill` attributes
+  // can't always resolve var(--…) — the heatmap text fills came out
+  // invisible on white card backgrounds when textColor was
+  // 'var(--color-text)' and the wrapper bg was flipped to white.
+  // Using fixed dark-on-translucent values keeps text readable on
+  // any wrapper background, not just the dark app shell.
   screen: {
     bg: 'transparent',
-    axisColor: 'var(--color-text-muted)',
-    gridColor: 'var(--color-border)',
-    textColor: 'var(--color-text)',
-    mutedColor: 'var(--color-text-muted)',
+    axisColor: '#A8B0BA',
+    gridColor: 'rgba(168, 176, 186, 0.25)',
+    textColor: '#E5E7EB',
+    mutedColor: '#A8B0BA',
     titleFont: "'Inter', system-ui, sans-serif",
     bodyFont: "'Inter', system-ui, sans-serif",
     axisStrokeWidth: 1,
@@ -1308,23 +1313,10 @@ export default function DataVisualization() {
   // ─── Copy chart to clipboard as image ──────────────────────
   const [copiedChart, setCopiedChart] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  // Per-chart background theme for the chart surface — lets the user
-  // flip a single card from dark to paper-white without affecting the
-  // rest of the platform (publication-grade parity with Plot3D).
-  const [chartBgTheme, setChartBgTheme] = useState<Record<string, 'dark' | 'light'>>({})
 
-  const setChartBg = useCallback((id: string, theme: 'dark' | 'light') => {
-    setChartBgTheme(prev => ({ ...prev, [id]: theme }))
-  }, [])
-
-  const copyChartToClipboard = useCallback(async (id: string, targetTheme?: 'dark' | 'light') => {
+  const copyChartToClipboard = useCallback(async (id: string) => {
     const el = chartRefs.current[id]
     if (!el) return
-    // `targetTheme` used to gate a pre-snapshot bg swap so html2canvas
-    // captured the intended solid color; with transparent exports the
-    // effective theme no longer affects the image, but the surface
-    // toggle itself (light/dark preview) still runs.
-    const needsSwap = targetTheme !== undefined && chartBgTheme[id] !== targetTheme
     // 3D charts: bypass html2canvas and use Plotly's native rasterizer
     // so the WebGL scene actually comes through on the clipboard image.
     const isPlotly = !!el.querySelector('.js-plotly-plot')
@@ -1340,10 +1332,6 @@ export default function DataVisualization() {
       } catch { /* fall through to html2canvas */ }
     }
     try {
-      if (needsSwap && targetTheme) setChartBg(id, targetTheme)
-      // Give Recharts a frame to repaint against the new bg before snapshotting.
-      await new Promise(r => requestAnimationFrame(() => r(null)))
-      await new Promise(r => requestAnimationFrame(() => r(null)))
       // Transparent clipboard copy: chart drops onto whatever surface
       // the user pastes into (paper, slide deck, whiteboard) without
       // dragging the app's dark chrome with it.
@@ -1363,13 +1351,11 @@ export default function DataVisualization() {
       }
     } catch (err) {
       // Don't fake the success state — clipboard.write failed and the
-      // user has nothing to paste. Common cause: the page isn't HTTPS
-      // (clipboard API requires secure context) or the browser denied
-      // the permission prompt.
+      // user has nothing to paste.
       console.error('chart copy failed', err)
       toast('error', 'Copy to clipboard failed. The chart was not copied; try the PNG export button.')
     }
-  }, [chartBgTheme, setChartBg])
+  }, [])
 
   // ─── Render any chart ───────────────────────────────────────
   const renderChart = (chart: ChartConfig, height = 300) => {
@@ -1986,13 +1972,16 @@ export default function DataVisualization() {
           const stats = computeBoxStats(vals)
           return { name, ...stats, outlierCount: stats.outliers.length }
         })
-        // Render as bar chart with custom rendering
+        // Render as bar chart with custom rendering. Uses the
+        // theme-aware tickStyle + theme.gridColor instead of the
+        // hard-coded AXIS_TICK / var(--color-border) so paper /
+        // nature / science themes don't get screen-token colours.
         return (
           <ResponsiveContainer width="100%" height={height}>
             <ComposedChart data={boxData} margin={chartMargin}>
               {gridEl}
-              <XAxis dataKey="name" tick={AXIS_TICK} />
-              <YAxis tick={AXIS_TICK} />
+              <XAxis dataKey="name" tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} />
+              <YAxis tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} />
               {tooltipEl}
               {/* IQR box */}
               <Bar dataKey="q3" fill="transparent" stackId="box" />
@@ -2002,7 +1991,7 @@ export default function DataVisualization() {
               <Line type="linear" dataKey="min" stroke={colors[0]} dot={{ r: 3 }} />
               <Line type="linear" dataKey="q1" stroke={colors[0]} dot={{ r: 5, fill: colors[0] }} strokeWidth={0} />
               <Line type="linear" dataKey="q3" stroke={colors[0]} dot={{ r: 5, fill: colors[0] }} strokeWidth={0} />
-              <ReferenceLine y={0} stroke="var(--color-border)" />
+              <ReferenceLine y={0} stroke={theme.gridColor} />
             </ComposedChart>
           </ResponsiveContainer>
         )
@@ -2038,7 +2027,7 @@ export default function DataVisualization() {
               {Array.from({ length: 5 }, (_, i) => {
                 const val = vMin - vPad + (vRange + 2 * vPad) * (i / 4)
                 const y = height - 30 - ((i / 4) * (height - 50))
-                return <g key={i}><line x1={55} x2={svgW} y1={y} y2={y} stroke="var(--color-border)" strokeDasharray="2,2" /><text x={50} y={y + 4} textAnchor="end" fill="var(--color-text-muted)" fontSize={10}>{val.toFixed(1)}</text></g>
+                return <g key={i}><line x1={55} x2={svgW} y1={y} y2={y} stroke={theme.gridColor} strokeDasharray="2,2" /><text x={50} y={y + 4} textAnchor="end" fill={theme.mutedColor} fontFamily={theme.bodyFont} fontSize={theme.tickFontSize * fs}>{val.toFixed(1)}</text></g>
               })}
               {vEntries.map(([name, vals], gi) => {
                 const sorted = [...vals].sort((a, b) => a - b)
@@ -2086,7 +2075,7 @@ export default function DataVisualization() {
                     <line x1={cx} x2={cx} y1={toY(stats.max)} y2={toY(stats.min)} stroke={col} strokeWidth={1} opacity={0.7} />
                     {/* Median dot */}
                     <circle cx={cx} cy={toY(stats.median)} r={3} fill="#fff" stroke={col} strokeWidth={1.5} />
-                    <text x={cx} y={height - 10} textAnchor="middle" fill="var(--color-text-muted)" fontSize={11}>{name}</text>
+                    <text x={cx} y={height - 10} textAnchor="middle" fill={theme.mutedColor} fontFamily={theme.bodyFont} fontSize={theme.tickFontSize * fs}>{name}</text>
                   </g>
                 )
               })}
@@ -2689,7 +2678,7 @@ export default function DataVisualization() {
         </label>
         <label className="flex items-center gap-1.5 cursor-pointer" title="Show range brush below chart for zooming">
           <input type="checkbox" checked={chart.options.showBrush} onChange={e => updateChartOptions(chart.id, { showBrush: e.target.checked })} />
-          <FiZoomIn className="w-3 h-3" /> Brush
+          Brush
         </label>
         <span className="flex items-center gap-1.5 text-xs" title="Trend line overlay">
           Trend:
@@ -2706,7 +2695,7 @@ export default function DataVisualization() {
         </span>
         <label className="flex items-center gap-1.5 cursor-pointer" title="Show crosshair cursor on hover">
           <input type="checkbox" checked={chart.options.showCrosshair} onChange={e => updateChartOptions(chart.id, { showCrosshair: e.target.checked })} />
-          <FiCrosshair className="w-3 h-3" /> Crosshair
+          Crosshair
         </label>
       </div>
       {/* Stats toggle */}
@@ -3079,15 +3068,19 @@ export default function DataVisualization() {
                       {CHART_TYPES.find(t => t.value === chart.type)?.label || chart.type}
                     </span>
                   </div>
+                  {/* Card chrome — declutter pass:
+                      Brush, Crosshair, Background-flip, and the
+                      separate export buttons (PNG-1×, PNG-4×, SVG,
+                      PDF, CSV, XLSX, Copy, Copy-inverted) used to
+                      sit here as 13 individual icons, which the user
+                      called out as visually overwhelming. They're
+                      now collapsed into one Export <details>
+                      dropdown; brush / crosshair / bg-flip moved
+                      into the per-chart Settings panel which already
+                      hosts the rest of the toggles. Top-level
+                      buttons left visible: Settings, Expand, Export,
+                      Duplicate, Delete (5 vs 13). */}
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button aria-label="Show brush" onClick={() => updateChartOptions(chart.id, { showBrush: !chart.options.showBrush })}
-                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showBrush ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle brush zoom">
-                      <FiZoomIn className="w-3.5 h-3.5" />
-                    </button>
-                    <button aria-label="Show crosshair" onClick={() => updateChartOptions(chart.id, { showCrosshair: !chart.options.showCrosshair })}
-                      className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${chart.options.showCrosshair ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`} title="Toggle crosshair">
-                      <FiCrosshair className="w-3.5 h-3.5" />
-                    </button>
                     <button onClick={() => setShowSettings(showSettings === chart.id ? null : chart.id)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Settings">
                       <FiSettings className="w-3.5 h-3.5" />
@@ -3097,46 +3090,40 @@ export default function DataVisualization() {
                       title={expandedChart ? 'Collapse' : 'Expand'}>
                       {expandedChart === chart.id ? <FiMinimize2 className="w-3.5 h-3.5" /> : <FiMaximize2 className="w-3.5 h-3.5" />}
                     </button>
-                    <button onClick={() => exportPng(chart.id, chart.title)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="PNG (1×)">
-                      <FiDownload className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => exportHighDpiPng(chart.id, chart.title)}
-                      className="px-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono" title="PNG @ 4× (publication / ~300 DPI)">
-                      4×
-                    </button>
-                    <button onClick={() => exportSvg(chart.id, chart.title)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="SVG (vector)">
-                      <FiDroplet className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => exportPdf(chart)}
-                      className="px-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono" title="PDF — publication layout w/ title + caption + source">
-                      PDF
-                    </button>
-                    <button onClick={() => exportCsv(chart)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="CSV (data)">
-                      <FiCopy className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => exportXlsx(chart)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="XLSX (data)">
-                      <FiUpload className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => setChartBg(chart.id, (chartBgTheme[chart.id] ?? 'dark') === 'dark' ? 'light' : 'dark')}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                      title={`Chart bg: ${chartBgTheme[chart.id] ?? 'dark'} — click to flip`}>
-                      <span className="text-xxs font-mono">{(chartBgTheme[chart.id] ?? 'dark') === 'dark' ? '◐' : '◑'}</span>
-                    </button>
-                    <button onClick={() => copyChartToClipboard(chart.id)}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Copy to clipboard (current bg)">
-                      {copiedChart === chart.id ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-success)]" /> : <FiClipboard className="w-3.5 h-3.5" />}
-                    </button>
-                    <button onClick={() => copyChartToClipboard(chart.id, (chartBgTheme[chart.id] ?? 'dark') === 'dark' ? 'light' : 'dark')}
-                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Copy with inverted bg">
-                      <FiClipboard className="w-3.5 h-3.5 opacity-60" />
-                    </button>
+                    <details className="relative">
+                      <summary className="list-none p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] cursor-pointer" title="Export">
+                        <FiDownload className="w-3.5 h-3.5" />
+                      </summary>
+                      <div className="absolute right-0 top-full mt-1 z-10 min-w-[180px] rounded-md shadow-lg border" style={{ background: 'var(--color-surface-solid)', borderColor: 'var(--color-border)' }}>
+                        <button onClick={() => exportPng(chart.id, chart.title)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
+                          <span>PNG</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">1×</span>
+                        </button>
+                        <button onClick={() => exportHighDpiPng(chart.id, chart.title)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
+                          <span>PNG (publication)</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">4×</span>
+                        </button>
+                        <button onClick={() => exportSvg(chart.id, chart.title)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
+                          <span>SVG</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">vector</span>
+                        </button>
+                        <button onClick={() => exportPdf(chart)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
+                          <span>PDF</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">w/ caption</span>
+                        </button>
+                        <div className="border-t" style={{ borderColor: 'var(--color-border)' }} />
+                        <button onClick={() => exportCsv(chart)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
+                          <span>Data</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">CSV</span>
+                        </button>
+                        <button onClick={() => exportXlsx(chart)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
+                          <span>Data</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">XLSX</span>
+                        </button>
+                        <div className="border-t" style={{ borderColor: 'var(--color-border)' }} />
+                        <button onClick={() => copyChartToClipboard(chart.id)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center gap-2">
+                          {copiedChart === chart.id ? <FiCheck className="w-3 h-3 text-[var(--color-success)]" /> : <FiClipboard className="w-3 h-3" />}
+                          <span>Copy to clipboard</span>
+                        </button>
+                      </div>
+                    </details>
                     <button onClick={() => duplicateChart(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Duplicate">
-                      <FiEdit3 className="w-3.5 h-3.5" />
+                      <FiCopy className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => deleteChart(chart.id)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-error)]" title="Delete">
@@ -3145,15 +3132,19 @@ export default function DataVisualization() {
                   </div>
                 </div>
 
-                {/* Chart body */}
+                {/* Chart body — bg is controlled by the chart's own
+                    pubTheme.bg now. The earlier chartBgTheme override
+                    flipped only the wrapper background to white but
+                    left the SVG text fills resolving to
+                    var(--color-text) (white in dark mode), which
+                    rendered the chart's text invisible on the white
+                    background. Removed the override; users pick a
+                    journal theme via Settings → Pub Theme to get a
+                    paper background with matching dark text. */}
                 <div
                   className="p-4 transition-colors"
                   ref={el => { chartRefs.current[chart.id] = el }}
-                  style={{
-                    background: (chartBgTheme[chart.id] ?? 'dark') === 'light' ? '#ffffff' : 'transparent',
-                    color: (chartBgTheme[chart.id] ?? 'dark') === 'light' ? '#0a0a0f' : undefined,
-                    borderRadius: 10,
-                  }}
+                  style={{ borderRadius: 10 }}
                 >
                   {renderChart(chart, expandedChart === chart.id ? 500 : 280)}
                 </div>

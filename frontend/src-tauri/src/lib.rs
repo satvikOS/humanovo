@@ -115,23 +115,25 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building humanovo desktop app")
         .run(|app, event| {
-            match event {
-                // Default close behaviour: destroy the window. We
-                // explicitly call exit(0) on the AppHandle when the
-                // window is destroyed so the process actually
-                // terminates instead of lingering as a zombie.
-                RunEvent::WindowEvent {
-                    label,
-                    event: WindowEvent::Destroyed,
-                    ..
-                } if label == "main" => {
+            // Final fallback: if the renderer's CloseGuardManager
+            // exit() didn't fire (e.g. the JS context died before
+            // the close was processed), kill the process when the
+            // main window destroys. Most close paths now exit via
+            // tauri-plugin-process from the renderer; this match
+            // exists so a Rust panic on the JS side can't leave us
+            // with a zombie window.
+            //
+            // Filtered to label == "main" so future secondary
+            // windows can close without taking down the whole app.
+            if let RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::Destroyed,
+                ..
+            } = event
+            {
+                if label == "main" {
                     app.exit(0);
                 }
-                // ExitRequested fires when something already asked
-                // the app to exit (e.g. tray Quit forwarded through
-                // window.close()). Let it through; the default
-                // behaviour from here is correct.
-                _ => {}
             }
         });
 }
