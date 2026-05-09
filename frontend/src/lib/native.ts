@@ -241,9 +241,13 @@ export async function getDiagnostics(): Promise<string> {
     lines.push(`Recent errors (last ${errs.length}):`)
     // Most-recent first reads more naturally for someone scanning
     // the bottom of the diagnostics block. Cap message length per
-    // line so a giant stack doesn't dominate the paste.
+    // line so a giant stack doesn't dominate the paste. `× N` suffix
+    // surfaces dedupe count when the same error fired repeatedly.
     for (const e of errs.slice().reverse()) {
-      lines.push(`  [${e.ts}] ${e.source} @ ${e.url} — ${e.message.slice(0, 200)}`)
+      const suffix = e.count && e.count > 1 ? ` × ${e.count}` : ''
+      lines.push(
+        `  [${e.ts}] ${e.source} @ ${e.url} — ${e.message.slice(0, 200)}${suffix}`,
+      )
     }
   }
   return lines.join('\n')

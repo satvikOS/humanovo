@@ -25,13 +25,19 @@
  */
 
 export interface ErrorLogEntry {
-  ts: string // ISO timestamp
+  ts: string // ISO timestamp (most recent occurrence when count > 1)
   source: 'error' | 'unhandledrejection' | 'manual'
   message: string
   // Path of the page that was active at capture time. Helpful when a
   // stack trace alone doesn't say which surface broke (e.g. a generic
   // network error from the api client).
   url: string
+  // Number of consecutive identical errors collapsed into this entry.
+  // Default 1; only > 1 when the same error fires repeatedly (network
+  // retries against a down server, polls hitting a 500 on every tick,
+  // etc.). Without this a noisy loop fills the entire buffer with
+  // dupes and crowds out other useful errors.
+  count?: number
 }
 
 const STORAGE_KEY = 'humanovo.errorLog'
@@ -63,19 +69,37 @@ function write(entries: ErrorLogEntry[]): void {
  * Record an error. Pruned to the last MAX_ENTRIES on write. Safe to
  * call from anywhere; failures are swallowed so the logger can't
  * break the app it's trying to instrument.
+ *
+ * Dedupes against the most-recent entry: if the same source+message
+ * fires consecutively, we bump the entry's count + ts instead of
+ * appending. Non-consecutive repeats (errA, errB, errA) still produce
+ * separate entries — the user wants to see the timing of the
+ * interleave.
  */
 export function logError(
   source: ErrorLogEntry['source'],
   message: string,
 ): void {
+  const truncated = message.slice(0, 1000) // cap individual messages
+  // so a misbehaving stack trace doesn't blow the storage quota.
+  const entries = read()
+  const last = entries[entries.length - 1]
+  if (last && last.source === source && last.message === truncated) {
+    // Consecutive duplicate — fold into the existing entry. Update
+    // ts so the diagnostics block shows the *latest* occurrence,
+    // which is what triage cares about.
+    last.count = (last.count ?? 1) + 1
+    last.ts = new Date().toISOString()
+    write(entries)
+    return
+  }
   const entry: ErrorLogEntry = {
     ts: new Date().toISOString(),
     source,
-    message: message.slice(0, 1000), // cap individual messages so a
-    // misbehaving stack trace doesn't blow the storage quota.
+    message: truncated,
     url: typeof location !== 'undefined' ? location.pathname : 'unknown',
   }
-  write([...read(), entry])
+  write([...entries, entry])
 }
 
 /** Snapshot of the recent errors, oldest → newest. */
