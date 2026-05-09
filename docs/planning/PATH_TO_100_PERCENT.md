@@ -40,7 +40,18 @@ and are sequenced separately because they don't unblock platform code.
 
 ## Where we are right now (2026-05-09)
 
-Session-end state at commit `c6fb8ab`:
+Session-end state at commit `950a83c` (desktop hardening pass):
+
+| Native-shell surface | State |
+|---|---|
+| Settings → Desktop App section | live — manual update check, report-issue, build version + platform display |
+| Native OS notifications | wired into DiscoveryRunner + Agents discovery completions/failures |
+| System tray | live — Show / Quit menu, left-click focuses window (Win/Linux), menu-on-left (mac) |
+| Window-state persistence | live (commit pre-session) |
+| Auto-updater | live, manual + 3 s post-launch check |
+| Deep-link router | live, `humanovo://` payloads route to React Router |
+
+Earlier session-end state at commit `c6fb8ab`:
 
 | Surface | State |
 |---|---|
