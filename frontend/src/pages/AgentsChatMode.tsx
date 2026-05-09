@@ -83,7 +83,12 @@ export default function Agents() {
   const reloadSessions = useCallback(async (q?: string) => {
     try {
       const list = await api.listDiscoverySessions({ q: q || undefined, limit: 200 })
-      setSessions(list)
+      // Defensive: a non-array (null, partial body, paginated wrapper)
+      // would propagate to sessions and crash subsequent
+      // `sessions.length` reads with "Cannot read properties of
+      // undefined (reading 'length')". Seen when /discovery-sessions
+      // returned 500 against a down backend.
+      setSessions(Array.isArray(list) ? list : [])
     } catch (err) {
       console.warn('Failed to load sessions:', err)
     }

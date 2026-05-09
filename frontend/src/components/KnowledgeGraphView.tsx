@@ -156,7 +156,18 @@ export default function KnowledgeGraphView(props: KnowledgeGraphViewProps) {
       .get<KGViewPayload>(requestUrl)
       .then(resp => {
         if (cancelled) return
-        setData(resp.data)
+        // Normalise shape — backend has been seen returning a partial
+        // payload (e.g. `{ total_nodes: 0 }` with no nodes/edges keys)
+        // when the scope is empty. Without this guard the downstream
+        // useMemo crashed with "Cannot read properties of undefined
+        // (reading 'map')" the moment we tried to lay out data.nodes.
+        const raw = resp.data ?? ({} as Partial<KGViewPayload>)
+        setData({
+          nodes: Array.isArray(raw.nodes) ? raw.nodes : [],
+          edges: Array.isArray(raw.edges) ? raw.edges : [],
+          total_nodes: raw.total_nodes,
+          total_edges: raw.total_edges,
+        })
       })
       .catch(err => {
         if (cancelled) return

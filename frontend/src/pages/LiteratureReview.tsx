@@ -90,7 +90,12 @@ export default function LiteratureReview() {
     setError(null)
     try {
       const data = await api.listLibraryCitations({ limit: 500 })
-      setCitations(data)
+      // Guard against the API returning null/undefined or a wrapped
+      // shape — the downstream useMemo flatMaps `citations` directly
+      // and crashes the page with "o.flatMap is not a function" if
+      // citations isn't an array. Seen in production when /citations
+      // returned a partial / 500 body.
+      setCitations(Array.isArray(data) ? data : [])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load literature library')
     } finally {

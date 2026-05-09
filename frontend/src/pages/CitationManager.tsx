@@ -100,8 +100,11 @@ export default function CitationManager() {
         }),
         api.listLibraryFolders(),
       ])
-      setCitations(cs)
-      setFolders(fs)
+      // Defensive: if the API returns a non-array (null, partial body,
+      // wrapped paginated shape), the downstream useMemo crashes with
+      // "u.find is not a function" before the empty-state can render.
+      setCitations(Array.isArray(cs) ? cs : [])
+      setFolders(Array.isArray(fs) ? fs : [])
     } catch {
       toast('error', 'Failed to load citation library')
     } finally {
