@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `54d1cf6`
+**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `136beb9`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -177,13 +177,23 @@ the file current.
 
 ### A3. Round 5: Neo4j → pgvector + Postgres relations refactor
 * ~3 days of work. Removes Neo4j from the deploy entirely.
-* Schema: pgvector for embeddings (already present), new
-  `kg_nodes` / `kg_edges` Postgres tables for the relational graph.
-* Existing `KnowledgeGraphNode` / `KnowledgeGraphEdge` models are
-  the right shape — Neo4j just needs to be removed as a hot path.
-* Touch: `app/services/knowledge_graph.py`, `kg_first_service.py`,
-  any `neo4j_population_service.py`, deploy IaC.
-* Test rewrites needed; `tests/test_knowledge_graph_*` audit.
+* **Plan written and committed** (`136beb9`) at
+  `docs/planning/A3_NEO4J_TO_PGVECTOR_PLAN.md`. 5-phase reversible
+  migration: (1) add PostgresGraphStore alongside Neo4j + migration
+  023 for VECTOR(1024) embedding column on `knowledge_graph_nodes`,
+  (2) dual-write + backfill, (3) flip reads behind `KG_BACKEND` flag,
+  (4) stop writing to Neo4j, (5) remove from compose / Terraform.
+* Schema: pgvector for embeddings (already present), existing
+  `knowledge_graph_nodes` / `knowledge_graph_edges` Postgres tables
+  in `app/models/platform_entities.py` are the right shape — the work
+  is purely service-side (swap Cypher for SQLAlchemy queries +
+  recursive CTE for pathfinding).
+* Touch: `app/knowledge/graph_store.py` (649 lines),
+  `app/services/kg_first_service.py` (835 lines),
+  `app/services/neo4j_population_service.py` (1560 lines), ~10
+  callers, deploy IaC. See plan for the per-phase file lists.
+* Test rewrites needed; `tests/test_knowledge_graph_*` audit per
+  Phase 3 of the plan.
 
 ### A4. Hooks-deps risk-fix sweep
 * 7 `react-hooks/exhaustive-deps` warnings remaining (down from 18).
