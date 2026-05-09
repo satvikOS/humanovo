@@ -331,6 +331,103 @@ class Neo4jPopulationService:
     # Entity upsert
     # ------------------------------------------------------------------
 
+    # ── A3 Phase 2 — dual-write helpers ──────────────────────────────
+    # Mirror each successful Neo4j write to the Postgres-backed
+    # PostgresGraphStore so the new tables catch up. Postgres failures
+    # log at warning and DO NOT fail the orchestrator's bulk-ingest —
+    # Neo4j stays authoritative through Phase 2.
+
+    async def _mirror_entity_dual_write(
+        self,
+        *,
+        entity_id: str,
+        canonical_name: str,
+        entity_type: str,
+        description: str,
+        aliases: list[str],
+        canonical_id_str: str,
+        confidence: float,
+        evidence_count: int,
+    ) -> None:
+        if not getattr(settings, "KG_DUAL_WRITE", False):
+            return
+        try:
+            from app.knowledge.graph_store import Entity
+            from app.knowledge.postgres_graph_store import (
+                get_postgres_graph_store,
+            )
+            ent = Entity(
+                id=entity_id,
+                name=canonical_name,
+                entity_type=entity_type,
+                aliases=list(aliases or []),
+                description=description or None,
+                external_ids=(
+                    {"canonical_id": canonical_id_str} if canonical_id_str else {}
+                ),
+                properties={"confidence": confidence},
+                source_count=evidence_count,
+            )
+            await get_postgres_graph_store().add_entity(ent)
+        except Exception as exc:
+            logger.warning(
+                "kg_dual_write.entity_failed",
+                extra={
+                    "event": "kg_dual_write.entity_failed",
+                    "entity_id": entity_id,
+                    "error": str(exc),
+                },
+            )
+
+    async def _mirror_relationship_dual_write(
+        self,
+        *,
+        source_id: str,
+        target_id: str,
+        rel_type: str,
+        confidence: float,
+        evidence_count: int,
+        source_name: str = "",
+        target_name: str = "",
+        evidence_text: str = "",
+    ) -> None:
+        if not getattr(settings, "KG_DUAL_WRITE", False):
+            return
+        try:
+            from app.knowledge.graph_store import Relation
+            from app.knowledge.postgres_graph_store import (
+                get_postgres_graph_store,
+            )
+            rel = Relation(
+                # Deterministic edge id = hash(src|type|tgt) so re-runs
+                # of the dual-write or the backfill land on the same
+                # Postgres edge row (the store hashes non-UUID ids
+                # through UUID5 to a stable row uuid).
+                id=f"{source_id}|{rel_type}|{target_id}",
+                source_id=source_id,
+                source_name=source_name,
+                source_type="",
+                target_id=target_id,
+                target_name=target_name,
+                target_type="",
+                relation_type=rel_type,
+                confidence=confidence,
+                evidence_count=evidence_count,
+                source_references=[evidence_text] if evidence_text else [],
+            )
+            await get_postgres_graph_store().add_relation(rel)
+        except Exception as exc:
+            logger.warning(
+                "kg_dual_write.relation_failed",
+                extra={
+                    "event": "kg_dual_write.relation_failed",
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "rel_type": rel_type,
+                    "error": str(exc),
+                },
+            )
+
     async def upsert_entity(
         self,
         entity_type: str,
@@ -421,7 +518,20 @@ class Neo4jPopulationService:
         async with self._driver.session() as session:
             result = await session.run(query, **props)
             record = await result.single()
-            return record["entity_id"] if record else entity_id
+            stored_id = record["entity_id"] if record else entity_id
+
+        # A3 Phase 2 — Postgres mirror after Neo4j commits. Best-effort.
+        await self._mirror_entity_dual_write(
+            entity_id=stored_id,
+            canonical_name=props["name"],
+            entity_type=entity_type,
+            description=props["description"],
+            aliases=list(props.get("aliases") or []),
+            canonical_id_str=props["canonical_id"],
+            confidence=props["confidence"],
+            evidence_count=props["evidence_count"],
+        )
+        return stored_id
 
     async def upsert_entities_batch(
         self,
@@ -524,6 +634,24 @@ class Neo4jPopulationService:
                     await tx.run(query, rows=rows)
                 await tx.commit()
 
+        # A3 Phase 2 — mirror every row we just persisted to Postgres.
+        # Iteration order matches `ids` because we appended to both
+        # sides in lockstep above. Best-effort per row; one failure
+        # doesn't stop the rest.
+        if getattr(settings, "KG_DUAL_WRITE", False):
+            for label_rows in rows_by_type.values():
+                for row in label_rows:
+                    await self._mirror_entity_dual_write(
+                        entity_id=row["entity_id"],
+                        canonical_name=row["name"],
+                        entity_type=row["entity_type"],
+                        description=row["description"],
+                        aliases=list(row.get("aliases") or []),
+                        canonical_id_str=row["canonical_id"],
+                        confidence=row["confidence"],
+                        evidence_count=row["evidence_count"],
+                    )
+
         logger.info("Batch upserted entities", count=len(ids))
         return ids
 
@@ -604,6 +732,18 @@ class Neo4jPopulationService:
         async with self._driver.session() as session:
             await session.run(query, **props)
 
+        # A3 Phase 2 — Postgres mirror after Neo4j commits. Best-effort.
+        await self._mirror_relationship_dual_write(
+            source_id=props["source_id"],
+            target_id=props["target_id"],
+            rel_type=rel_type,
+            confidence=props["confidence"],
+            evidence_count=props["evidence_count"],
+            source_name=source,
+            target_name=target,
+            evidence_text=props["evidence_text"],
+        )
+
     async def upsert_relationships_batch(
         self,
         relationships: list[dict[str, Any]],
@@ -670,6 +810,25 @@ class Neo4jPopulationService:
                     """
                     await tx.run(query, rows=rows)
                 await tx.commit()
+
+        # A3 Phase 2 — mirror to Postgres. Best-effort per row.
+        if getattr(settings, "KG_DUAL_WRITE", False):
+            for rt, rows in rows_by_rel.items():
+                # `relationships` is the input list; we don't have the
+                # raw `source` / `target` names per row here, so fall
+                # back to the entity_id strings — those are the rows'
+                # FK source for Postgres anyway.
+                for row in rows:
+                    await self._mirror_relationship_dual_write(
+                        source_id=row["source_id"],
+                        target_id=row["target_id"],
+                        rel_type=rt,
+                        confidence=row["confidence"],
+                        evidence_count=row["evidence_count"],
+                        source_name="",
+                        target_name="",
+                        evidence_text=row["evidence_text"],
+                    )
 
         logger.info("Batch upserted relationships", count=len(relationships))
 

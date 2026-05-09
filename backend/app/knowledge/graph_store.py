@@ -133,6 +133,52 @@ class GraphStore(LoggerMixin):
             await self._driver.close()
             self.logger.info("Neo4j connection closed")
 
+    # ── A3 Phase 2 — dual-write helpers ──────────────────────────────
+    # Every successful Neo4j write below is mirrored to the
+    # Postgres-backed PostgresGraphStore so the new tables catch up
+    # while Neo4j stays authoritative for reads. Postgres failures log
+    # at warning and DO NOT fail the request — the dual-write is
+    # best-effort during the migration window.
+    #
+    # The PostgresGraphStore import is deferred to avoid a circular
+    # import (it imports `Entity` / `Relation` from this module).
+
+    async def _mirror_entity_to_postgres(self, entity: Entity) -> None:
+        if not getattr(settings, "KG_DUAL_WRITE", False):
+            return
+        try:
+            from app.knowledge.postgres_graph_store import (
+                get_postgres_graph_store,
+            )
+            await get_postgres_graph_store().add_entity(entity)
+        except Exception as exc:
+            self.logger.warning(
+                "kg_dual_write.entity_failed",
+                extra={
+                    "event": "kg_dual_write.entity_failed",
+                    "entity_id": entity.id,
+                    "error": str(exc),
+                },
+            )
+
+    async def _mirror_relation_to_postgres(self, relation: Relation) -> None:
+        if not getattr(settings, "KG_DUAL_WRITE", False):
+            return
+        try:
+            from app.knowledge.postgres_graph_store import (
+                get_postgres_graph_store,
+            )
+            await get_postgres_graph_store().add_relation(relation)
+        except Exception as exc:
+            self.logger.warning(
+                "kg_dual_write.relation_failed",
+                extra={
+                    "event": "kg_dual_write.relation_failed",
+                    "relation_id": relation.id,
+                    "error": str(exc),
+                },
+            )
+
     async def add_entity(self, entity: Entity) -> str:
         """Add an entity to the knowledge graph."""
         if self._driver:
@@ -163,6 +209,10 @@ class GraphStore(LoggerMixin):
             self._entities[entity.id] = entity
             if entity.id not in self._adjacency:
                 self._adjacency[entity.id] = []
+
+        # A3 Phase 2 — mirror to Postgres after the Neo4j (or
+        # in-memory) write succeeds. Failures here are non-fatal.
+        await self._mirror_entity_to_postgres(entity)
 
         self.logger.debug("Entity added", entity_id=entity.id, name=entity.name)
         return entity.id
@@ -195,6 +245,10 @@ class GraphStore(LoggerMixin):
             if relation.source_id not in self._adjacency:
                 self._adjacency[relation.source_id] = []
             self._adjacency[relation.source_id].append(relation.id)
+
+        # A3 Phase 2 — mirror to Postgres after the Neo4j (or
+        # in-memory) write succeeds. Failures here are non-fatal.
+        await self._mirror_relation_to_postgres(relation)
 
         self.logger.debug(
             "Relation added",

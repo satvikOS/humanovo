@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -163,16 +163,22 @@ class PostgresGraphStore(LoggerMixin):
     async def add_entity(self, entity: Entity, *, owner_id: UUID | None = None) -> str:
         """Insert a new entity. Returns the new id (string UUID).
 
-        The `id` on the Pydantic model is treated as a stable hint —
-        if absent we mint a fresh UUID.
+        The `id` on the Pydantic model is mapped via `_derive_node_id`
+        — UUID strings pass through verbatim, non-UUID source ids hash
+        deterministically through UUID5 so re-runs of the dual-write
+        or backfill paths land on the same Postgres row. The original
+        upstream id is stashed in `properties.original_id` so it can be
+        recovered later (used by the Neo4j → Postgres backfill).
         """
-        new_id = UUID(entity.id) if entity.id and _looks_like_uuid(entity.id) else uuid4()
+        new_id = _derive_node_id(entity.id)
         properties = {
             **entity.properties,
             "aliases": entity.aliases,
             "external_ids": entity.external_ids,
             "source_count": entity.source_count,
         }
+        if entity.id and not _looks_like_uuid(entity.id):
+            properties["original_id"] = entity.id
         async with self._session_factory() as session:
             await session.execute(
                 text(
@@ -200,10 +206,32 @@ class PostgresGraphStore(LoggerMixin):
         return str(new_id)
 
     async def add_relation(self, relation: Relation, *, owner_id: UUID | None = None) -> str:
-        new_id = UUID(relation.id) if relation.id and _looks_like_uuid(relation.id) else uuid4()
+        """Insert a new relation. Returns the new id (string UUID).
+
+        Like `add_entity`, the relation id is mapped via UUID5 when the
+        upstream is non-UUID so dual-write + backfill stay idempotent.
+        Source / target ids must resolve to existing
+        `knowledge_graph_nodes` rows; we derive both via the node
+        namespace so a relation written before its endpoints exist
+        will fail with a FK error and the dual-write path will log
+        instead of crashing the orchestrator.
+        """
+        new_id = _derive_edge_id(relation.id)
+        # If the relation rows came from Neo4j, the source/target ids
+        # are entity ids (potentially non-UUID). Run them through the
+        # same node-id derivation so the FK lines up with what
+        # `add_entity` wrote.
+        src_uuid = _derive_node_id(relation.source_id)
+        tgt_uuid = _derive_node_id(relation.target_id)
         evidence_payload = {
             "evidence_count": relation.evidence_count,
             "source_references": relation.source_references,
+            # Preserve the original upstream id when it isn't a UUID, so
+            # we can audit the backfill / dual-write path later.
+            **(
+                {"original_id": relation.id}
+                if relation.id and not _looks_like_uuid(relation.id) else {}
+            ),
         }
         async with self._session_factory() as session:
             await session.execute(
@@ -213,12 +241,19 @@ class PostgresGraphStore(LoggerMixin):
                     " relationship, strength, evidence, owner_id, "
                     " created_at, updated_at) "
                     "VALUES (:id, :source_id, :target_id, :source_name, :target_name, "
-                    " :relationship, :strength, :evidence, :owner_id, NOW(), NOW())"
+                    " :relationship, :strength, :evidence, :owner_id, NOW(), NOW()) "
+                    "ON CONFLICT (id) DO UPDATE SET "
+                    " source_name = EXCLUDED.source_name, "
+                    " target_name = EXCLUDED.target_name, "
+                    " relationship = EXCLUDED.relationship, "
+                    " strength = EXCLUDED.strength, "
+                    " evidence = EXCLUDED.evidence, "
+                    " updated_at = NOW()"
                 ),
                 {
                     "id": new_id,
-                    "source_id": UUID(relation.source_id),
-                    "target_id": UUID(relation.target_id),
+                    "source_id": src_uuid,
+                    "target_id": tgt_uuid,
                     "source_name": relation.source_name,
                     "target_name": relation.target_name,
                     "relationship": relation.relation_type,
@@ -559,6 +594,42 @@ def _looks_like_uuid(s: str) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
+
+# UUID5 namespaces — distinct per entity/relation so an entity id and a
+# relation id with the same source string cannot ever collide. Using
+# NAMESPACE_OID as the parent because there's no canonical DNS namespace
+# for these ids; deterministic UUID5 keeps backfill + dual-write
+# idempotent across re-runs.
+_KG_NODE_NAMESPACE = uuid5(NAMESPACE_OID, "humanovo.kg.node")
+_KG_EDGE_NAMESPACE = uuid5(NAMESPACE_OID, "humanovo.kg.edge")
+
+
+def _derive_node_id(source_id: str | None) -> UUID:
+    """Map a (possibly-non-UUID) source id into a stable UUID for the
+    Postgres row.
+
+    A3 Phase 2 dual-write path: every Neo4j entity id needs a
+    corresponding Postgres row id. If the upstream id is already a
+    valid UUID we use it verbatim (Neo4j and Postgres share the same
+    pk). Otherwise we hash it via UUID5 so re-runs of the dual-write
+    or the backfill script land on the same Postgres row — the
+    `ON CONFLICT DO UPDATE` clause then keeps the row consistent.
+    """
+    if not source_id:
+        return uuid4()
+    if _looks_like_uuid(source_id):
+        return UUID(source_id)
+    return uuid5(_KG_NODE_NAMESPACE, source_id)
+
+
+def _derive_edge_id(source_id: str | None) -> UUID:
+    """Same as `_derive_node_id` but in the edge namespace."""
+    if not source_id:
+        return uuid4()
+    if _looks_like_uuid(source_id):
+        return UUID(source_id)
+    return uuid5(_KG_EDGE_NAMESPACE, source_id)
 
 
 def _scope_clause(

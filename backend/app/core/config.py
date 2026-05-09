@@ -300,6 +300,21 @@ class Settings(BaseSettings):
     # extension is installed and transparently falls back to Neo4j.
     KG_GRAPH_BACKEND: str = "auto"   # auto | apache_age | neo4j
 
+    # A3 Phase 2 — dual-write toggle. When True, every Neo4j write in
+    # GraphStore + neo4j_population_service is mirrored to the
+    # Postgres-backed PostgresGraphStore. Postgres failures log but do
+    # not fail the request; Neo4j stays authoritative for reads until
+    # Phase 3 flips KG_BACKEND. Set False to disable mirroring on a
+    # hot-path issue without redeploying.
+    KG_DUAL_WRITE: bool = True
+
+    # A3 Phase 3 hook — `KG_BACKEND` will route reads to either the
+    # Neo4j-backed GraphStore or the Postgres-backed PostgresGraphStore.
+    # Phase 2 doesn't read this; the setting lives here so the value can
+    # be flipped and observed (via the admin /kg/stats endpoint) before
+    # Phase 3 wires the factory in.
+    KG_BACKEND: str = "neo4j"  # neo4j | postgres
+
     # PubMed / Data Sources — NCBI requires a real contact email per
     # E-utilities ToU. Default is intentionally empty so dev callers get
     # a fail-fast when the env var isn't set; production environments are
