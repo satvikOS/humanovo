@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `03d3981`
+**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `54d1cf6`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -225,6 +225,17 @@ the file current.
 * `landing/src/app/press/page.tsx`. Logos, screenshots, founder
   bios (gated on user-blocked item 5 above), product video embed
   (when produced).
+
+### A5. Backend perf tuning of `query_all` — DONE (commit `54d1cf6`)
+* Surfaced TWO real bugs in PubMedSource (and 3 NCBI-backed
+  siblings: ClinVar, RefSeq, GeneCards): `getattr(settings,
+  'NCBI_API_KEY', ...)` was looking at a field that never existed
+  (the actual setting is `PUBMED_API_KEY`), so the API key was
+  never sent — every NCBI hit ran at the no-key tier permanently.
+  And `PUBMED_RATE_LIMIT=10` was wired in config but never read.
+  Both fixed; new `_pubmed_api_key()` helper unwraps the SecretStr.
+  EuropePMC rate-limit bumped 3 → 10 req/s (polite-pool default).
+  No-key path still falls back to 3 req/s for safety.
 
 ### B2. Bundle-size audit — DONE (commit `03d3981`, partial)
 * compute-lab children (Workstation/MonteCarloPanel/EquationPlotter)
