@@ -30,7 +30,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { isNativeApp, notify } from '../lib/native'
+import { isNativeApp, notify, openExternal } from '../lib/native'
 
 interface UpdateInfo {
   version: string
@@ -151,7 +151,20 @@ export default function UpdateChecker() {
           {error}
         </p>
       )}
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() =>
+            void openExternal(
+              `https://github.com/satvikOS/humanovo/releases/tag/v${update.version}`,
+            )
+          }
+          disabled={installing}
+          className="text-xs underline opacity-70 hover:opacity-100 disabled:opacity-30"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          What’s new?
+        </button>
         <button
           type="button"
           onClick={install}
