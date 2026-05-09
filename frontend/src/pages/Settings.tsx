@@ -28,6 +28,7 @@ import {
   getNotificationPermission,
   getAutostartEnabled,
   setAutostartEnabled,
+  getDiagnostics,
   notify,
 } from '../lib/native'
 import { toast } from '../contexts/ToastContext'
@@ -1639,11 +1640,13 @@ function DesktopSettings() {
   }, [])
 
   const reportIssue = useCallback(async () => {
-    // Pre-fill the issue body with build info so triage doesn't have
-    // to ask "what version / OS?". The user types over the placeholder
-    // sections to describe their actual issue.
+    // Pre-fill the issue body with the full diagnostics block so
+    // triage doesn't have to ask "what version / OS / perms?". The
+    // user types over the placeholder sections to describe their
+    // actual issue.
+    const diagnostics = await getDiagnostics()
     const body =
-      `**Build**: humanovo ${version ?? 'unknown'} · ${plat ?? 'unknown'}\n\n` +
+      `**Diagnostics**\n\`\`\`\n${diagnostics}\n\`\`\`\n\n` +
       `**Steps to reproduce**:\n1. \n2. \n\n` +
       `**Expected**:\n\n` +
       `**Actual**:\n`
@@ -1659,7 +1662,23 @@ function DesktopSettings() {
         { title: 'humanovo' },
       )
     }
-  }, [version, plat])
+  }, [])
+
+  const copyDiagnostics = useCallback(async () => {
+    try {
+      const text = await getDiagnostics()
+      await navigator.clipboard.writeText(text)
+      toast('success', 'Diagnostics copied. Paste into your support ticket.', {
+        title: 'humanovo',
+      })
+    } catch (err) {
+      toast(
+        'error',
+        err instanceof Error ? err.message : 'Couldn’t copy to clipboard',
+        { title: 'humanovo' },
+      )
+    }
+  }, [])
 
   return (
     <div className="max-w-2xl">
@@ -1798,18 +1817,32 @@ function DesktopSettings() {
               inside the desktop app’s WebView.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={reportIssue}
-            className="text-xs px-3 py-1.5 rounded-md active:scale-95 shrink-0"
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--color-border)',
-              color: 'var(--color-text)',
-            }}
-          >
-            Open issue tracker
-          </button>
+          <div className="flex flex-col gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={reportIssue}
+              className="text-xs px-3 py-1.5 rounded-md active:scale-95"
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+            >
+              Open issue tracker
+            </button>
+            <button
+              type="button"
+              onClick={copyDiagnostics}
+              className="text-xs px-3 py-1.5 rounded-md active:scale-95"
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              Copy diagnostics
+            </button>
+          </div>
         </div>
       </div>
     </div>

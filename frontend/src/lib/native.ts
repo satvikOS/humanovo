@@ -163,6 +163,41 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 }
 
 /**
+ * Build a one-shot diagnostics block: version, platform, perms, etc.
+ *
+ * Used by the Settings "Copy diagnostics" affordance so a user filing
+ * a support issue can paste a single self-contained block instead of
+ * being asked five follow-up questions. Plain text by design — drops
+ * cleanly into GitHub Issues, email, or Slack without rendering
+ * weirdly.
+ *
+ * Web mode returns the platform line only (no native fields apply).
+ */
+export async function getDiagnostics(): Promise<string> {
+  const [version, plat, notifPerm, autostart] = await Promise.all([
+    getAppVersion(),
+    getPlatform(),
+    getNotificationPermission(),
+    getAutostartEnabled(),
+  ])
+  const lines = [
+    `humanovo ${version ?? 'web'} · ${plat ?? 'web'}`,
+    `User-Agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'n/a'}`,
+    `Window: ${
+      typeof window !== 'undefined'
+        ? `${window.innerWidth}×${window.innerHeight}`
+        : 'n/a'
+    }`,
+    `Native: ${isNativeApp() ? 'yes' : 'no'}`,
+  ]
+  if (isNativeApp()) {
+    lines.push(`Notifications: ${notifPerm ?? 'unknown'}`)
+    lines.push(`Auto-launch: ${autostart === null ? 'unknown' : autostart ? 'on' : 'off'}`)
+  }
+  return lines.join('\n')
+}
+
+/**
  * Read the current OS notification permission for humanovo. Returns
  * 'granted' / 'denied' / 'default' (never asked) / null in web mode.
  *
