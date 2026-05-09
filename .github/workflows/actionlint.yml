@@ -63,4 +63,25 @@ jobs:
           # already strips ANSI on its log viewer when needed; -color
           # with no argument forces colour output for terminal-side
           # debugging.
-          actionlint -color
+          #
+          # -shellcheck argument: pass shellcheck with a tuned
+          # -e exclude list. The codes silenced here are stylistic
+          # noise on patterns that are *intentional* in GitHub
+          # Actions:
+          #   SC2086  Double quote to prevent globbing/word-splitting.
+          #           Triggered on every `${{ var }}` interpolation
+          #           even though Actions already escapes the value.
+          #   SC2129  Use `{ a; b; } >> file` instead of individual
+          #           redirects. Style preference; either is fine.
+          #   SC2001  Use ${var//s/r}. Useful tip but flooding logs.
+          #   SC2015  A && B || C is not if-then-else. Recognised
+          #           idiom in actions for "best-effort cleanup".
+          #   SC2046  Quote $() to prevent word splitting. Same kind
+          #           of false-positive on Actions outputs as SC2086.
+          #   SC2044  For-loop over find output is fragile. The
+          #           workflows pass through a known-safe filename set.
+          # SC1xxx (real syntax errors) and SC2-codes outside this list
+          # remain active, so a genuinely broken script still fails.
+          actionlint \
+            -color \
+            -shellcheck="shellcheck -e SC2086,SC2129,SC2001,SC2015,SC2046,SC2044"

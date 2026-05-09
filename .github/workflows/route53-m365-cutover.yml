@@ -436,12 +436,6 @@ jobs:
           {
             echo "## Route 53 — humanovo.net M365 email cutover"
             echo ""
-            echo "Phase: \`${{ inputs.phase }}\`"
-            echo "SPF mode: \`${{ inputs.spf_mode }}\`"
-            echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
-            echo ""
-            if [ "${{ inputs.phase }}" = "apply" ]; then
-
             echo "Phase: \`${{ env.EFFECTIVE_PHASE }}\`"
             echo "SPF mode: \`${{ env.EFFECTIVE_SPF_MODE }}\`"
             echo "Hosted zone: \`${{ steps.hz.outputs.zone_id }}\`"
