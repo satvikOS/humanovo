@@ -317,3 +317,121 @@ async def analyze_image(data: ImageAnalysisRequest):
     except Exception as e:
         logger.exception("Imaging AI analysis failed")
         raise HTTPException(status_code=500, detail=f"Constant AI analysis failed: {str(e)}")
+
+
+# ─────────────────────────── MONAI integration ──────────────────
+#
+# MONAI (Medical Open Network for AI, https://monai.io) is the de-facto
+# PyTorch framework for medical-imaging workflows: segmentation,
+# classification, registration, and pre-processing pipelines for DICOM
+# volumes. The integration plan, scaffolded below, lets the Research
+# Imaging surface request MONAI ops by name without each call site
+# having to know whether MONAI is locally available, GPU-accelerated,
+# or cloud-routed.
+#
+# ENDPOINT CONTRACT (frozen here so the renderer can integrate now,
+# even before MONAI is wired):
+#
+#   POST /imaging/monai/segment
+#     body  : { study_id: UUID, model: "spleen_ct" | "lung_nodule" | ... }
+#     200   : { segmentation_url: str, dice_score?: float, latency_ms: int }
+#     501   : { detail: "MONAI runtime not configured" } when the
+#             backend hasn't yet had `pip install monai[all]` run +
+#             model weights downloaded to MONAI_MODEL_DIR.
+#
+#   POST /imaging/monai/classify
+#     body  : { study_id: UUID, model: "covid_chest_xray" | ... }
+#     200   : { label: str, probability: float, top_k: list }
+#
+#   POST /imaging/monai/register
+#     body  : { fixed_study_id: UUID, moving_study_id: UUID,
+#               method: "rigid" | "affine" | "deformable" }
+#     200   : { transformed_study_id: UUID, transform_matrix: list }
+#
+# Implementation will land MONAI behind an `import` guard so the
+# Python venv that doesn't have it installed (default for the
+# private-beta backend) keeps booting; the endpoints just 501 with a
+# helpful detail message.
+
+
+class MonaiOpRequest(BaseModel):
+    study_id: UUID
+    model: str | None = None
+    method: str | None = None
+    fixed_study_id: UUID | None = None
+    moving_study_id: UUID | None = None
+
+
+def _monai_available() -> bool:
+    """Cheap probe — tries an `import monai` once and caches the result."""
+    if not hasattr(_monai_available, "_cached"):
+        try:
+            import monai  # type: ignore  # noqa: F401
+            _monai_available._cached = True  # type: ignore[attr-defined]
+        except Exception:
+            _monai_available._cached = False  # type: ignore[attr-defined]
+    return _monai_available._cached  # type: ignore[attr-defined]
+
+
+def _monai_501() -> HTTPException:
+    return HTTPException(
+        status_code=501,
+        detail=(
+            "MONAI runtime not configured on this backend. "
+            "Install with `pip install monai[all]` and set MONAI_MODEL_DIR "
+            "to a directory holding the requested model's weights. "
+            "See docs/planning/MONAI_INTEGRATION.md for the full setup walkthrough."
+        ),
+    )
+
+
+@router.post("/monai/segment")
+async def monai_segment(
+    body: MonaiOpRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # Tenant isolation — caller must own the study they're segmenting.
+    await fetch_owned_directly_or_404(db, ImagingStudy, body.study_id, current_user)
+    if not _monai_available():
+        raise _monai_501()
+    # TODO(monai): load the requested model from MONAI_MODEL_DIR,
+    # run inference on the study's pixel data, persist the
+    # segmentation mask alongside the original study, return its URL.
+    raise HTTPException(status_code=501, detail="MONAI segment endpoint scaffolded; runtime wiring TBD.")
+
+
+@router.post("/monai/classify")
+async def monai_classify(
+    body: MonaiOpRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await fetch_owned_directly_or_404(db, ImagingStudy, body.study_id, current_user)
+    if not _monai_available():
+        raise _monai_501()
+    raise HTTPException(status_code=501, detail="MONAI classify endpoint scaffolded; runtime wiring TBD.")
+
+
+@router.post("/monai/register")
+async def monai_register(
+    body: MonaiOpRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.fixed_study_id is None or body.moving_study_id is None:
+        raise HTTPException(status_code=422, detail="fixed_study_id and moving_study_id required for register.")
+    await fetch_owned_directly_or_404(db, ImagingStudy, body.fixed_study_id, current_user)
+    await fetch_owned_directly_or_404(db, ImagingStudy, body.moving_study_id, current_user)
+    if not _monai_available():
+        raise _monai_501()
+    raise HTTPException(status_code=501, detail="MONAI register endpoint scaffolded; runtime wiring TBD.")
+
+
+@router.get("/monai/health")
+async def monai_health():
+    """Quick probe — does this backend have MONAI installed?"""
+    return {
+        "available": _monai_available(),
+        "endpoints": ["/monai/segment", "/monai/classify", "/monai/register"],
+    }

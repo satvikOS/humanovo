@@ -14,7 +14,6 @@
  * Reasons documented per route:
  *   /workbench          ROUGH (silent error swallow at line 2524, 3825 LOC)
  *   /anatomy            placeholder BP3D models
- *   /imaging            clinical, defer to v1.1
  *   /clinical-trials    clinical, defer to v1.1
  *   /manuscripts        ROUGH (researchers use Overleaf)
  *   /regulatory         FDA/IRB tracker — clinical/industry
@@ -22,6 +21,13 @@
  *   /biobank            niche (Benchling-grade)
  *   /experiment-tracker niche (Benchling-grade)
  *   /ml-models          unclear scope
+ *
+ * RECENTLY UN-HIDDEN:
+ *   /imaging  — back in V1 per user directive 2026-05-09. Wires into
+ *               MONAI (PyTorch medical-imaging framework) for
+ *               segmentation / classification / registration; backend
+ *               endpoints + DICOM viewer are follow-on work tracked
+ *               separately.
  */
 
 const HIDDEN_ENABLED =
@@ -30,7 +36,6 @@ const HIDDEN_ENABLED =
 export const V1_HIDDEN_PATHS: ReadonlySet<string> = new Set([
   '/workbench',
   '/anatomy',
-  '/imaging',
   '/clinical-trials',
   '/manuscripts',
   '/regulatory',
