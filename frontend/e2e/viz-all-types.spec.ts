@@ -21,7 +21,7 @@ import { test, expect } from '@playwright/test'
 
 // All chart types declared in DataVisualization.tsx's `ChartType`.
 // Kept in sync by hand — if you add a new type there, add it here.
-const CHART_TYPES = [
+const CHART_TYPES_2D = [
   // Bars
   'bar', 'horizontal_bar', 'grouped_bar', 'stacked_bar', 'stacked_bar_100', 'waterfall',
   // Lines
@@ -36,11 +36,18 @@ const CHART_TYPES = [
   'radar', 'funnel', 'treemap',
   'histogram', 'box_plot', 'violin', 'density',
   'error_bar', 'heatmap',
-  // 3D — skipped for now: Plotly initialisation in a headless context
-  // is unreliable (WebGL fallback to software renderer differs on CI
-  // vs. the user's GPU). Add a separate viz-all-types-3d.spec.ts that
-  // launches with --use-gl=swiftshader once we need that coverage.
+  // Specialty 2D
+  'sankey', 'candlestick',
 ] as const
+
+const CHART_TYPES_3D = [
+  'scatter_3d', 'bubble_3d', 'line_3d', 'bar_3d',
+  'surface_3d', 'wireframe_3d', 'contour_3d', 'trisurf_3d',
+  'quiver_3d', 'isosurface_3d', 'voxel_3d', 'streamline_3d',
+  'slice_3d', 'stem_3d', 'waterfall_3d', 'ribbon_3d', 'pie_3d',
+] as const
+
+const CHART_TYPES = [...CHART_TYPES_2D, ...CHART_TYPES_3D] as const
 
 const DATA = Array.from({ length: 12 }, (_, i) => {
   const angle = (i / 12) * Math.PI * 2
