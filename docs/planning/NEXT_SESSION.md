@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `3a97a4e`
+**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `03d3981`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -225,6 +225,15 @@ the file current.
 * `landing/src/app/press/page.tsx`. Logos, screenshots, founder
   bios (gated on user-blocked item 5 above), product video embed
   (when produced).
+
+### B2. Bundle-size audit — DONE (commit `03d3981`, partial)
+* compute-lab children (Workstation/MonteCarloPanel/EquationPlotter)
+  lazy-loaded — initial bundle dropped ~5 MB (the plotly dist). The
+  per-test 60 s timeout band-aid in visual-screenshots is gone;
+  /compute-lab now passes in ~24 s within the default 30 s. Other
+  large chunks flagged: `extends` (721 KB unnamed vendor),
+  ProjectWorkspace + ProjectKnowledgeGraph already lazy-routed.
+  Remaining pass over the initial 2 MB main bundle deferred.
 
 ### B4. Onboarding flow / first-run experience — DONE (commit `3a97a4e`)
 * Migration 022 added `users.has_completed_onboarding` (TRUE for legacy
