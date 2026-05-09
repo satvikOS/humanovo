@@ -1811,32 +1811,45 @@ export default function DataVisualization() {
 
       // ── CIRCULAR CHARTS ─────────────────────────────────────
       case 'pie':
+      case 'donut': {
+        // Drop labels on slices smaller than 4 % — under that the
+        // ${name} ${percent}% string overlaps neighbouring labels and
+        // looks like a dropped pixel. The legend still carries the
+        // full breakdown for those slices. Also: labelLine={false}
+        // because journal convention is "no leader line", and outer
+        // radius shrunk slightly to leave room for the labels we
+        // DO render.
+        const pieLabel = ({ name, percent }: { name?: string; percent?: number }) => {
+          const p = (percent ?? 0) * 100
+          if (p < 4) return ''
+          return `${name ?? ''} ${p.toFixed(0)}%`
+        }
+        const pieOuter = Math.max(40, height / 3 - 18)
+        const isPie = type === 'pie'
         return (
           <ResponsiveContainer width="100%" height={height}>
             <PieChart>
-              <Pie data={data} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={height / 3}
-                label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`} startAngle={o.startAngle} endAngle={o.startAngle + 360}>
+              <Pie
+                data={data}
+                dataKey="value"
+                nameKey="label"
+                cx="50%"
+                cy="50%"
+                outerRadius={pieOuter}
+                innerRadius={isPie ? 0 : o.innerRadius}
+                label={pieLabel}
+                labelLine={false}
+                startAngle={o.startAngle}
+                endAngle={o.startAngle + 360}
+                animationDuration={animDur}
+              >
                 {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
               </Pie>
               {tooltipEl}{legendEl}
             </PieChart>
           </ResponsiveContainer>
         )
-
-      case 'donut':
-        return (
-          <ResponsiveContainer width="100%" height={height}>
-            <PieChart>
-              <Pie data={data} dataKey="value" nameKey="label" cx="50%" cy="50%"
-                innerRadius={o.innerRadius} outerRadius={height / 3}
-                label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                startAngle={o.startAngle} endAngle={o.startAngle + 360}>
-                {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
-              </Pie>
-              {tooltipEl}{legendEl}
-            </PieChart>
-          </ResponsiveContainer>
-        )
+      }
 
       case 'radial_bar': {
         const rbData = data.map((d, i) => ({ ...d, fill: colors[i % colors.length] }))
