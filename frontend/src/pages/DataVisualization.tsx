@@ -999,7 +999,7 @@ export default function DataVisualization() {
     const today = new Date()
     const stamp = today.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
     const subtitle = `${typeMeta?.label || form.type} · n=${parsed.length}`
-    const caption = `${typeMeta?.label || form.type} of ${form.title.toLowerCase()}. ${parsed.length} observation${parsed.length === 1 ? '' : 's'} plotted; export at 4× PNG, vector SVG, or letter-size PDF via the toolbar above.`
+    const caption = `${typeMeta?.label || form.type} of ${form.title.toLowerCase()}. ${parsed.length} observation${parsed.length === 1 ? '' : 's'} plotted.`
     const source = `Humanovo Compute Lab · generated ${stamp}`
     const chart: ChartConfig = {
       id: `chart-${Date.now()}`,
