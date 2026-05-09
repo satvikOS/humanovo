@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios'
 import { toast } from '../contexts/ToastContext'
+import { logError } from '../lib/errorLog'
 import { getToken, clearToken, isTokenExpired } from './auth'
 
 // In production (CloudFront), set VITE_API_BASE_URL to the backend URL
@@ -140,6 +141,16 @@ apiClient.interceptors.response.use(
       } else {
         toast('error', message, { title: 'Request failed' })
       }
+    }
+    // Feed non-silent errors into the diagnostics ring buffer so a
+    // user filing a support ticket has the failed request visible
+    // even when the calling code silently swallows the rejection
+    // (e.g. background polls, optimistic UI fallbacks). 401/404 are
+    // expected control-flow errors and would just be noise.
+    if (!silent && error.response?.status !== 401 && error.response?.status !== 404) {
+      const url = error.config?.url || 'unknown'
+      const status = error.response?.status ?? 'network'
+      logError('manual', `API ${status} ${error.config?.method?.toUpperCase() || ''} ${url}: ${message}`)
     }
     return Promise.reject(error)
   }
