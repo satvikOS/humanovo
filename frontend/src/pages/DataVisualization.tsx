@@ -1369,7 +1369,18 @@ export default function DataVisualization() {
     // palette so a user can hand-tune individual series colors via
     // the per-color picker without leaving the original palette
     // selection (preserves the CB-safe attribution if applicable).
-    const namedPalette = getPalette(o.colorPalette)
+    // Journal themes (paper / nature / science / ieee) automatically
+    // upgrade to a colour-blind-safe palette (Okabe-Ito) when the user
+    // is still on the generic `default` palette. Roughly 8 % of male
+    // readers and 0.5 % of female readers can't distinguish standard
+    // editorial palettes, and most journals (Nature, Science, JAMA,
+    // PLOS) explicitly require CB-safe figures or call them out as
+    // strongly preferred. Users who explicitly pick a non-default
+    // palette keep their choice — we only override `default`.
+    const isJournalTheme = o.pubTheme && o.pubTheme !== 'screen'
+    const effectivePaletteName =
+      isJournalTheme && o.colorPalette === 'default' ? 'okabe_ito' : o.colorPalette
+    const namedPalette = getPalette(effectivePaletteName)
     const colors = (chart.customPalette && chart.customPalette.length > 0)
       ? namedPalette.map((c, i) => chart.customPalette![i] || c)
       : namedPalette
