@@ -95,21 +95,36 @@ function Toggle({
   onChange: (v: boolean) => void
   disabled?: boolean
 }) {
+  // Pill: 44×24 outer, 20×20 dot, 2px inset. The previous w-9/h-5
+  // version sized the dot to almost exactly the pill height
+  // (16 in 16 of vertical room) which made the dot visually escape
+  // the pill on some renders due to subpixel anti-aliasing — the
+  // image the user shared was the off-state dot bleeding past the
+  // right cap. Bumping pill to w-11 (44px) + h-6 (24px) leaves
+  // 4px of vertical breathing room and 4px each side of horizontal,
+  // so the dot is never within a pixel of the boundary.
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={enabled}
+      aria-disabled={disabled}
       onClick={() => !disabled && onChange(!enabled)}
       disabled={disabled}
       className={clsx(
-        'relative w-9 h-5 rounded-full transition-colors',
+        'relative w-11 h-6 rounded-full transition-colors flex-shrink-0',
         enabled ? 'bg-[var(--color-text)]' : 'bg-white/10',
         disabled && 'opacity-50 cursor-not-allowed',
       )}
     >
       <span
+        aria-hidden="true"
         className={clsx(
-          'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
-          enabled ? 'translate-x-4' : 'translate-x-0.5'
+          'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-150',
+          // Explicit left positioning instead of translate so a
+          // mid-transition repaint doesn't leave the dot at a
+          // sub-pixel boundary. left-0.5 = 2px on, left-[22px] = on.
+          enabled ? 'left-[22px]' : 'left-0.5',
         )}
       />
     </button>
