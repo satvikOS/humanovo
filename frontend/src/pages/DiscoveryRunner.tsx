@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom'
 import api, { apiClient } from '../services/api'
 import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
 import { notify } from '../lib/native'
+import { register as registerCloseGuard } from '../lib/closeGuard'
 
 const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
 const WS_BASE = _BACKEND
@@ -227,6 +228,16 @@ export default function DiscoveryRunner() {
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [])
+
+  // Register a close-guard while the pipeline is mid-run so the
+  // CloseGuardManager prompts the user instead of letting humanovo
+  // exit straight to discovery loss. Runs only when phase === 'running'
+  // — config and completed/error phases are safe to quit.
+  useEffect(() => {
+    if (phase !== 'running') return
+    const unregister = registerCloseGuard('A discovery is running')
+    return unregister
+  }, [phase])
 
   const costDollars = (cents: unknown) => { const n = typeof cents === 'number' && Number.isFinite(cents) ? cents : 0; return `$${(n / 100).toFixed(2)}` }
 

@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import RouteGatePlaceholder from './components/RouteGatePlaceholder'
 import DeepLinkRouter from './components/DeepLinkRouter'
 import UpdateChecker from './components/UpdateChecker'
+import CloseGuardManager from './components/CloseGuardManager'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import { isHiddenInV1 } from './utils/featureFlags'
@@ -122,6 +123,12 @@ function App() {
           bottom-right banner when one is available with a Restart-
           to-install CTA. Native-only via isNativeApp(). */}
       <UpdateChecker />
+      {/* Intercepts the native window's close request when long-
+          running work (e.g. an active discovery) has registered with
+          closeGuard, and prompts the user before letting humanovo
+          quit. Renderless; web-mode no-op (browsers handle their own
+          beforeunload). */}
+      <CloseGuardManager />
       <Routes>
       {/* Marketing lives at https://www.humanovo.net/ — the in-app /welcome,
           /pricing, /docs routes were removed (commit following this one)

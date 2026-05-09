@@ -35,6 +35,10 @@ tauri-plugin-window-state = "2"
 # a long-running discovery / agent run completes while humanovo isn't
 # focused. Renderer calls go through `frontend/src/lib/native.ts:notify`.
 tauri-plugin-notification = "2"
+# Native confirm/alert dialogs. Used by `CloseGuardManager` to ask
+# "Quit humanovo? A discovery is running" before letting the window
+# close while long-running work is in flight.
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

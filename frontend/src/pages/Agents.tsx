@@ -33,6 +33,7 @@ import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
 import { notify } from '../lib/native'
+import { register as registerCloseGuard } from '../lib/closeGuard'
 
 // Types
 interface TranslationalPhaseDetail {
@@ -172,6 +173,13 @@ export default function Agents() {
 
   // State
   const [state, setState] = useState<string>('idle')
+  // Block native window close while discovery is mid-run; users
+  // can still explicitly stop or pause from the UI.
+  useEffect(() => {
+    if (state !== 'running') return
+    const unregister = registerCloseGuard('A discovery is running')
+    return unregister
+  }, [state])
   const [stats, setStats] = useState<OrchestratorStatus | null>(null)
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])
   const [selectedHypothesis, setSelectedHypothesis] = useState<Hypothesis | null>(null)

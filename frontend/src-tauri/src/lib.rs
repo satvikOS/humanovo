@@ -63,6 +63,9 @@ pub fn run() {
         // the user gets a system-tray ping instead of having to babysit
         // the window.
         .plugin(tauri_plugin_notification::init())
+        // Native confirm dialogs. Backs the CloseGuardManager prompt
+        // when the user tries to quit while a discovery is running.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Re-register `humanovo://` at runtime so the scheme is
             // associated with this binary on first launch (Linux),
