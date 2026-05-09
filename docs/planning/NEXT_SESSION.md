@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-09 · **Branch:** `humanovo` · **Last commit:** `0835393`
+**Last touched:** 2026-05-09 · **Branch:** `humanovo` · **Last commit:** `1fe4712`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -174,6 +174,22 @@ the file current.
   `pages/genomics/{Variants,Expression,Pathway,Drug}.tsx` plus a
   shared `pages/genomics/constants.ts`. Keep `GenomicsAnalysis.tsx`
   as the orchestrator/router.
+
+### A3 Phase 2 — DONE (commit `1fe4712`)
+* `KG_DUAL_WRITE: bool = True` setting + `KG_BACKEND: str = "neo4j"`
+  hook for Phase 3 added.
+* `GraphStore.add_entity` / `.add_relation` mirror to
+  `PostgresGraphStore` after the Neo4j write succeeds; Postgres
+  failures log-warn and don't fail the request.
+* Same dual-write pattern across the 4 upsert paths in
+  `neo4j_population_service.py`.
+* Deterministic UUID5 id derivation in `PostgresGraphStore` so
+  dual-write + backfill stay idempotent regardless of upstream id
+  shape; original id audited in `properties.original_id`.
+* New `scripts/backfill_kg_to_postgres.py` — one-shot Neo4j → Postgres
+  walker, paged, idempotent, with `--dry-run` and `--page-size` flags.
+  Designed for an ECS one-shot task on AWS.
+* Read path still Neo4j — Phase 3 flips it behind `KG_BACKEND`.
 
 ### A3 Phase 1 + Visual KG — DONE (commit `0835393`)
 * PostgresGraphStore mirroring the GraphStore interface against the
