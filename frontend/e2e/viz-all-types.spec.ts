@@ -167,4 +167,13 @@ test('every chart type renders without crash', async ({ page }) => {
   expect(boundaryCount, 'no chart should hit the error boundary').toBe(0)
   expect(failed, `chart types missing from render: ${failed.join(', ')}`).toEqual([])
   expect(pageErrors, `pageerrors fired during render`).toHaveLength(0)
+
+  // Per-type screenshot grid — useful for eyeballing journal-grade
+  // typography and CB-safe palette application across all 49 types.
+  // Saved next to the spec so a future run can diff against the
+  // committed baseline once the visual surface stabilises.
+  await page.screenshot({
+    path: 'test-results/viz-all-types-grid.png',
+    fullPage: true,
+  })
 })

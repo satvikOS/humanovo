@@ -56,17 +56,10 @@ jobs:
           "$BIN_DIR/actionlint" -version
 
       - name: Lint workflows
-        run: |
-          # actionlint's -color flag is a boolean (no value). The
-          # earlier `-color always` invocation made actionlint treat
-          # `always` as a workflow file path and fail. GitHub Actions
-          # already strips ANSI on its log viewer when needed; -color
-          # with no argument forces colour output for terminal-side
-          # debugging.
-          #
-          # -shellcheck argument: pass shellcheck with a tuned
-          # -e exclude list. The codes silenced here are stylistic
-          # noise on patterns that are *intentional* in GitHub
+        env:
+          # SHELLCHECK_OPTS is read by shellcheck itself when
+          # actionlint invokes it. Silences the stylistic noise
+          # codes that fire on patterns *intentional* in GitHub
           # Actions:
           #   SC2086  Double quote to prevent globbing/word-splitting.
           #           Triggered on every `${{ var }}` interpolation
@@ -82,6 +75,17 @@ jobs:
           #           workflows pass through a known-safe filename set.
           # SC1xxx (real syntax errors) and SC2-codes outside this list
           # remain active, so a genuinely broken script still fails.
-          actionlint \
-            -color \
-            -shellcheck="shellcheck -e SC2086,SC2129,SC2001,SC2015,SC2046,SC2044"
+          # The previous attempt passed these via actionlint's
+          # `-shellcheck=` flag, but that flag expects a binary path,
+          # not a command-with-args — actionlint tried to exec a
+          # literal `shellcheck -e ...` and the workflow died with
+          # "exec format error" before linting anything.
+          SHELLCHECK_OPTS: "-e SC2086,SC2129,SC2001,SC2015,SC2046,SC2044"
+        run: |
+          # actionlint's -color flag is a boolean (no value). The
+          # earlier `-color always` invocation made actionlint treat
+          # `always` as a workflow file path and fail. GitHub Actions
+          # already strips ANSI on its log viewer when needed; -color
+          # with no argument forces colour output for terminal-side
+          # debugging.
+          actionlint -color
