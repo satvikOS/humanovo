@@ -190,6 +190,48 @@ the file current.
   pre-transform resolves the lazy imports in `lib/native.ts` once
   it's pulled into the production tree.
 
+### Desktop hardening pass 2 — DONE (2026-05-09 session, commits `e853991`–`24c2a9b`)
+13 commits, all desktop-only, all CI-green on the Win/Mac/Linux native
+build matrix. Major adds:
+* **Settings → Desktop App section** (`e853991`): manual update check,
+  report-issue link, Notifications subsection (permission status pill +
+  test-fire button), Launch-on-login toggle, build version + platform
+  display.
+* **Native OS notifications** via `tauri-plugin-notification`
+  (`7cb0343`, `f695970`, `5e1866b`): wired into `DiscoveryRunner`,
+  `Agents` discovery completions/failures, and `UpdateChecker`
+  launch-time check. `lib/native.ts:notify()` no-ops when window has
+  focus or in web mode.
+* **System tray** (`fd728f9`, `920b55d`): `tauri::tray` icon with
+  Show / Quit menu. Left-click focuses on Win/Linux; macOS uses
+  menu-on-left-click convention. Tray Quit goes through the same
+  close-guard prompt as the X button so accidental quits while a
+  discovery is running can be cancelled.
+* **Confirm-on-close while running** (`a74d2b5`): new
+  `lib/closeGuard.ts` registry + `CloseGuardManager` Tauri close-
+  request handler + `tauri-plugin-dialog`. DiscoveryRunner & Agents
+  register a guard while phase/state === 'running'.
+* **Cold-start deep links** (`b21822f`): `getInitialDeepLink()` reads
+  the URL the app was launched with so Stripe checkout returns + any
+  `humanovo://` clicks route correctly even when the OS spawned
+  humanovo fresh.
+* **Launch-on-login toggle** (`6131264`): `tauri-plugin-autostart`
+  registered (LaunchAgent on macOS) + Toggle in Settings. Re-reads
+  actual OS state after toggle so silent registration failures don't
+  leave the UI lying.
+* **"What's new?" link on update banner** (`24c2a9b`): opens the
+  matching GitHub Release page in the system browser via
+  `openExternal` so users can read what changed before committing
+  to the restart-to-install.
+
+Files added: `frontend/src/lib/closeGuard.ts`,
+`frontend/src/components/CloseGuardManager.tsx`. Files extended:
+`lib/native.ts` (notify, getAppVersion, getPlatform, getInitialDeepLink,
+getNotificationPermission, getAutostartEnabled, setAutostartEnabled),
+`pages/Settings.tsx` (DesktopSettings component, Toggle gains
+`disabled` prop), `App.tsx` (CloseGuardManager mount), `src-tauri/`
+(tray plugin + 3 new plugins + capabilities).
+
 ### Stage 5 admin rate limit — DONE (commit `4a4d7f6`)
 * New `app/core/rate_limit.py` — in-process per-IP token bucket
   + FastAPI dependency. Wired to /admin/* router as defence-in-depth
