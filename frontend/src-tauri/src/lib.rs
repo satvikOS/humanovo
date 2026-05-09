@@ -129,7 +129,18 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = w.set_focus();
                 }
             }
-            "quit" => app.exit(0),
+            // Route Quit through the main window's close-requested
+            // event so the renderer's CloseGuardManager gets a chance
+            // to prompt the user when a discovery is running. If the
+            // window is missing (shouldn't happen, but tray may fire
+            // post-close on macOS), fall back to a hard exit.
+            "quit" => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.close();
+                } else {
+                    app.exit(0);
+                }
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
