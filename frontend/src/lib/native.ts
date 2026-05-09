@@ -91,6 +91,29 @@ export async function onDeepLink(
 }
 
 /**
+ * Read the deep-link URLs the app was launched *with* — i.e. the
+ * cold-start case where humanovo wasn't running and the OS spawned
+ * it in response to a `humanovo://...` click. `onOpenUrl` only fires
+ * for runtime deliveries; without this, cold-start deep links land
+ * the user on /dashboard regardless of where the URL pointed.
+ *
+ * Returns the first URL (or null) so callers can route once on
+ * mount — most launches involve at most one initial URL.
+ */
+export async function getInitialDeepLink(): Promise<string | null> {
+  if (!isNativeApp()) return null
+  try {
+    const { getCurrent } = await import(/* @vite-ignore */ '@tauri-apps/plugin-deep-link')
+    const urls = await getCurrent()
+    if (urls && urls.length > 0) return urls[0]
+    return null
+  } catch (err) {
+    console.warn('native.getInitialDeepLink: failed', err)
+    return null
+  }
+}
+
+/**
  * Read the OS / arch the user is running on. Used by the in-app
  * "Send feedback" form so support tickets carry the platform context
  * without the user having to type it in. Returns a stable string so

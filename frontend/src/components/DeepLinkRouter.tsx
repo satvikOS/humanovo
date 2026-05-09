@@ -23,7 +23,7 @@
 
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { onDeepLink } from '../lib/native'
+import { onDeepLink, getInitialDeepLink } from '../lib/native'
 
 // path-prefix → router-path mapping. Add new entries here when wiring
 // a new deep-link surface. Anything outside this map falls through
@@ -74,6 +74,18 @@ export default function DeepLinkRouter() {
   useEffect(() => {
     let unlisten: (() => void) | null = null
     let cancelled = false
+
+    // Cold-start case: humanovo was launched *by* a deep link click
+    // (the OS spawned the binary fresh). onDeepLink only fires for
+    // runtime deliveries, so we'd miss the launch URL entirely
+    // without this. Replace history so the user can't Back into the
+    // pre-redirect /dashboard placeholder.
+    void getInitialDeepLink().then((url) => {
+      if (cancelled || !url) return
+      const target = resolveTarget(url)
+      if (target) navigate(target, { replace: true })
+    })
+
     onDeepLink((url) => {
       const target = resolveTarget(url)
       if (target) navigate(target, { replace: false })
