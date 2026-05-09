@@ -1564,6 +1564,12 @@ function formatRelative(iso: string | null): string {
 function DesktopSettings() {
   const [checking, setChecking] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<{ version: string; current: string } | null>(null)
+  // Phase the update button cycles through. `idle` → click → `checking`
+  // → if found, `downloading` (with progress %) → `installing` →
+  // relaunch (process exits). User-cancellable confirmation step
+  // happens between `found` and `downloading`.
+  const [updatePhase, setUpdatePhase] = useState<'idle' | 'checking' | 'found' | 'downloading' | 'installing'>('idle')
+  const [downloadPct, setDownloadPct] = useState(0)
   const [version, setVersion] = useState<string | null>(null)
   const [plat, setPlat] = useState<string | null>(null)
   const [notifPerm, setNotifPerm] = useState<'granted' | 'denied' | 'default' | null>(null)
@@ -1655,35 +1661,90 @@ function DesktopSettings() {
   const checkForUpdates = useCallback(async () => {
     setChecking(true)
     setUpdateInfo(null)
+    setUpdatePhase('checking')
+    setDownloadPct(0)
     try {
       const updaterMod = await import('@tauri-apps/plugin-updater')
       const u = await updaterMod.check()
-      if (u) {
-        setUpdateInfo({ version: u.version, current: u.currentVersion })
-        toast(
-          'success',
-          `Update available — humanovo ${u.version}. Restart-to-install banner is at the bottom-right.`,
-          { title: 'humanovo' },
-        )
-      } else {
-        toast('info', 'You’re running the latest version.', { title: 'humanovo' })
-      }
       // Stamp the last-checked timestamp on success regardless of
       // whether an update was found — both outcomes prove the check
-      // round-tripped to the manifest. Errors deliberately don't
-      // stamp so the UI still shows "Never" / a stale time when the
-      // user's offline.
+      // round-tripped to the manifest.
       const now = new Date().toISOString()
       try {
         localStorage.setItem(LAST_UPDATE_CHECK_KEY, now)
       } catch { /* storage disabled; degraded but not fatal */ }
       setLastCheck(now)
-    } catch (err) {
-      toast(
-        'error',
-        err instanceof Error ? err.message : 'Update check failed',
-        { title: 'humanovo' },
+
+      if (!u) {
+        setUpdatePhase('idle')
+        toast('info', 'You’re running the latest version.', { title: 'humanovo' })
+        return
+      }
+
+      setUpdateInfo({ version: u.version, current: u.currentVersion })
+
+      // Confirm before downloading — auto-installing without asking
+      // is hostile, especially mid-discovery. The user clicked
+      // "Check now" expecting an *option* to update; we surface the
+      // version + size and let them confirm. tauri-plugin-dialog's
+      // `ask` returns true on Yes.
+      const dialogMod = await import('@tauri-apps/plugin-dialog')
+      const ok = await dialogMod.ask(
+        `humanovo ${u.version} is available (you’re on ${u.currentVersion}). ` +
+          `Download and install now? humanovo will restart automatically.`,
+        {
+          title: 'Update humanovo?',
+          kind: 'info',
+          okLabel: 'Download & install',
+          cancelLabel: 'Not now',
+        },
       )
+      if (!ok) {
+        setUpdatePhase('found')
+        toast('info', `Update postponed. The launch-time check will offer humanovo ${u.version} again next start.`, {
+          title: 'humanovo',
+        })
+        return
+      }
+
+      // Download with live progress. Tauri's downloadAndInstall
+      // takes an event callback — we surface the percentage in the
+      // button label. Sequence:
+      //   Started      → contentLength known
+      //   Progress     → emitted ~10× per second on big payloads
+      //   Finished     → triggers install kickoff
+      //   then         → relaunch() exits the process
+      setUpdatePhase('downloading')
+      let downloaded = 0
+      let total = 0
+      await u.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            total = event.data.contentLength ?? 0
+            break
+          case 'Progress':
+            downloaded += event.data.chunkLength
+            if (total > 0) {
+              setDownloadPct(Math.min(100, Math.round((downloaded / total) * 100)))
+            }
+            break
+          case 'Finished':
+            setDownloadPct(100)
+            setUpdatePhase('installing')
+            break
+        }
+      })
+      // downloadAndInstall returns once the installer has run the
+      // upgrade. Now we relaunch — process exits and the new build
+      // takes over. Using plugin-process so the close-guard /
+      // CloseGuardManager pathway doesn't interfere.
+      const processMod = await import('@tauri-apps/plugin-process')
+      await processMod.relaunch()
+    } catch (err) {
+      setUpdatePhase('idle')
+      toast('error', err instanceof Error ? err.message : 'Update failed', {
+        title: 'humanovo',
+      })
     } finally {
       setChecking(false)
     }
@@ -1837,9 +1898,10 @@ function DesktopSettings() {
               Check for updates
             </div>
             <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-              Triggers an immediate check against the GitHub Releases manifest. The
-              installed version updates only on restart — the banner appears with a
-              one-click Restart-to-install button when an update is found.
+              Live update: humanovo checks the GitHub Releases manifest, asks before
+              downloading, then installs and restarts in one click — no separate
+              banner step. The launch-time check still surfaces the same prompt
+              automatically a few seconds after each start.
             </p>
             <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
               Last checked: {formatRelative(lastCheck)}
@@ -1850,14 +1912,18 @@ function DesktopSettings() {
             type="button"
             onClick={checkForUpdates}
             disabled={checking}
-            className="text-xs px-3 py-1.5 rounded-md disabled:opacity-50 active:scale-95 shrink-0"
+            className="text-xs px-3 py-1.5 rounded-md disabled:opacity-50 active:scale-95 shrink-0 min-w-[110px]"
             style={{
               background: 'var(--color-text)',
               color: 'var(--color-bg)',
               fontWeight: 500,
             }}
           >
-            {checking ? 'Checking…' : 'Check now'}
+            {updatePhase === 'checking' ? 'Checking…'
+              : updatePhase === 'downloading' ? `Downloading ${downloadPct}%`
+              : updatePhase === 'installing' ? 'Installing…'
+              : updatePhase === 'found' ? 'Postponed'
+              : 'Check now'}
           </button>
         </div>
 
