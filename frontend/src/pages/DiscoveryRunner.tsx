@@ -6,6 +6,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import api, { apiClient } from '../services/api'
 import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
+import { notify } from '../lib/native'
 
 const _BACKEND = import.meta.env.VITE_API_BASE_URL || ''
 const WS_BASE = _BACKEND
@@ -186,6 +187,13 @@ export default function DiscoveryRunner() {
         setBestHypothesis(msg.best_hypothesis_id as string)
         if (timerRef.current) clearInterval(timerRef.current)
         addLog('completed', `Run completed — ${msg.total_hypotheses} hypotheses generated`)
+        // Ping the OS so the user notices even if humanovo isn't focused.
+        // No-op in web mode, and skipped when the window already has
+        // focus — see lib/native.ts:notify.
+        void notify(
+          'Discovery complete',
+          `${msg.total_hypotheses} hypotheses generated. Switch back to humanovo to review.`,
+        )
         break
       case 'run_error':
         addLog('error', msg.error as string)
@@ -198,6 +206,10 @@ export default function DiscoveryRunner() {
           setPhase('error')
           setRunError(typeof msg.error === 'string' ? msg.error : 'Pipeline failed')
           if (timerRef.current) clearInterval(timerRef.current)
+          void notify(
+            'Discovery failed',
+            typeof msg.error === 'string' ? msg.error : 'Pipeline failed — open humanovo to retry.',
+          )
         }
         break
     }

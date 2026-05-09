@@ -28,6 +28,10 @@ tauri-plugin-process = "2"
 # launches so the user doesn't have to re-resize humanovo every time
 # they reopen it. Wired up in lib.rs.
 tauri-plugin-window-state = "2"
+# OS notification surface — used by the renderer to ping the user when
+# a long-running discovery / agent run completes while humanovo isn't
+# focused. Renderer calls go through `frontend/src/lib/native.ts:notify`.
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

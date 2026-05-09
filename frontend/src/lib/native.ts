@@ -101,3 +101,50 @@ export async function getPlatform(): Promise<string> {
   const { platform } = await import(/* @vite-ignore */ '@tauri-apps/plugin-os')
   return await platform() // 'macos' | 'windows' | 'linux' | 'ios' | 'android'
 }
+
+/**
+ * Fire an OS-native notification (the system tray ping, not an in-app
+ * toast). Used for events the user is likely waiting on but isn't
+ * actively watching the window for — discovery completion, long agent
+ * runs, ingestion finished — so they get a real desktop notification.
+ *
+ * Permission is requested on first call. The OS surfaces the prompt;
+ * if the user denies it, `notify()` silently returns false on every
+ * subsequent call. Callers should not depend on the notification
+ * actually firing — it's an accelerant, not a contract.
+ *
+ * Returns true when a notification was dispatched. Web mode and denied
+ * permission both return false; callers can fall back to in-app toast.
+ *
+ * Background-only by default — when humanovo's window already has
+ * focus we skip the OS ping (the user can see the in-app toast just
+ * fine), so we don't double-notify them. Pass `force: true` to
+ * override (rare; only used by tests).
+ */
+export async function notify(
+  title: string,
+  body: string,
+  opts: { force?: boolean } = {},
+): Promise<boolean> {
+  if (!isNativeApp()) return false
+  if (!opts.force) {
+    // The webview's `document.hasFocus()` is true exactly when humanovo
+    // is the foreground window. Skip the OS ping in that case — toast
+    // is enough.
+    if (typeof document !== 'undefined' && document.hasFocus()) return false
+  }
+  try {
+    const mod = await import(/* @vite-ignore */ '@tauri-apps/plugin-notification')
+    let granted = await mod.isPermissionGranted()
+    if (!granted) {
+      const result = await mod.requestPermission()
+      granted = result === 'granted'
+    }
+    if (!granted) return false
+    await mod.sendNotification({ title, body })
+    return true
+  } catch (err) {
+    console.warn('native.notify: dispatch failed', err)
+    return false
+  }
+}

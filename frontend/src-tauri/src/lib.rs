@@ -54,6 +54,11 @@ pub fn run() {
         // first-launch fallback is the size declared in
         // tauri.conf.json `app.windows[0]` (1440x900 centred).
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // OS-native notifications. Used when a long-running discovery
+        // or agent task finishes while humanovo is in the background —
+        // the user gets a system-tray ping instead of having to babysit
+        // the window.
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Re-register `humanovo://` at runtime so the scheme is
             // associated with this binary on first launch (Linux),
