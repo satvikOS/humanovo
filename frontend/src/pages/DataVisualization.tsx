@@ -248,6 +248,16 @@ const defaultOptions: ChartOptions = {
 // references for protan/deutan/tritan accessibility — Wong (Nature
 // Methods 2011) and Tol (SRON Tech Note 2018) are the de-facto
 // journal standards.
+//
+// PLATFORM POLICY — muted only: every palette entry must stay
+// within the muted register (~ <60% HSL saturation, lightness in
+// the 40–75% band). The rest of humanovo's visual surface is in
+// that register; bright primary-saturation hues would visually
+// scream against the tonal language of the app. When adding a new
+// palette: pick from a desaturated journal-style band, never
+// from primary-color territory. Tests don't enforce this — it's
+// a reviewer-eyeball check, but the comments here let the next
+// reader know the constraint exists.
 const PALETTES: Record<string, string[]> = {
   default: ['#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#7BA7B8', '#B07E8B', '#A89B6E', '#8598AD', '#7E9B8A', '#9B8EAD'],
   nature: ['#4A7C6F', '#5D9178', '#6FA583', '#81B792', '#94C7A2', '#749C76', '#5E8860', '#8CB186', '#6D9969', '#527E56'],
@@ -255,7 +265,12 @@ const PALETTES: Record<string, string[]> = {
   warm: ['#B57170', '#C48A6F', '#CFA277', '#D4B481', '#DABD8B', '#C19068', '#B87E5E', '#CF9E72', '#D5AA7D', '#C2886A'],
   pastel: ['#B8C4D8', '#C2B8D6', '#BDC8CA', '#D1C4B8', '#C8BDC8', '#B8CDB8', '#D3D1B8', '#C8BAB8', '#B8BFD6', '#C4C8C2'],
   scientific: ['#4A6670', '#5C8A82', '#8FA96C', '#C4A05C', '#B87A5C', '#6C7C4A', '#4A5C3C', '#9C8258', '#7C5C3C', '#2A4048'],
-  diverging: ['#B85450', '#C87A5E', '#D8A870', '#E8D088', '#F0F0B8', '#B8D890', '#88C070', '#58A858', '#389038', '#207828'],
+  // Diverging palette — desaturated red↔green band that stays within
+  // the platform's muted-only colour policy (every entry ≤ ~50%
+  // saturation). The earlier #58A858 / #207828 / #B85450 were too
+  // saturated and broke the visual register against the rest of the
+  // app, where every other palette sits in the muted band.
+  diverging: ['#A56560', '#B07E66', '#B89570', '#BFAB7C', '#C5BC8A', '#A8B888', '#88A87C', '#6E9670', '#5C8164', '#4A6E58'],
   monochrome: ['#2A3544', '#354252', '#404F60', '#4B5C6E', '#56697C', '#61768A', '#6C8398', '#7790A6', '#829DB4', '#8DAAC2'],
   // Color-blind-safe (CB) palettes — desaturated for the muted-only
   // platform palette policy. Each pair stays CB-distinguishable
@@ -1380,6 +1395,21 @@ export default function DataVisualization() {
     const isJournalTheme = o.pubTheme && o.pubTheme !== 'screen'
     const effectivePaletteName =
       isJournalTheme && o.colorPalette === 'default' ? 'okabe_ito' : o.colorPalette
+    // Uniform margin applied to every chart wrapper. Recharts'
+    // default `{ top: 5, right: 5, bottom: 5, left: 5 }` was too
+    // tight: the X-axis label (`insideBottom, offset -5`) collided
+    // with the bottom legend on every chart that had both. Padding
+    // the bottom to 28 + left to 24 gives both axis labels +
+    // legend room to coexist; right/top stay small so the plot
+    // area still dominates the card. tickStyle's per-theme
+    // baselines mean these absolute pixel values look proportional
+    // at any theme.
+    const chartMargin = {
+      top: 12,
+      right: 24,
+      bottom: o.showLegend && o.legendPosition === 'bottom' ? 32 : 16,
+      left: o.yLabel ? 24 : 8,
+    }
     const namedPalette = getPalette(effectivePaletteName)
     const colors = (chart.customPalette && chart.customPalette.length > 0)
       ? namedPalette.map((c, i) => chart.customPalette![i] || c)
@@ -1469,7 +1499,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             {hasTrend ? (
-              <ComposedChart data={data} barGap={o.barGap}>
+              <ComposedChart data={data} barGap={o.barGap} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
@@ -1477,7 +1507,7 @@ export default function DataVisualization() {
                 <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />
               </ComposedChart>
             ) : (
-              <BarChart data={data} barGap={o.barGap}>
+              <BarChart data={data} barGap={o.barGap} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
@@ -1490,7 +1520,7 @@ export default function DataVisualization() {
       case 'horizontal_bar':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={data} layout="vertical" barGap={o.barGap}>
+            <BarChart data={data} layout="vertical" barGap={o.barGap} margin={chartMargin}>
               {gridEl}
               <XAxis type="number" tick={AXIS_TICK} />
               <YAxis dataKey="label" type="category" tick={AXIS_TICK} width={90} />
@@ -1506,7 +1536,7 @@ export default function DataVisualization() {
           // Use value + value2 as two series
           return (
             <ResponsiveContainer width="100%" height={height}>
-              <BarChart data={data} barGap={o.barGap}>
+              <BarChart data={data} barGap={o.barGap} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" name="Series 1" fill={colors[0]} radius={[4, 4, 0, 0]} />
                 {data.some(d => d.value2 !== undefined) && <Bar dataKey="value2" name="Series 2" fill={colors[1]} radius={[4, 4, 0, 0]} />}
@@ -1523,7 +1553,7 @@ export default function DataVisualization() {
         })
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={pivoted} barGap={o.barGap}>
+            <BarChart data={pivoted} barGap={o.barGap} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               {cats.map((cat, i) => <Bar key={cat} dataKey={cat!} fill={colors[i % colors.length]} radius={[4, 4, 0, 0]} />)}
             </BarChart>
@@ -1537,7 +1567,7 @@ export default function DataVisualization() {
         if (cats.length === 0) {
           return (
             <ResponsiveContainer width="100%" height={height}>
-              <BarChart data={data}>
+              <BarChart data={data} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" stackId="a" fill={colors[0]} />
                 {data.some(d => d.value2 !== undefined) && <Bar dataKey="value2" stackId="a" fill={colors[1]} />}
@@ -1561,7 +1591,7 @@ export default function DataVisualization() {
         }
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={pivoted}>
+            <BarChart data={pivoted} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               {cats.map((cat, i) => <Bar key={cat} dataKey={cat!} stackId="a" fill={colors[i % colors.length]} />)}
             </BarChart>
@@ -1578,7 +1608,7 @@ export default function DataVisualization() {
         })
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={waterfallData}>
+            <BarChart data={waterfallData} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
               <Bar dataKey="end" fill="transparent" stackId="w">
                 {waterfallData.map((_, i) => <Cell key={i} fill="transparent" />)}
@@ -1597,7 +1627,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             {hasCI ? (
-              <ComposedChart data={finalData}>
+              <ComposedChart data={finalData} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 {/* CI band — shaded high - low envelope rendered behind the main line. */}
                 <Area type={o.smooth ? 'monotone' : 'linear'} dataKey="ciHigh" stroke="none" fill={colors[0]} fillOpacity={0.15} name={`+${Math.round(o.ciLevel * 100)}% CI`} />
@@ -1606,7 +1636,7 @@ export default function DataVisualization() {
                 {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
               </ComposedChart>
             ) : (
-              <LineChart data={finalData}>
+              <LineChart data={finalData} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
                 {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
@@ -1618,7 +1648,7 @@ export default function DataVisualization() {
       case 'multi_line':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <LineChart data={data}>
+            <LineChart data={data} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="monotone" dataKey="value" name="Series 1" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value')} />
               {data.some(d => d.value2 !== undefined) && <Line type="monotone" dataKey="value2" name="Series 2" stroke={colors[1]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value2')} />}
@@ -1630,7 +1660,7 @@ export default function DataVisualization() {
       case 'step':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <LineChart data={data}>
+            <LineChart data={data} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="stepAfter" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
@@ -1640,7 +1670,7 @@ export default function DataVisualization() {
       case 'spline':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <LineChart data={data}>
+            <LineChart data={data} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="natural" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
@@ -1651,7 +1681,7 @@ export default function DataVisualization() {
         // Lollipop chart: bars + dots
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <ComposedChart data={data}>
+            <ComposedChart data={data} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
               <Bar dataKey="value" fill={colors[0]} barSize={2} />
               <Line type="linear" dataKey="value" stroke="none" dot={{ r: o.markerSize + 2, fill: colors[0], strokeWidth: 0 }} />
@@ -1664,13 +1694,13 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             {hasTrend ? (
-              <ComposedChart data={data}>
+              <ComposedChart data={data} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
                 <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />
               </ComposedChart>
             ) : (
-              <AreaChart data={data}>
+              <AreaChart data={data} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
               </AreaChart>
@@ -1681,7 +1711,7 @@ export default function DataVisualization() {
       case 'stacked_area':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <AreaChart data={data}>
+            <AreaChart data={data} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
               <Area type="monotone" dataKey="value" stackId="1" name="Series 1" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} hide={hidden.has('value')} />
               {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" name="Series 2" stroke={colors[1]} fill={colors[1]} fillOpacity={o.fillOpacity} hide={hidden.has('value2')} />}
@@ -1693,7 +1723,7 @@ export default function DataVisualization() {
       case 'stream':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <AreaChart data={data} stackOffset="silhouette">
+            <AreaChart data={data} stackOffset="silhouette" margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               <Area type="monotone" dataKey="value" stackId="1" stroke={colors[0]} fill={colors[0]} fillOpacity={0.6} />
               {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" stroke={colors[1]} fill={colors[1]} fillOpacity={0.6} />}
@@ -1706,7 +1736,7 @@ export default function DataVisualization() {
         // Render as area between value (low) and value2 (high)
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <AreaChart data={data}>
+            <AreaChart data={data} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               <Area type="monotone" dataKey="value2" stroke="none" fill={colors[0]} fillOpacity={o.fillOpacity} name="Upper" />
               <Area type="monotone" dataKey="value" stroke="none" fill="var(--color-bg)" fillOpacity={1} name="Lower" />
@@ -1790,7 +1820,7 @@ export default function DataVisualization() {
       case 'scatter':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <ScatterChart>
+            <ScatterChart margin={chartMargin}>
               {gridEl}
               <XAxis dataKey="value" name={o.xLabel || 'X'} tick={AXIS_TICK} type="number" />
               <YAxis dataKey="value2" name={o.yLabel || 'Y'} tick={AXIS_TICK} type="number" />
@@ -1805,7 +1835,7 @@ export default function DataVisualization() {
       case 'bubble':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <ScatterChart>
+            <ScatterChart margin={chartMargin}>
               {gridEl}
               <XAxis dataKey="value" name="X" tick={AXIS_TICK} type="number" />
               <YAxis dataKey="value2" name="Y" tick={AXIS_TICK} type="number" />
@@ -1854,7 +1884,7 @@ export default function DataVisualization() {
         const hist = computeHistogram(data.map(d => d.value))
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={hist}>
+            <BarChart data={hist} margin={chartMargin}>
               {gridEl}
               <XAxis dataKey="label" tick={AXIS_TICK} />
               <YAxis tick={AXIS_TICK} />
@@ -1883,7 +1913,7 @@ export default function DataVisualization() {
         // Render as bar chart with custom rendering
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <ComposedChart data={boxData}>
+            <ComposedChart data={boxData} margin={chartMargin}>
               {gridEl}
               <XAxis dataKey="name" tick={AXIS_TICK} />
               <YAxis tick={AXIS_TICK} />
@@ -2020,7 +2050,7 @@ export default function DataVisualization() {
         }
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <AreaChart data={kdeData}>
+            <AreaChart data={kdeData} margin={chartMargin}>
               {gridEl}
               <XAxis dataKey="x" tick={AXIS_TICK} />
               <YAxis tick={AXIS_TICK} />
@@ -2035,7 +2065,7 @@ export default function DataVisualization() {
       case 'error_bar':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={data}>
+            <BarChart data={data} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
               <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]}>
                 <ErrorBar dataKey="errorPlus" width={4} strokeWidth={2} stroke={colors[1] || '#B07E8B'} />
@@ -2048,7 +2078,7 @@ export default function DataVisualization() {
         // value=open, value2=close, value3=high, errorPlus=low
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <ComposedChart data={data}>
+            <ComposedChart data={data} margin={chartMargin}>
               {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
               <Bar dataKey="value" fill="transparent" />
               {data.map((d, i) => {
