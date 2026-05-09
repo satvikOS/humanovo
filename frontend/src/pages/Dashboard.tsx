@@ -88,6 +88,17 @@ function RecentSimulationsWidget() {
   const navigate = useNavigate()
   const [simulations, setSimulations] = useState<SimulationSummary[]>([])
   const [loading, setLoading] = useState(true)
+  // `stale` mirrors the ActivityFeed pattern below: API failed AND
+  // local cache had something to show, so the widget is rendering
+  // potentially-stale data. Surface it as a "cached" pill so the
+  // user knows the live source is unreachable instead of silently
+  // showing pre-deploy state forever.
+  const [stale, setStale] = useState(false)
+  // Surfaced when the API fails AND the local fallback is empty — the
+  // pre-Stage-3 widget went silent here (loaded an empty list). Now
+  // we render an explicit error card with a Retry CTA.
+  const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // One-shot drain of pre-Round-4 localStorage collections to the
   // backend. Idempotent + sentineled; safe to call on every Dashboard
@@ -160,7 +171,8 @@ function RecentSimulationsWidget() {
     }
 
     allSims.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    if (allSims.length > 0) setSimulations(allSims.slice(0, 4))
+    const haveLocal = allSims.length > 0
+    if (haveLocal) setSimulations(allSims.slice(0, 4))
 
     const fetchSimulations = async () => {
       try {
@@ -181,17 +193,25 @@ function RecentSimulationsWidget() {
             return merged.slice(0, 4)
           })
         }
+        setStale(false)
+        setError(null)
       } catch (err) {
-        // API unavailable — localStorage data is already displayed.
-        // Log so a dev debugging "why is the simulation list empty"
-        // sees the upstream failure instead of silently shrugging.
         console.warn('Dashboard: simulations API unavailable; using local cache', err)
+        // Two-branch error UX: API down + local cache empty → show
+        // an error card with Retry. API down + local cache has data
+        // → show data with a "cached" pill (mirrors ActivityFeed).
+        if (haveLocal) {
+          setStale(true)
+          setError(null)
+        } else {
+          setError(err instanceof Error ? err.message : 'Couldn’t load simulations')
+        }
       } finally {
         setLoading(false)
       }
     }
     fetchSimulations()
-  }, [])
+  }, [refreshKey])
 
   return (
     <div className="glass-card p-4 h-full flex flex-col">
@@ -199,6 +219,14 @@ function RecentSimulationsWidget() {
         <div className="flex items-center gap-2">
           <FiActivity className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
           <h3 className="text-sm font-medium">Recent Simulations</h3>
+          {stale && (
+            <span
+              className="text-xxs px-1.5 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]"
+              title="Live API unreachable — showing locally-cached entries"
+            >
+              cached
+            </span>
+          )}
         </div>
         <Link to="/compute-lab?tab=montecarlo" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors px-2.5 py-1 rounded-full border border-[var(--glass-border)] hover:border-[var(--color-border-strong)]">
           All <FiArrowRight className="w-3 h-3" />
@@ -210,6 +238,18 @@ function RecentSimulationsWidget() {
           {[0, 1, 2].map(i => (
             <Skeleton key={i} height={40} style={{ borderRadius: 10 }} />
           ))}
+        </div>
+      ) : error && simulations.length === 0 ? (
+        <div role="alert" className="text-center py-4 text-[var(--color-text-muted)]">
+          <FiActivity className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
+          <p className="text-xs">Couldn’t load simulations</p>
+          <p className="text-xxs mt-1 max-w-xs mx-auto opacity-80">{error}</p>
+          <button
+            onClick={() => { setLoading(true); setError(null); setRefreshKey(k => k + 1) }}
+            className="text-xs mt-2 px-2.5 py-1 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors active:scale-95"
+          >
+            Try again
+          </button>
         </div>
       ) : simulations.length === 0 ? (
         <div className="text-center py-4 text-[var(--color-text-muted)]">
@@ -269,11 +309,18 @@ function RecentNotebooksWidget() {
   const navigate = useNavigate()
   const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
   const [loading, setLoading] = useState(true)
+  // Same two-branch error UX as RecentSimulationsWidget — see the
+  // commentary there for the rationale.
+  const [stale, setStale] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     type RemoteNotebook = { id: string; title?: string; updated_at?: string; created_at?: string; tags?: string[] }
     type LocalNotebook = { id: string; title?: string; updatedAt?: string; updated_at?: string; createdAt?: string; tags?: string[] }
+    let cancelled = false
     const fetchNotebooks = async () => {
+      let apiError: unknown = null
       try {
         const res = await api.getNotebookPages({ page_size: 4 })
         const items = ((res?.items || []) as RemoteNotebook[]).map((p) => ({
@@ -282,24 +329,45 @@ function RecentNotebooksWidget() {
           updated_at: p.updated_at || p.created_at || '',
           tags: p.tags || [],
         }))
-        if (items.length > 0) {
+        if (!cancelled && items.length > 0) {
           setNotebooks(items)
+          setStale(false)
+          setError(null)
           return
         }
-      } catch (err) { console.warn('Dashboard: notebooks API unavailable; using local index', err) }
+      } catch (err) {
+        apiError = err
+        console.warn('Dashboard: notebooks API unavailable; using local index', err)
+      }
+      // Fall through: API returned empty OR threw. Try the local
+      // index. If that also yields nothing AND we had an API error,
+      // surface the error UI; otherwise show the empty state.
       const pageIndex = persistGet<LocalNotebook[]>('notebook-index', [])
       const sorted = [...pageIndex].sort((a, b) =>
         new Date(b.updatedAt || b.updated_at || 0).getTime() - new Date(a.updatedAt || a.updated_at || 0).getTime()
       )
-      setNotebooks(sorted.slice(0, 4).map((p) => ({
+      const localItems = sorted.slice(0, 4).map((p) => ({
         id: p.id,
         title: p.title || 'Untitled',
         updated_at: p.updatedAt || p.updated_at || p.createdAt || '',
         tags: p.tags || [],
-      })))
+      }))
+      if (cancelled) return
+      setNotebooks(localItems)
+      if (apiError && localItems.length === 0) {
+        setError(apiError instanceof Error ? apiError.message : 'Couldn’t load notebooks')
+        setStale(false)
+      } else if (apiError && localItems.length > 0) {
+        setStale(true)
+        setError(null)
+      } else {
+        setStale(false)
+        setError(null)
+      }
     }
-    fetchNotebooks().finally(() => setLoading(false))
-  }, [])
+    fetchNotebooks().finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [refreshKey])
 
   return (
     <div className="glass-card p-4 h-full flex flex-col">
@@ -307,6 +375,14 @@ function RecentNotebooksWidget() {
         <div className="flex items-center gap-2">
           <FiBook className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
           <h3 className="text-sm font-medium">Recent Notebooks</h3>
+          {stale && (
+            <span
+              className="text-xxs px-1.5 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)]"
+              title="Live API unreachable — showing locally-cached entries"
+            >
+              cached
+            </span>
+          )}
         </div>
         <Link to="/notebook" className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-1 transition-colors px-2.5 py-1 rounded-full border border-[var(--glass-border)] hover:border-[var(--color-border-strong)]">
           All <FiArrowRight className="w-3 h-3" />
@@ -318,6 +394,18 @@ function RecentNotebooksWidget() {
           {[0, 1, 2].map(i => (
             <Skeleton key={i} height={40} style={{ borderRadius: 10 }} />
           ))}
+        </div>
+      ) : error && notebooks.length === 0 ? (
+        <div role="alert" className="text-center py-4 text-[var(--color-text-muted)]">
+          <FiBook className="w-5 h-5 mx-auto mb-1.5 opacity-40" />
+          <p className="text-xs">Couldn’t load notebooks</p>
+          <p className="text-xxs mt-1 max-w-xs mx-auto opacity-80">{error}</p>
+          <button
+            onClick={() => { setLoading(true); setError(null); setRefreshKey(k => k + 1) }}
+            className="text-xs mt-2 px-2.5 py-1 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors active:scale-95"
+          >
+            Try again
+          </button>
         </div>
       ) : notebooks.length === 0 ? (
         <div className="text-center py-4 text-[var(--color-text-muted)]">
@@ -393,11 +481,15 @@ const TYPE_ICONS: Record<string, typeof FiZap> = {
   discovery: FiCpu,
 }
 
-function ActivityFeed({ refreshKey }: { refreshKey: number }) {
+function ActivityFeed({ refreshKey: parentRefreshKey }: { refreshKey: number }) {
   const navigate = useNavigate()
   const [activities, setActivities] = useState<ActivityEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [stale, setStale] = useState(false)
+  // API down + local log empty → render an explicit error card with
+  // a Retry CTA, mirroring the simulations + notebooks widgets.
+  const [error, setError] = useState<string | null>(null)
+  const [innerKey, setInnerKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -413,6 +505,7 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
         created_at?: string
         metadata?: Record<string, unknown>
       }
+      let apiError: unknown = null
       try {
         const res = await api.getActivities({ page_size: 10 })
         if (cancelled) return
@@ -428,24 +521,37 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
         if (items.length > 0) {
           setActivities(items)
           setStale(false)
+          setError(null)
           return
         }
       } catch (err) {
         if (cancelled) return
-        // Surface "stale" state to the user (handled below) AND log so
-        // we can tell whether the activity feed went stale because of
-        // an auth blip, a 5xx, or a rate-limit.
+        apiError = err
+        // Surface "stale" / "error" state below depending on whether
+        // the local log has anything to show. Logged either way so a
+        // dev sees the upstream symptom (auth blip / 5xx / rate-limit).
         console.warn('Dashboard: activity feed API failed; falling back to local log', err)
-        setStale(true)
       }
-      if (!cancelled) setActivities(getActivityLog().slice(0, 10))
+      if (cancelled) return
+      const localLog = getActivityLog().slice(0, 10)
+      setActivities(localLog)
+      if (apiError && localLog.length === 0) {
+        setError(apiError instanceof Error ? apiError.message : 'Couldn’t load activity')
+        setStale(false)
+      } else if (apiError && localLog.length > 0) {
+        setStale(true)
+        setError(null)
+      } else {
+        setStale(false)
+        setError(null)
+      }
     }
     setLoading(true)
     fetchActivities().finally(() => {
       if (!cancelled) setLoading(false)
     })
     return () => { cancelled = true }
-  }, [refreshKey])
+  }, [parentRefreshKey, innerKey])
 
   return (
     <div className="glass-card p-5 h-full flex flex-col">
@@ -471,6 +577,18 @@ function ActivityFeed({ refreshKey }: { refreshKey: number }) {
           {[0, 1, 2, 3, 4].map(i => (
             <Skeleton key={i} height={48} style={{ borderRadius: 8 }} />
           ))}
+        </div>
+      ) : error && activities.length === 0 ? (
+        <div role="alert" className="text-center py-8 text-[var(--color-text-muted)] flex-1 flex flex-col items-center justify-center">
+          <FiClock className="w-6 h-6 mx-auto mb-2 opacity-40" />
+          <p className="text-sm">Couldn’t load recent activity</p>
+          <p className="text-xs mt-1 max-w-xs opacity-80">{error}</p>
+          <button
+            onClick={() => { setLoading(true); setError(null); setInnerKey(k => k + 1) }}
+            className="text-xs mt-3 px-2.5 py-1 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors active:scale-95"
+          >
+            Try again
+          </button>
         </div>
       ) : activities.length === 0 ? (
         <div className="text-center py-8 text-[var(--color-text-muted)] flex-1 flex flex-col items-center justify-center">
@@ -620,6 +738,10 @@ export default function Dashboard() {
   const [simulationCount, setSimulationCount] = useState(0)
   const [countsLoading, setCountsLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
+  // Projects-fetch error state — pre-Stage-3 this widget went silent
+  // when the API failed. Now we surface a Retry CTA so the user can
+  // recover without a full page reload.
+  const [projectsError, setProjectsError] = useState<string | null>(null)
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -627,8 +749,10 @@ export default function Dashboard() {
       const apiProjects = res?.items || []
       apiProjects.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
       setProjects(apiProjects)
+      setProjectsError(null)
     } catch (err) {
       console.warn('Dashboard: projects API unavailable', err)
+      setProjectsError(err instanceof Error ? err.message : 'Couldn’t load projects')
     } finally {
       setProjectsLoading(false)
     }
@@ -752,6 +876,23 @@ export default function Dashboard() {
             {[0, 1, 2].map(i => (
               <Skeleton key={i} height={92} style={{ borderRadius: 12 }} />
             ))}
+          </div>
+        ) : projectsError && projects.length === 0 ? (
+          <div role="alert" className="text-center py-6">
+            <FiFolder className="w-6 h-6 mx-auto mb-2 opacity-40" style={{ color: 'var(--color-text-muted)' }} />
+            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+              Couldn’t load projects
+            </p>
+            <p className="text-xs mt-1 max-w-md mx-auto" style={{ color: 'var(--color-text-muted)', opacity: 0.8 }}>
+              {projectsError}
+            </p>
+            <button
+              onClick={() => { setProjectsLoading(true); setProjectsError(null); setRefreshKey(k => k + 1) }}
+              className="text-xs mt-3 px-2.5 py-1 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] transition-colors active:scale-95"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Try again
+            </button>
           </div>
         ) : projects.length === 0 ? (
           <EmptyState
