@@ -1,13 +1,20 @@
-import { useState, useEffect } from 'react'
+import { lazy, Suspense, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FiCpu, FiTerminal, FiGrid, FiActivity, FiTrendingUp,
 } from 'react-icons/fi'
 import clsx from 'clsx'
-import Workstation from './Workstation'
-import MonteCarloPanel from './MonteCarloPanel'
-import EquationPlotter from './EquationPlotter'
 import type { ComputeMode } from './types'
+
+// Lazy-load each tab's panel — Workstation alone pulls in plotly-dist-min
+// (~3 MB minified) plus a MATLAB-style numeric interpreter, so eagerly
+// importing all three blows up the compute-lab initial paint and used to
+// trip the 30 s default test timeout under headless 7-worker contention.
+// Splitting them into separate chunks keeps the tab row painting fast and
+// the heavy work on demand.
+const Workstation = lazy(() => import('./Workstation'))
+const MonteCarloPanel = lazy(() => import('./MonteCarloPanel'))
+const EquationPlotter = lazy(() => import('./EquationPlotter'))
 
 const tabs: { id: ComputeMode; label: string; icon: typeof FiGrid; desc: string }[] = [
   { id: 'workstation', label: 'Workstation', icon: FiTerminal, desc: 'In-browser numeric compute workstation with 3D plotting' },
@@ -99,9 +106,20 @@ export default function ComputeLab() {
 
       {/* ── Content ── */}
       <div className="flex-1 overflow-hidden">
-        {mode === 'workstation' && <Workstation />}
-        {mode === 'montecarlo' && <MonteCarloPanel />}
-        {mode === 'equations' && <EquationPlotter />}
+        <Suspense
+          fallback={
+            <div
+              className="flex items-center justify-center h-full p-8 text-xs"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Loading…
+            </div>
+          }
+        >
+          {mode === 'workstation' && <Workstation />}
+          {mode === 'montecarlo' && <MonteCarloPanel />}
+          {mode === 'equations' && <EquationPlotter />}
+        </Suspense>
       </div>
     </div>
   )
