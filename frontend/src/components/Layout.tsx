@@ -50,9 +50,11 @@ import {
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
+import { useAuth } from '../contexts/useAuth'
 import { filterV1 } from '../utils/featureFlags'
 import { useWorkspace, WorkspaceTab } from '../contexts/WorkspaceContext'
 import HumanovoGlyph from './HumanovoGlyph'
+import { Onboarding } from './Onboarding'
 
 const mainNavItems = filterV1([
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
@@ -1256,6 +1258,10 @@ function ConstantChat() {
 
 export default function Layout() {
   const { theme, toggleTheme } = useTheme()
+  // Auth state — used to gate the first-run Onboarding wizard at the
+  // bottom of this component. The wizard renders once per user when
+  // the backend reports has_completed_onboarding === false.
+  const { user, loading: authLoading } = useAuth()
   const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
@@ -1709,6 +1715,16 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
       {/* Keyboard shortcuts cheatsheet */}
       <KeyboardShortcutsHelp isOpen={isShortcutsOpen} onClose={() => setIsShortcutsOpen(false)} />
+
+      {/* First-run onboarding wizard. Shown when:
+          - auth bootstrap finished (otherwise we'd flash on page reload),
+          - user is signed in,
+          - backend reports has_completed_onboarding === false.
+          The wizard's Skip / Finish handlers PATCH /me to flip the flag
+          and trigger refresh(), so it never re-opens after dismissal. */}
+      {!authLoading && user && user.has_completed_onboarding === false && (
+        <Onboarding />
+      )}
     </div>
   )
 }

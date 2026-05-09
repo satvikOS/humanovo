@@ -69,6 +69,7 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     is_verified: bool
+    has_completed_onboarding: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}

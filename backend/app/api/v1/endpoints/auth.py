@@ -53,6 +53,10 @@ class UserUpdateRequest(BaseModel):
     """User update request."""
     full_name: str | None = None
     email: EmailStr | None = None
+    # First-run onboarding wizard gate. The frontend PATCHes True when
+    # the user clicks Skip or completes the final step; once flipped
+    # the wizard never shows again.
+    has_completed_onboarding: bool | None = None
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
@@ -83,6 +87,7 @@ async def register(
             role=user.role.value,
             is_active=user.is_active,
             is_verified=user.is_verified,
+            has_completed_onboarding=user.has_completed_onboarding,
             created_at=user.created_at,
         )
     except HTTPException:
@@ -150,6 +155,7 @@ async def get_current_user_info(
         role=current_user.role.value if isinstance(current_user.role, UserRole) else current_user.role,
         is_active=current_user.is_active,
         is_verified=current_user.is_verified,
+        has_completed_onboarding=current_user.has_completed_onboarding,
         created_at=current_user.created_at,
     )
 
@@ -178,6 +184,7 @@ async def update_current_user(
         role=current_user.role.value if isinstance(current_user.role, UserRole) else current_user.role,
         is_active=current_user.is_active,
         is_verified=current_user.is_verified,
+        has_completed_onboarding=current_user.has_completed_onboarding,
         created_at=current_user.created_at,
     )
 
@@ -243,6 +250,7 @@ async def list_users(
             role=user.role.value if isinstance(user.role, UserRole) else user.role,
             is_active=user.is_active,
             is_verified=user.is_verified,
+            has_completed_onboarding=user.has_completed_onboarding,
             created_at=user.created_at,
         )
         for user in users

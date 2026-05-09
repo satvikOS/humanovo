@@ -30,6 +30,10 @@ export interface AuthUser {
   role: 'admin' | 'researcher' | 'lab' | 'institution' | string
   is_active: boolean
   is_verified: boolean
+  // First-run onboarding wizard gate. Backend defaults to TRUE for
+  // legacy rows so they never see the wizard; FALSE for new signups
+  // until the user clicks Skip or completes the last step.
+  has_completed_onboarding: boolean
   created_at: string
 }
 
@@ -129,6 +133,23 @@ export async function getMe(): Promise<AuthUser> {
   const token = getToken()
   if (!token) throw new Error('Not authenticated')
   const { data } = await authClient.get<AuthUser>('/me', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  return data
+}
+
+// Profile patch — currently used by the onboarding wizard to set
+// has_completed_onboarding=true on Skip / Finish, but accepts any
+// subset of UserUpdateRequest fields the backend allows (full_name,
+// email, has_completed_onboarding).
+export async function patchMe(updates: {
+  full_name?: string
+  email?: string
+  has_completed_onboarding?: boolean
+}): Promise<AuthUser> {
+  const token = getToken()
+  if (!token) throw new Error('Not authenticated')
+  const { data } = await authClient.patch<AuthUser>('/me', updates, {
     headers: { Authorization: `Bearer ${token}` },
   })
   return data

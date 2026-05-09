@@ -71,6 +71,13 @@ class User(BaseModel):
     is_verified = Column(Boolean, default=False, nullable=False)
     email_verified_at = Column(DateTime(timezone=True), nullable=True)
 
+    # First-run onboarding wizard gate. New signups land at FALSE so
+    # the wizard fires once; the wizard's "skip" / "finish" handlers
+    # PATCH this to TRUE. See migration 022 for the column-level
+    # default (TRUE for existing rows so we don't dunk them into a
+    # wizard unprompted post-deploy).
+    has_completed_onboarding = Column(Boolean, default=False, nullable=False)
+
     # Security
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     failed_login_attempts = Column(Integer, default=0, nullable=False)
