@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-09 · **Branch:** `humanovo` · **Last commit:** `7a0018f`
+**Last touched:** 2026-05-09 · **Branch:** `humanovo` · **Last commit:** `00f6231`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -174,6 +174,33 @@ the file current.
   `pages/genomics/{Variants,Expression,Pathway,Drug}.tsx` plus a
   shared `pages/genomics/constants.ts`. Keep `GenomicsAnalysis.tsx`
   as the orchestrator/router.
+
+### Stage 4 bundle audit follow-on — DONE (commit `00f6231`)
+* Main bundle 2,021 KB → 911 KB (-55%, ~1.1 MB shaved). Lazy-loaded
+  ProjectDetail, Settings, Notebook, Timeline, DataManager;
+  xlsx + Notebook now their own chunks loaded on demand. Three.js
+  (721 KB `extends-*.js`) already lazy via ResearchImaging /
+  HumanAnatomy / DataVisualization route chunks. visual-screenshots
+  56/56.
+
+### Stage 3 hardening — Dashboard worked example + 14 surfaces (commits `ed0ee43` → `ca598d0`)
+* Dashboard end-to-end (commit `ed0ee43`): 4 widgets gain explicit
+  error UX with Retry CTA + dedicated 5-test e2e spec.
+* Projects (`fe48b7a`): API-error banner gains Retry CTA + 4-test e2e.
+* Discovery / Agents (`7860009`): toast on silent control failures
+  + 4-test e2e.
+* Evidence (`cd195a0`): explicit error state with Retry + 3-test e2e.
+* Pages 5-15 (`ca598d0`): 11 dedicated -hardening.spec.ts files
+  pinning mount + primary CTA + key UX anchor for KG, Notebook,
+  Search, Timeline, Literature, Citations, Visualization,
+  Compute Lab, Genomics, Data Manager, Settings. 18/18 pass.
+
+### UIUX foundation — DONE (commit `41f219f`)
+* RouteGatePlaceholder wraps every route via PageWrapper +
+  LazyPageWrapper (placeholder mode — any click goes through;
+  Stage 5 flip is one-line).
+* PageStateBoundary primitive: drop-in loading/error/empty
+  sequencing with 50 ms grace + Retry CTA + EmptyState reuse.
 
 ### A3 Phase 3 — DONE (commit `7a0018f`)
 * `get_graph_store()` now consults `settings.KG_BACKEND` and returns
