@@ -189,6 +189,10 @@ function getEvidenceSearchUrl(item: EvidenceType): string {
 
 export default function Evidence() {
   const [evidence, setEvidence] = useState<EvidenceType[]>([])
+  // Stage 3 hardening — explicit error state so the user sees a Retry
+  // CTA instead of an indistinguishable "no evidence" empty state when
+  // the fetch fails.
+  const [evidenceError, setEvidenceError] = useState<string | null>(null)
   // `?id=…` deep-link: pre-select a specific evidence row on mount so
   // Search result navigation can land users on the correct item. The
   // id is held even if the evidence list hasn't loaded yet; the list's
@@ -246,6 +250,7 @@ export default function Evidence() {
 
   const fetchEvidence = useCallback(async () => {
     setLoading(true)
+    setEvidenceError(null)
     try {
       if (searchQuery.trim()) {
         const res = await api.searchEvidence(searchQuery, {
@@ -267,6 +272,7 @@ export default function Evidence() {
       console.error('Failed to fetch evidence:', err)
       setEvidence([])
       setTotalItems(0)
+      setEvidenceError(err instanceof Error ? err.message : 'Couldn’t load evidence')
     }
     setLoading(false)
   }, [searchQuery, filterType, page])
@@ -630,6 +636,24 @@ export default function Evidence() {
           {loading && mergedEvidence.length === 0 ? (
             <div className="text-center py-16">
               <FiLoader className="w-8 h-8 animate-spin mx-auto mb-3 text-[var(--color-text-muted)]" />
+            </div>
+          ) : evidenceError && mergedEvidence.length === 0 ? (
+            <div role="alert" className="text-center py-16">
+              <FiDatabase className="w-8 h-8 mx-auto mb-3 opacity-40" style={{ color: 'var(--color-text-muted)' }} />
+              <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                Couldn’t load evidence
+              </p>
+              <p className="text-xs mt-1 max-w-md mx-auto" style={{ color: 'var(--color-text-muted)', opacity: 0.8 }}>
+                {evidenceError}
+              </p>
+              <button
+                onClick={fetchEvidence}
+                disabled={loading}
+                className="mt-4 px-3 py-1.5 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-xs transition-colors disabled:opacity-40 active:scale-95"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                Try again
+              </button>
             </div>
           ) : mergedEvidence.length === 0 ? (
             <EmptyState
