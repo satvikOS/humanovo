@@ -1404,10 +1404,18 @@ export default function DataVisualization() {
     // area still dominates the card. tickStyle's per-theme
     // baselines mean these absolute pixel values look proportional
     // at any theme.
+    // Bottom margin grows when we have chrome there. Top margin
+    // grows when the legend is forced to the top (the both-present
+    // case escape valve — see legendVAlign computation below). Other
+    // axis-specific tweaks: yLabel needs left padding so the rotated
+    // label has somewhere to live without colliding with the y-tick
+    // numbers.
+    const hasBottomLegend = o.showLegend && o.legendPosition === 'bottom'
+    const legendForcedTop = o.xLabel && hasBottomLegend
     const chartMargin = {
-      top: 12,
+      top: legendForcedTop || o.legendPosition === 'top' ? 36 : 12,
       right: 24,
-      bottom: o.showLegend && o.legendPosition === 'bottom' ? 32 : 16,
+      bottom: o.xLabel ? 36 : hasBottomLegend && !legendForcedTop ? 32 : 16,
       left: o.yLabel ? 24 : 8,
     }
     const namedPalette = getPalette(effectivePaletteName)
@@ -1448,7 +1456,42 @@ export default function DataVisualization() {
       const k = e?.dataKey
       if (typeof k === 'string' || typeof k === 'number') toggleSeries(chart.id, String(k))
     }
-    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: theme.legendFontSize * fs, cursor: 'pointer', fontFamily: theme.bodyFont, color: theme.textColor }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none', color: theme.textColor }}>{value}</span>} /> : null
+    // When both an X-axis label and a bottom legend are present,
+    // they compete for the same bottom margin band and partially
+    // overlap. Recharts doesn't auto-stack them. Working around by
+    // moving the legend to the TOP for that case — keeps both
+    // visible without playing pixel-tetris with paddingTop. When
+    // user explicitly picks legendPosition: 'top'/'left'/'right'
+    // we honour it. Only the bottom-default case flips.
+    const legendVAlign: 'top' | 'middle' | 'bottom' =
+      o.xLabel && hasBottomLegend ? 'top'
+      : o.legendPosition === 'top' ? 'top'
+      : 'bottom'
+    const legendAlign: 'left' | 'center' | 'right' =
+      o.legendPosition === 'left' ? 'left'
+      : o.legendPosition === 'right' ? 'right'
+      : 'center'
+    const legendWrapperStyle: React.CSSProperties = {
+      fontSize: theme.legendFontSize * fs,
+      cursor: 'pointer',
+      fontFamily: theme.bodyFont,
+      color: theme.textColor,
+    }
+    const legendEl = o.showLegend ? (
+      <Legend
+        verticalAlign={legendVAlign}
+        align={legendAlign}
+        wrapperStyle={legendWrapperStyle}
+        onClick={handleLegendClick}
+        formatter={(value: string) => (
+          <span style={{
+            opacity: hidden.has(value) ? 0.3 : 1,
+            textDecoration: hidden.has(value) ? 'line-through' : 'none',
+            color: theme.textColor,
+          }}>{value}</span>
+        )}
+      />
+    ) : null
     const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke={theme.axisColor} fill={theme.bg === 'transparent' ? 'var(--glass-bg)' : '#F0F0F0'} travellerWidth={8} /> : null
     const xAxisProps: Record<string, unknown> = {
       dataKey: 'label',
@@ -1456,7 +1499,13 @@ export default function DataVisualization() {
       stroke: theme.axisColor,
       strokeWidth: theme.axisStrokeWidth,
       tickFormatter: xTickFmt,
-      label: o.xLabel ? { value: o.xLabel, position: 'insideBottom', offset: -5, style: labelStyle } : undefined,
+      // X-axis label sits outside the plot area (`position: 'bottom'`)
+      // with a small dy to clear the tick labels. Earlier
+      // `position: 'insideBottom', offset: -5` rendered the label
+      // INSIDE the plot at the same y as the bottom legend, so they
+      // visually collided. Outside-the-axis is the journal-figure
+      // convention anyway.
+      label: o.xLabel ? { value: o.xLabel, position: 'bottom', dy: 8, style: labelStyle } : undefined,
       scale: o.logScaleX ? 'log' : 'auto',
     }
     if (o.tickCountX && o.tickCountX > 0) xAxisProps.tickCount = o.tickCountX
