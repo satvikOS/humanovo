@@ -20,7 +20,7 @@ import {
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
 import api, { type IngestionJob } from '../services/api'
-import { isNativeApp, openExternal } from '../lib/native'
+import { isNativeApp, openExternal, getAppVersion, getPlatform } from '../lib/native'
 import { toast } from '../contexts/ToastContext'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -1510,6 +1510,23 @@ function IntegrationSettings() {
 function DesktopSettings() {
   const [checking, setChecking] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<{ version: string; current: string } | null>(null)
+  const [version, setVersion] = useState<string | null>(null)
+  const [plat, setPlat] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Pull build info eagerly so the rendered values are stable —
+    // the user shouldn't see them shift between dashes and the real
+    // string after a render. Both helpers are no-throw.
+    let cancelled = false
+    void Promise.all([getAppVersion(), getPlatform()]).then(([v, p]) => {
+      if (cancelled) return
+      setVersion(v)
+      setPlat(p)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const checkForUpdates = useCallback(async () => {
     setChecking(true)
@@ -1539,10 +1556,17 @@ function DesktopSettings() {
   }, [])
 
   const reportIssue = useCallback(async () => {
-    // Pre-fill the issue title with the platform so triage doesn't
-    // have to ask. Body is left blank for the user; the Settings
-    // surface can't know what they want to file.
-    const url = 'https://github.com/satvikOS/humanovo/issues/new?labels=desktop'
+    // Pre-fill the issue body with build info so triage doesn't have
+    // to ask "what version / OS?". The user types over the placeholder
+    // sections to describe their actual issue.
+    const body =
+      `**Build**: humanovo ${version ?? 'unknown'} · ${plat ?? 'unknown'}\n\n` +
+      `**Steps to reproduce**:\n1. \n2. \n\n` +
+      `**Expected**:\n\n` +
+      `**Actual**:\n`
+    const url =
+      'https://github.com/satvikOS/humanovo/issues/new?labels=desktop' +
+      `&body=${encodeURIComponent(body)}`
     try {
       await openExternal(url)
     } catch (err) {
@@ -1552,16 +1576,19 @@ function DesktopSettings() {
         { title: 'humanovo' },
       )
     }
-  }, [])
+  }, [version, plat])
 
   return (
     <div className="max-w-2xl">
       <h2 className="text-lg font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
         Desktop App
       </h2>
-      <p className="text-xs mb-6" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="text-xs mb-2" style={{ color: 'var(--color-text-muted)' }}>
         Native-shell affordances. The auto-updater also runs ~3 seconds after launch and
         surfaces a Restart-to-install banner when an update is available.
+      </p>
+      <p className="text-xs mb-6" style={{ color: 'var(--color-text-secondary)' }}>
+        humanovo {version ?? '…'} · {plat ?? '…'}
       </p>
 
       <div className="space-y-4">

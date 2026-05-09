@@ -103,6 +103,24 @@ export async function getPlatform(): Promise<string> {
 }
 
 /**
+ * Read the bundled native app version (the `version` field from
+ * `tauri.conf.json` / `Cargo.toml`). Used by Settings → Desktop App
+ * to surface the build the user is running so support tickets can
+ * cite a concrete version. Web mode returns null — there's no native
+ * binary to version against.
+ */
+export async function getAppVersion(): Promise<string | null> {
+  if (!isNativeApp()) return null
+  try {
+    const { getVersion } = await import(/* @vite-ignore */ '@tauri-apps/api/app')
+    return await getVersion()
+  } catch (err) {
+    console.warn('native.getAppVersion: failed', err)
+    return null
+  }
+}
+
+/**
  * Fire an OS-native notification (the system tray ping, not an in-app
  * toast). Used for events the user is likely waiting on but isn't
  * actively watching the window for — discovery completion, long agent
