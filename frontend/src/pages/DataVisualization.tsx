@@ -1416,6 +1416,14 @@ export default function DataVisualization() {
     // axis-specific tweaks: yLabel needs left padding so the rotated
     // label has somewhere to live without colliding with the y-tick
     // numbers.
+    // Animation is suppressed on journal themes regardless of the
+    // user's toggle — paper figures are static, animation can disrupt
+    // PDF export rendering, and the user picking a journal theme
+    // implicitly opts into static-figure semantics. They can still
+    // see animation when on the screen theme.
+    const isJournal = o.pubTheme && o.pubTheme !== 'screen'
+    const effectiveAnimate = isJournal ? false : !!o.animate
+    const animDur = effectiveAnimate ? 400 : 0
     const hasBottomLegend = o.showLegend && o.legendPosition === 'bottom'
     const legendForcedTop = o.xLabel && hasBottomLegend
     const chartMargin = {
@@ -1556,7 +1564,7 @@ export default function DataVisualization() {
             {hasTrend ? (
               <ComposedChart data={data} barGap={o.barGap} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
-                <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
+                <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={animDur} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
                 </Bar>
                 <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />
@@ -1564,7 +1572,7 @@ export default function DataVisualization() {
             ) : (
               <BarChart data={data} barGap={o.barGap} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
-                <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')}>
+                <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={animDur} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
                 </Bar>
               </BarChart>
@@ -1687,13 +1695,13 @@ export default function DataVisualization() {
                 {/* CI band — shaded high - low envelope rendered behind the main line. */}
                 <Area type={o.smooth ? 'monotone' : 'linear'} dataKey="ciHigh" stroke="none" fill={colors[0]} fillOpacity={0.15} name={`+${Math.round(o.ciLevel * 100)}% CI`} />
                 <Area type={o.smooth ? 'monotone' : 'linear'} dataKey="ciLow" stroke="none" fill={theme.bg === 'transparent' ? 'var(--color-bg)' : theme.bg} fillOpacity={1} legendType="none" />
-                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
+                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={animDur} hide={hidden.has('value')} />
                 {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
               </ComposedChart>
             ) : (
               <LineChart data={finalData} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
-                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={o.animate ? 400 : 0} hide={hidden.has('value')} />
+                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={animDur} hide={hidden.has('value')} />
                 {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
               </LineChart>
             )}
