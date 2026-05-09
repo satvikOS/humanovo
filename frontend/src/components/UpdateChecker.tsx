@@ -53,6 +53,14 @@ export default function UpdateChecker() {
       try {
         const updaterMod = await import('@tauri-apps/plugin-updater')
         const u = await updaterMod.check()
+        // Stamp the last-checked timestamp so Settings → Check for
+        // updates reflects automatic launch-time checks, not just
+        // manual ones. Done unconditionally on a successful round-
+        // trip — present-and-no-update is still proof we contacted
+        // the manifest. Key matches the constant in Settings.tsx.
+        try {
+          localStorage.setItem('humanovo.lastUpdateCheck', new Date().toISOString())
+        } catch { /* storage disabled; degraded but not fatal */ }
         if (cancelled || !u) return
         // Honour a per-version snooze so the user doesn't see the
         // banner repeatedly within a single session if they

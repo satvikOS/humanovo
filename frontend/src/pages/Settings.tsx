@@ -1528,6 +1528,24 @@ function IntegrationSettings() {
 // link to the GitHub Issues page via openExternal so the OS browser
 // owns the Authentication flow with GitHub instead of the WebView.
 
+// localStorage key used by both the manual "Check now" path and the
+// launch-time UpdateChecker so the timestamp is shared across surfaces.
+const LAST_UPDATE_CHECK_KEY = 'humanovo.lastUpdateCheck'
+
+function formatRelative(iso: string | null): string {
+  if (!iso) return 'never'
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return 'never'
+  const diffSec = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (diffSec < 60) return 'just now'
+  const diffMin = Math.round(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.round(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.round(diffHr / 24)
+  return `${diffDay}d ago`
+}
+
 function DesktopSettings() {
   const [checking, setChecking] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<{ version: string; current: string } | null>(null)
@@ -1537,6 +1555,13 @@ function DesktopSettings() {
   const [testingNotif, setTestingNotif] = useState(false)
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [togglingAutostart, setTogglingAutostart] = useState(false)
+  const [lastCheck, setLastCheck] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LAST_UPDATE_CHECK_KEY)
+    } catch {
+      return null
+    }
+  })
 
   const refreshNotifPerm = useCallback(async () => {
     const p = await getNotificationPermission()
@@ -1628,6 +1653,16 @@ function DesktopSettings() {
       } else {
         toast('info', 'You’re running the latest version.', { title: 'humanovo' })
       }
+      // Stamp the last-checked timestamp on success regardless of
+      // whether an update was found — both outcomes prove the check
+      // round-tripped to the manifest. Errors deliberately don't
+      // stamp so the UI still shows "Never" / a stale time when the
+      // user's offline.
+      const now = new Date().toISOString()
+      try {
+        localStorage.setItem(LAST_UPDATE_CHECK_KEY, now)
+      } catch { /* storage disabled; degraded but not fatal */ }
+      setLastCheck(now)
     } catch (err) {
       toast(
         'error',
@@ -1782,11 +1817,10 @@ function DesktopSettings() {
               installed version updates only on restart — the banner appears with a
               one-click Restart-to-install button when an update is found.
             </p>
-            {updateInfo && (
-              <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                Available: {updateInfo.version} (current: {updateInfo.current}).
-              </p>
-            )}
+            <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+              Last checked: {formatRelative(lastCheck)}
+              {updateInfo && ` · available: ${updateInfo.version} (current: ${updateInfo.current})`}
+            </p>
           </div>
           <button
             type="button"
