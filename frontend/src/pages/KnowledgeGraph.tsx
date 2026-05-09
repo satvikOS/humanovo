@@ -9,6 +9,7 @@ import {
 import { api, apiClient, Entity } from '../services/api'
 import { toast } from '../contexts/ToastContext'
 import { modalBackdropProps } from '../utils/clickable'
+import KnowledgeGraphView from '../components/KnowledgeGraphView'
 
 // Entity type colors and configurations
 const ENTITY_COLORS = {
@@ -506,6 +507,13 @@ export default function KnowledgeGraph() {
 
   return (
     <div className="h-full flex flex-col bg-[var(--color-bg)]">
+      {/* Scope toggle + compact KG strip — Private (current user's
+          owned entities) vs Common (community pool). Sits above the
+          full explorer chrome below; the explorer continues to drive
+          its own data flow for now (Phase 2 will unify when the
+          PostgresGraphStore swap lands). */}
+      <ScopedKnowledgeGraphPanel />
+
       {/* Header */}
       <div className="p-4 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
         <div className="flex items-center justify-between mb-3">
@@ -1106,6 +1114,75 @@ export default function KnowledgeGraph() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+// ─── Scoped panel (Private / Common / All) ─────────────────────────
+// Sibling component: shows a compact KG view at the top of the
+// explorer page, scoped by the user-selected toggle. Hits the new
+// /knowledge-graph/scope/{scope} backend endpoint.
+
+function ScopedKnowledgeGraphPanel() {
+  const [scope, setScope] = useState<"private" | "common" | "all">("all")
+  const labels: Record<typeof scope, { title: string; sub: string }> = {
+    private: {
+      title: "Private",
+      sub: "Entities you own — only visible to you.",
+    },
+    common: {
+      title: "Common",
+      sub: "Community pool — visible to every authenticated user.",
+    },
+    all: {
+      title: "All visible",
+      sub: "Your private entities + the community pool.",
+    },
+  }
+  return (
+    <div
+      className="px-4 pt-4 pb-3 border-b"
+      style={{ borderColor: "var(--color-border)", background: "var(--color-bg)" }}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+            {labels[scope].title} knowledge graph
+          </h2>
+          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+            {labels[scope].sub}
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          {(["private", "common", "all"] as const).map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setScope(s)}
+              className="text-xs px-3 py-1 rounded-md"
+              style={{
+                background:
+                  scope === s ? "var(--color-text)" : "transparent",
+                color: scope === s ? "var(--color-bg)" : "var(--color-text-muted)",
+                border: "1px solid var(--color-border)",
+                fontWeight: scope === s ? 500 : 400,
+              }}
+            >
+              {labels[s].title}
+            </button>
+          ))}
+        </div>
+      </div>
+      <KnowledgeGraphView
+        fetchScope={scope}
+        height={280}
+        emptyLabel={
+          scope === "private"
+            ? "No private entities yet — write a hypothesis or save a paper to start populating your graph."
+            : "No community entities reachable yet."
+        }
+      />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { apiClient } from '../services'
 import { STAGE_CODES, stageLabel } from '../constants/pipelineStages'
+import KnowledgeGraphView from '../components/KnowledgeGraphView'
 
 interface HypothesisDetail {
   id: string
@@ -260,6 +261,19 @@ export default function HypothesisReview() {
         )}
         <p className="text-sm mt-3" style={{ color: 'var(--color-text-muted)' }}>{hyp.summary}</p>
       </div>
+
+      {/* Section 1.5: Knowledge Graph subgraph */}
+      <Section title="Knowledge Graph">
+        <p className="text-xs mb-3" style={{ color: 'var(--color-text-muted)' }}>
+          Entities mentioned in this hypothesis (statement + mechanism + tags), with the
+          relationships humanovo's KG has on file. Hover a node for details.
+        </p>
+        <KnowledgeGraphView
+          fetchHypothesisId={hyp.id}
+          height={320}
+          emptyLabel="No KG entities matched this hypothesis yet — the graph fills in as ingestion lands more facts."
+        />
+      </Section>
 
       {/* Section 2: Pipeline Trace Accordion */}
       <Section title="Pipeline Trace">

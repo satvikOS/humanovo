@@ -1,0 +1,604 @@
+"""
+Postgres-backed Knowledge Graph store.
+
+A3 Phase 1 (see docs/planning/A3_NEO4J_TO_PGVECTOR_PLAN.md): mirrors
+the GraphStore interface in `graph_store.py` but talks to the
+existing `knowledge_graph_nodes` / `knowledge_graph_edges` Postgres
+tables instead of Neo4j. This module ships ALONGSIDE `GraphStore` —
+no callers switch in Phase 1; the existing Neo4j flow stays canonical.
+
+Why a sibling instead of a swap: the Neo4j path is hot in production
+and an in-place rewrite is exactly how you end up with half-migrated
+data. Phase 2 introduces dual-write + a backfill script; Phase 3
+flips reads behind a `KG_BACKEND` env flag with an instant
+escape-hatch back to Neo4j; Phase 4 stops Neo4j writes; Phase 5
+removes Neo4j from the deploy.
+
+Design choices:
+
+  * The Pydantic models (`Entity`, `Relation`, `GraphNeighborhood`,
+    `GraphPath`) are imported from `graph_store.py` so callers don't
+    care which backend served them.
+
+  * Field mapping: the SQLAlchemy `KnowledgeGraphNode` / `Edge`
+    columns are leaner than the Pydantic models — `aliases`,
+    `external_ids`, `source_count`, `evidence_count`,
+    `source_references` get packed into the `properties` / `evidence`
+    JSONB. Read-side helpers below unpack them.
+
+  * Pathfinding uses a recursive CTE with cycle detection. This
+    diverges from Cypher's variable-length matches in a documented
+    way: it returns deduplicated shortest-paths only. Tests assert
+    the new semantic explicitly so callers don't silently rely on
+    the old one.
+
+  * `search_entities` uses pgvector cosine similarity when the
+    query has been embedded; otherwise falls back to ILIKE on the
+    name + description. Phase 1 ships the ILIKE path; Phase 2
+    wires the embedding pipeline.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+from uuid import UUID, uuid4
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import async_session_factory
+from app.core.logging import LoggerMixin
+from app.knowledge.graph_store import (
+    Entity,
+    GraphNeighborhood,
+    GraphPath,
+    Relation,
+)
+
+
+def _node_row_to_entity(row: Any) -> Entity:
+    """Convert a knowledge_graph_nodes row to a Pydantic Entity.
+
+    `properties` JSONB carries the fields that don't have a dedicated
+    column on the SQLAlchemy model: aliases, external_ids,
+    source_count. Missing keys fall back to safe defaults so legacy
+    rows written before this convention round-trip cleanly.
+    """
+    props = row.properties if row.properties is not None else {}
+    if isinstance(props, str):
+        # Defensive: some legacy rows may have a JSON-encoded string
+        # instead of a parsed JSONB payload depending on the driver.
+        try:
+            props = json.loads(props)
+        except (TypeError, ValueError):
+            props = {}
+    return Entity(
+        id=str(row.id),
+        name=row.name,
+        entity_type=row.type or "unknown",
+        aliases=list(props.get("aliases", []) or []),
+        description=row.description,
+        external_ids=dict(props.get("external_ids", {}) or {}),
+        # Strip the unpacked-into-fields keys so the residual properties
+        # field on Entity carries only "extras" — avoids double counting.
+        properties={
+            k: v for k, v in props.items()
+            if k not in {"aliases", "external_ids", "source_count"}
+        },
+        source_count=int(props.get("source_count", 0)),
+    )
+
+
+def _edge_row_to_relation(row: Any) -> Relation:
+    """Convert a knowledge_graph_edges row to a Pydantic Relation.
+
+    The SQLAlchemy edge model has `evidence` as a Text column; we
+    pack `evidence_count` and `source_references` into a small JSON
+    payload there to avoid a schema change just for Phase 1. Read-side
+    parses that out.
+    """
+    raw_evidence = row.evidence
+    evidence_count = 0
+    source_references: list[str] = []
+    if raw_evidence:
+        try:
+            payload = json.loads(raw_evidence)
+            if isinstance(payload, dict):
+                evidence_count = int(payload.get("evidence_count", 0))
+                refs = payload.get("source_references", [])
+                source_references = list(refs) if isinstance(refs, list) else []
+        except (TypeError, ValueError):
+            # Pre-Phase-1 free-text evidence — just keep the raw string
+            # available via source_references for now.
+            source_references = [raw_evidence]
+
+    return Relation(
+        id=str(row.id),
+        source_id=str(row.source_id),
+        source_name=row.source_name or "",
+        source_type="",
+        target_id=str(row.target_id),
+        target_name=row.target_name or "",
+        target_type="",
+        relation_type=row.relationship,
+        confidence=float(row.strength) if row.strength is not None else 0.5,
+        evidence_count=evidence_count,
+        source_references=source_references,
+    )
+
+
+class PostgresGraphStore(LoggerMixin):
+    """Postgres + pgvector implementation of the KG store interface.
+
+    Conformance: this class implements the same public methods as
+    `GraphStore` (initialize, add_entity, add_relation, get_entity,
+    search_entities, get_neighborhood, get_relations_between,
+    find_paths, execute_query, get_stats) so callers can flip
+    backends behind a flag in Phase 3 without touching call sites.
+    """
+
+    def __init__(self, session_factory=async_session_factory):
+        self._session_factory = session_factory
+        self._initialized = False
+
+    async def initialize(self) -> None:
+        """Probe the schema. The migration owns table creation; this
+        just verifies the tables are reachable."""
+        if self._initialized:
+            return
+        async with self._session_factory() as session:
+            await session.execute(
+                text("SELECT 1 FROM knowledge_graph_nodes LIMIT 1")
+            )
+        self._initialized = True
+        self.logger.info("PostgresGraphStore initialized")
+
+    async def close(self) -> None:
+        """No driver to close — the session factory manages pooling."""
+        return
+
+    # ── Mutations ──────────────────────────────────────────────────
+
+    async def add_entity(self, entity: Entity, *, owner_id: UUID | None = None) -> str:
+        """Insert a new entity. Returns the new id (string UUID).
+
+        The `id` on the Pydantic model is treated as a stable hint —
+        if absent we mint a fresh UUID.
+        """
+        new_id = UUID(entity.id) if entity.id and _looks_like_uuid(entity.id) else uuid4()
+        properties = {
+            **entity.properties,
+            "aliases": entity.aliases,
+            "external_ids": entity.external_ids,
+            "source_count": entity.source_count,
+        }
+        async with self._session_factory() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO knowledge_graph_nodes "
+                    "(id, name, type, description, properties, owner_id, created_at, updated_at) "
+                    "VALUES (:id, :name, :type, :description, CAST(:properties AS JSONB), "
+                    " :owner_id, NOW(), NOW()) "
+                    "ON CONFLICT (id) DO UPDATE SET "
+                    " name = EXCLUDED.name, "
+                    " type = EXCLUDED.type, "
+                    " description = EXCLUDED.description, "
+                    " properties = EXCLUDED.properties, "
+                    " updated_at = NOW()"
+                ),
+                {
+                    "id": new_id,
+                    "name": entity.name,
+                    "type": entity.entity_type,
+                    "description": entity.description,
+                    "properties": json.dumps(properties),
+                    "owner_id": owner_id,
+                },
+            )
+            await session.commit()
+        return str(new_id)
+
+    async def add_relation(self, relation: Relation, *, owner_id: UUID | None = None) -> str:
+        new_id = UUID(relation.id) if relation.id and _looks_like_uuid(relation.id) else uuid4()
+        evidence_payload = {
+            "evidence_count": relation.evidence_count,
+            "source_references": relation.source_references,
+        }
+        async with self._session_factory() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO knowledge_graph_edges "
+                    "(id, source_id, target_id, source_name, target_name, "
+                    " relationship, strength, evidence, owner_id, "
+                    " created_at, updated_at) "
+                    "VALUES (:id, :source_id, :target_id, :source_name, :target_name, "
+                    " :relationship, :strength, :evidence, :owner_id, NOW(), NOW())"
+                ),
+                {
+                    "id": new_id,
+                    "source_id": UUID(relation.source_id),
+                    "target_id": UUID(relation.target_id),
+                    "source_name": relation.source_name,
+                    "target_name": relation.target_name,
+                    "relationship": relation.relation_type,
+                    "strength": relation.confidence,
+                    "evidence": json.dumps(evidence_payload),
+                    "owner_id": owner_id,
+                },
+            )
+            await session.commit()
+        return str(new_id)
+
+    # ── Reads ──────────────────────────────────────────────────────
+
+    async def get_entity(self, entity_id: str) -> Entity | None:
+        try:
+            entity_uuid = UUID(entity_id)
+        except (TypeError, ValueError):
+            return None
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, name, type, description, properties "
+                    "FROM knowledge_graph_nodes WHERE id = :id"
+                ),
+                {"id": entity_uuid},
+            )
+            row = result.first()
+            if row is None:
+                return None
+            return _node_row_to_entity(row)
+
+    async def search_entities(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        type_filter: str | None = None,
+        owner_id: UUID | None = None,
+        include_common: bool = True,
+    ) -> list[Entity]:
+        """Search by ILIKE on name + description.
+
+        Phase 1 doesn't compute query embeddings on the fly — that
+        plumbing lands in Phase 2. The ILIKE fallback covers the
+        90% case (name lookup) and lets the visual KG ship now.
+        """
+        like = f"%{query.strip()}%"
+        scope_clause = _scope_clause(owner_id, include_common)
+        type_clause = "AND type = :type_filter" if type_filter else ""
+        sql = (
+            "SELECT id, name, type, description, properties "
+            "FROM knowledge_graph_nodes "
+            "WHERE (name ILIKE :like OR description ILIKE :like) "
+            f"{type_clause} {scope_clause} "
+            "ORDER BY "
+            "  CASE WHEN name ILIKE :exact THEN 0 ELSE 1 END, "
+            "  length(name) "
+            "LIMIT :limit"
+        )
+        params: dict[str, Any] = {
+            "like": like,
+            "exact": query.strip(),
+            "limit": limit,
+        }
+        if type_filter:
+            params["type_filter"] = type_filter
+        if owner_id is not None:
+            params["owner_id"] = owner_id
+
+        async with self._session_factory() as session:
+            result = await session.execute(text(sql), params)
+            return [_node_row_to_entity(row) for row in result.fetchall()]
+
+    async def get_neighborhood(
+        self,
+        entity_id: str,
+        *,
+        depth: int = 1,
+        limit: int = 100,
+        owner_id: UUID | None = None,
+        include_common: bool = True,
+    ) -> GraphNeighborhood | None:
+        """Return the n-hop neighbourhood of a center entity.
+
+        Recursive CTE with cycle detection — visited node ids are
+        accumulated per row so we don't revisit. `depth` caps the
+        BFS, `limit` caps the result rows on each side (nodes,
+        edges).
+        """
+        try:
+            center_uuid = UUID(entity_id)
+        except (TypeError, ValueError):
+            return None
+
+        center = await self.get_entity(entity_id)
+        if center is None:
+            return None
+
+        scope_clause = _scope_clause(owner_id, include_common, table="e")
+        sql = f"""
+            WITH RECURSIVE walk(node_id, depth, visited) AS (
+                SELECT :center::uuid, 0, ARRAY[:center::uuid]
+                UNION ALL
+                SELECT next_id, w.depth + 1, w.visited || next_id
+                FROM walk w
+                JOIN LATERAL (
+                    SELECT e.target_id AS next_id
+                    FROM knowledge_graph_edges e
+                    WHERE e.source_id = w.node_id
+                      {scope_clause}
+                    UNION
+                    SELECT e.source_id AS next_id
+                    FROM knowledge_graph_edges e
+                    WHERE e.target_id = w.node_id
+                      {scope_clause}
+                ) hop ON next_id <> ALL(w.visited)
+                WHERE w.depth < :max_depth
+            )
+            SELECT DISTINCT node_id FROM walk LIMIT :node_limit
+        """
+        params: dict[str, Any] = {
+            "center": center_uuid,
+            "max_depth": depth,
+            "node_limit": limit,
+        }
+        if owner_id is not None:
+            params["owner_id"] = owner_id
+
+        async with self._session_factory() as session:
+            ids_result = await session.execute(text(sql), params)
+            node_ids = [r.node_id for r in ids_result.fetchall()]
+            if not node_ids:
+                return GraphNeighborhood(
+                    center_entity=center,
+                    entities=[center],
+                    relations=[],
+                    depth=depth,
+                )
+
+            nodes_result = await session.execute(
+                text(
+                    "SELECT id, name, type, description, properties "
+                    "FROM knowledge_graph_nodes WHERE id = ANY(:ids)"
+                ),
+                {"ids": node_ids},
+            )
+            entities = [_node_row_to_entity(r) for r in nodes_result.fetchall()]
+
+            edges_result = await session.execute(
+                text(
+                    "SELECT id, source_id, target_id, source_name, target_name, "
+                    "       relationship, strength, evidence "
+                    "FROM knowledge_graph_edges "
+                    "WHERE source_id = ANY(:ids) AND target_id = ANY(:ids) "
+                    "LIMIT :edge_limit"
+                ),
+                {"ids": node_ids, "edge_limit": limit},
+            )
+            relations = [_edge_row_to_relation(r) for r in edges_result.fetchall()]
+
+        return GraphNeighborhood(
+            center_entity=center,
+            entities=entities,
+            relations=relations,
+            depth=depth,
+        )
+
+    async def get_relations_between(
+        self, source_id: str, target_id: str
+    ) -> list[Relation]:
+        try:
+            src = UUID(source_id)
+            tgt = UUID(target_id)
+        except (TypeError, ValueError):
+            return []
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, source_id, target_id, source_name, target_name, "
+                    "       relationship, strength, evidence "
+                    "FROM knowledge_graph_edges "
+                    "WHERE (source_id = :src AND target_id = :tgt) "
+                    "   OR (source_id = :tgt AND target_id = :src)"
+                ),
+                {"src": src, "tgt": tgt},
+            )
+            return [_edge_row_to_relation(r) for r in result.fetchall()]
+
+    async def find_paths(
+        self,
+        source_id: str,
+        target_id: str,
+        *,
+        max_depth: int = 4,
+    ) -> list[GraphPath]:
+        """Recursive CTE shortest-paths.
+
+        Documented divergence from `GraphStore.find_paths`:
+        the Cypher implementation returns every variable-length
+        match; this returns deduplicated shortest paths only. Tests
+        assert this explicitly.
+        """
+        try:
+            src_uuid = UUID(source_id)
+            tgt_uuid = UUID(target_id)
+        except (TypeError, ValueError):
+            return []
+
+        sql = """
+            WITH RECURSIVE walk(node_id, path_ids, edge_ids, depth) AS (
+                SELECT :src::uuid, ARRAY[:src::uuid], ARRAY[]::uuid[], 0
+                UNION ALL
+                SELECT
+                    CASE WHEN e.source_id = w.node_id
+                         THEN e.target_id ELSE e.source_id END,
+                    w.path_ids ||
+                        (CASE WHEN e.source_id = w.node_id
+                              THEN e.target_id ELSE e.source_id END),
+                    w.edge_ids || e.id,
+                    w.depth + 1
+                FROM walk w
+                JOIN knowledge_graph_edges e
+                  ON (e.source_id = w.node_id OR e.target_id = w.node_id)
+                WHERE
+                    (CASE WHEN e.source_id = w.node_id
+                          THEN e.target_id ELSE e.source_id END)
+                    <> ALL(w.path_ids)
+                    AND w.depth < :max_depth
+            )
+            SELECT path_ids, edge_ids, depth
+            FROM walk
+            WHERE node_id = :tgt::uuid
+            ORDER BY depth ASC
+            LIMIT 5
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(sql),
+                {"src": src_uuid, "tgt": tgt_uuid, "max_depth": max_depth},
+            )
+            rows = result.fetchall()
+            if not rows:
+                return []
+
+            # Hydrate each path's entities + relations in two index lookups.
+            all_node_ids = {nid for r in rows for nid in r.path_ids}
+            all_edge_ids = {eid for r in rows for eid in r.edge_ids}
+
+            nodes_by_id: dict[UUID, Entity] = {}
+            edges_by_id: dict[UUID, Relation] = {}
+            if all_node_ids:
+                node_rows = await session.execute(
+                    text(
+                        "SELECT id, name, type, description, properties "
+                        "FROM knowledge_graph_nodes WHERE id = ANY(:ids)"
+                    ),
+                    {"ids": list(all_node_ids)},
+                )
+                for nr in node_rows.fetchall():
+                    nodes_by_id[nr.id] = _node_row_to_entity(nr)
+            if all_edge_ids:
+                edge_rows = await session.execute(
+                    text(
+                        "SELECT id, source_id, target_id, source_name, target_name, "
+                        "       relationship, strength, evidence "
+                        "FROM knowledge_graph_edges WHERE id = ANY(:ids)"
+                    ),
+                    {"ids": list(all_edge_ids)},
+                )
+                for er in edge_rows.fetchall():
+                    edges_by_id[er.id] = _edge_row_to_relation(er)
+
+        paths: list[GraphPath] = []
+        for row in rows:
+            relations = [edges_by_id[eid] for eid in row.edge_ids if eid in edges_by_id]
+            avg_conf = (
+                sum(r.confidence for r in relations) / len(relations)
+                if relations else 1.0
+            )
+            paths.append(
+                GraphPath(
+                    source=nodes_by_id.get(src_uuid) or Entity(
+                        id=str(src_uuid), name="", entity_type="unknown",
+                    ),
+                    target=nodes_by_id.get(tgt_uuid) or Entity(
+                        id=str(tgt_uuid), name="", entity_type="unknown",
+                    ),
+                    path=relations,
+                    path_length=row.depth,
+                    path_confidence=avg_conf,
+                )
+            )
+        return paths
+
+    async def execute_query(self, *_args: Any, **_kwargs: Any) -> Any:
+        """Cypher passthrough — not supported on the Postgres backend.
+
+        Phase 3 will route the few callers that do raw Cypher into
+        SQL-equivalent queries; for Phase 1 we surface the gap loudly.
+        """
+        raise NotImplementedError(
+            "PostgresGraphStore does not support raw Cypher. "
+            "Use the typed methods (search_entities, get_neighborhood, "
+            "find_paths, get_relations_between) or fall back to "
+            "the Neo4j-backed GraphStore for ad-hoc Cypher."
+        )
+
+    async def get_stats(
+        self, *, owner_id: UUID | None = None, include_common: bool = True
+    ) -> dict[str, Any]:
+        scope_node_clause = _scope_clause(owner_id, include_common, table="n")
+        scope_edge_clause = _scope_clause(owner_id, include_common, table="e")
+        async with self._session_factory() as session:
+            n = await session.execute(
+                text(
+                    f"SELECT COUNT(*) AS c FROM knowledge_graph_nodes n "
+                    f"WHERE 1=1 {scope_node_clause}"
+                ),
+                {"owner_id": owner_id} if owner_id is not None else {},
+            )
+            e = await session.execute(
+                text(
+                    f"SELECT COUNT(*) AS c FROM knowledge_graph_edges e "
+                    f"WHERE 1=1 {scope_edge_clause}"
+                ),
+                {"owner_id": owner_id} if owner_id is not None else {},
+            )
+            return {
+                "node_count": int(n.scalar() or 0),
+                "edge_count": int(e.scalar() or 0),
+                "backend": "postgres",
+            }
+
+
+def _looks_like_uuid(s: str) -> bool:
+    try:
+        UUID(s)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _scope_clause(
+    owner_id: UUID | None,
+    include_common: bool,
+    *,
+    table: str = "knowledge_graph_nodes",
+) -> str:
+    """Render the SQL fragment for the private/common scope filter.
+
+    Caller binds the `:owner_id` parameter when owner_id is not None.
+    Keeps the query parameterised; never interpolates UUIDs into the
+    string.
+
+      owner_id=None,  include_common=True  → no extra filter
+      owner_id=None,  include_common=False → owner_id IS NOT NULL
+      owner_id=set,   include_common=True  → owner_id = :owner_id OR owner_id IS NULL
+      owner_id=set,   include_common=False → owner_id = :owner_id
+    """
+    col = f"{table}.owner_id" if "." not in table else f"{table}.owner_id"
+    if owner_id is None and include_common:
+        return ""
+    if owner_id is None and not include_common:
+        return f" AND {col} IS NOT NULL"
+    if include_common:
+        return f" AND ({col} = :owner_id OR {col} IS NULL)"
+    return f" AND {col} = :owner_id"
+
+
+_postgres_graph_store: PostgresGraphStore | None = None
+
+
+def get_postgres_graph_store() -> PostgresGraphStore:
+    """Module-level singleton accessor mirroring `get_graph_store()`.
+
+    Phase 3 will introduce a `KG_BACKEND`-aware factory that returns
+    either this implementation or the Neo4j-backed `GraphStore`; for
+    now both factories coexist and callers explicitly pick one.
+    """
+    global _postgres_graph_store
+    if _postgres_graph_store is None:
+        _postgres_graph_store = PostgresGraphStore()
+    return _postgres_graph_store

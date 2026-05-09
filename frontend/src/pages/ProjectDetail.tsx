@@ -14,6 +14,7 @@ import HypothesisDocViewer, { type TranslationalRoadmapDoc } from '../components
 import HypothesisTrace from '../components/HypothesisTrace'
 import AuditLogViewer from '../components/AuditLogViewer'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
+import KnowledgeGraphView from '../components/KnowledgeGraphView'
 import { useEscapeKey } from '../utils/clickable'
 import { useSavedPapers } from '../hooks/useSavedPapers'
 
@@ -184,6 +185,12 @@ export default function ProjectDetail() {
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
   const [paperHtml, setPaperHtml] = useState<string | null>(null)
   const [paperError, setPaperError] = useState<string | null>(null)
+  // Active SavedResearchPaper id while the paper viewer is open. Drives
+  // the per-paper KG subgraph panel above the iframe — null when no
+  // paper is in view (e.g. during a fresh generate that hasn't been
+  // saved yet) so the panel just hides.
+  const [activePaperId, setActivePaperId] = useState<string | null>(null)
+  const [paperKgOpen, setPaperKgOpen] = useState<boolean>(true)
   const [activeHypothesis, setActiveHypothesis] = useState<SavedHypothesis | null>(null)
   const [deletePaperId, setDeletePaperId] = useState<string | null>(null)
 
@@ -918,13 +925,41 @@ export default function ProjectDetail() {
           )}
 
           {paperHtml && (
-            <iframe
-              srcDoc={paperHtml}
-              className="w-full h-full border-0"
-              title="Research Paper"
-              sandbox="allow-same-origin allow-popups allow-modals"
-              style={{ minHeight: '100%' }}
-            />
+            <div className="flex flex-col h-full">
+              {/* Per-paper Knowledge Graph subgraph. Collapsible so it
+                  doesn't permanently steal real estate from the paper
+                  iframe; expanded by default so users discover it. */}
+              {activePaperId && (
+                <div className="border-b border-[var(--color-border)] shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPaperKgOpen(o => !o)}
+                    className="w-full px-4 py-2 flex items-center justify-between text-xs hover:bg-white/5"
+                    style={{ color: 'var(--color-text-muted)' }}
+                  >
+                    <span className="font-medium" style={{ color: 'var(--color-text)' }}>
+                      Knowledge Graph
+                    </span>
+                    <span>{paperKgOpen ? 'Hide' : 'Show'}</span>
+                  </button>
+                  {paperKgOpen && (
+                    <div className="px-4 pb-3">
+                      <KnowledgeGraphView
+                        fetchPaperId={activePaperId}
+                        height={260}
+                        emptyLabel="No KG entities matched this paper yet."
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              <iframe
+                srcDoc={paperHtml}
+                className="w-full flex-1 border-0"
+                title="Research Paper"
+                sandbox="allow-same-origin allow-popups allow-modals"
+              />
+            </div>
           )}
 
           {pdfBlobUrl && !paperHtml && (
@@ -1224,6 +1259,9 @@ export default function ProjectDetail() {
                           created_at: paper.created_at,
                         }
                         setActiveHypothesis(h)
+                        // Track the saved-paper UUID so the per-paper
+                        // KG subgraph panel can fetch its scoped view.
+                        setActivePaperId(paper.id)
                         setPaperError(null)
                         setGeneratingPaper(false)
                         setPdfBlobUrl(null)

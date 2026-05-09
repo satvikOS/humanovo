@@ -301,7 +301,14 @@ class ResearchDataset(BaseModel):
 # ---------------------------------------------------------------------------
 
 class KnowledgeGraphNode(BaseModel):
-    """Node in the knowledge graph."""
+    """Node in the knowledge graph.
+
+    `owner_id` is NULL for community/common entities visible to every
+    authenticated user; set to a user's id for private entities. The
+    `embedding` column holds a 1024-dim Cohere Embed English v3 vector
+    when the entity has been embedded by the ingestion pipeline; NULL
+    otherwise. Both columns added in migration 023.
+    """
 
     __tablename__ = "knowledge_graph_nodes"
 
@@ -309,10 +316,24 @@ class KnowledgeGraphNode(BaseModel):
     type = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
     properties = Column(JSONB, default=dict, nullable=False)
+    owner_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # The embedding column is intentionally not declared with the
+    # pgvector SQLAlchemy type here to keep imports minimal; the
+    # PostgresGraphStore reads / writes it via raw SQL casts. ORM
+    # SELECTs that don't request `embedding` ignore it cleanly.
 
 
 class KnowledgeGraphEdge(BaseModel):
-    """Edge (relationship) in the knowledge graph."""
+    """Edge (relationship) in the knowledge graph.
+
+    `owner_id` follows the same NULL=common / set=private convention
+    as on the node table. Added in migration 023.
+    """
 
     __tablename__ = "knowledge_graph_edges"
 
@@ -333,6 +354,12 @@ class KnowledgeGraphEdge(BaseModel):
     relationship = Column(String(255), nullable=False)
     strength = Column(Float, default=0.5, nullable=False)
     evidence = Column(Text, nullable=True)
+    owner_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
 
 # ---------------------------------------------------------------------------
