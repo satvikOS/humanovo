@@ -2186,6 +2186,16 @@ export default function DataVisualization() {
         }
         const cellH = Math.max(20, Math.min(40, (height - 40) / Math.max(labels.length, 1)))
         const cellW = Math.max(40, 500 / Math.max(cats.length || 1, 1))
+        // Muted-only palette policy: previous implementation used
+        // saturated rgba(59,130,246) blue and rgba(239,68,68) red
+        // which broke the platform's muted register. Now uses
+        // theme-aware muted teal-blue and dusty-rose, intensity
+        // mapped via the same alpha channel so 0 values stay near-
+        // transparent and the largest values are still readable.
+        // Cell-value text picks up theme.textColor too instead of
+        // the var(--color-text) which is wrong in paper themes.
+        const posColor = (a: number) => `rgba(91, 141, 184, ${a})`   // muted blue (#5B8DB8)
+        const negColor = (a: number) => `rgba(181, 113, 112, ${a})` // muted dusty rose (#B57170)
         return (
           <div style={{ overflowX: 'auto', height }}>
             <svg width={Math.max(cats.length * cellW + 100, 300)} height={Math.max(labels.length * cellH + 40, 100)}>
@@ -2195,26 +2205,30 @@ export default function DataVisualization() {
                   const v = d?.value ?? 0
                   const intensity = Math.abs(v) / maxVal
                   const color = v >= 0
-                    ? `rgba(59, 130, 246, ${intensity * 0.9})`
-                    : `rgba(239, 68, 68, ${intensity * 0.9})`
+                    ? posColor(intensity * 0.85)
+                    : negColor(intensity * 0.85)
+                  // Drop trailing zero on integers so cell labels
+                  // read "50" not "50.0" — same convention as the
+                  // axis tick formatter.
+                  const cellLabel = Number.isInteger(v) ? String(v) : v.toFixed(1)
                   return (
                     <g key={`${ri}-${ci}`}>
                       <rect x={90 + ci * cellW} y={20 + ri * cellH} width={cellW - 2} height={cellH - 2} fill={color} rx={3}>
                         <title>{`${label}${cat ? ` / ${cat}` : ''}: ${v}`}</title>
                       </rect>
                       <text x={90 + ci * cellW + cellW / 2} y={20 + ri * cellH + cellH / 2} textAnchor="middle" dominantBaseline="central"
-                        fill="var(--color-text)" fontSize={9} opacity={0.8}>{v.toFixed(1)}</text>
+                        fill={theme.textColor} fontSize={theme.tickFontSize * fs} fontFamily={theme.bodyFont} opacity={0.8}>{cellLabel}</text>
                     </g>
                   )
                 })
               )}
               {labels.map((label, ri) => (
                 <text key={ri} x={85} y={20 + ri * cellH + cellH / 2} textAnchor="end" dominantBaseline="central"
-                  fill="var(--color-text-muted)" fontSize={10}>{label}</text>
+                  fill={theme.mutedColor} fontSize={theme.tickFontSize * fs} fontFamily={theme.bodyFont}>{label}</text>
               ))}
               {cats.length > 0 && cats.map((cat, ci) => (
                 <text key={ci} x={90 + ci * cellW + cellW / 2} y={12} textAnchor="middle"
-                  fill="var(--color-text-muted)" fontSize={10}>{cat}</text>
+                  fill={theme.mutedColor} fontSize={theme.tickFontSize * fs} fontFamily={theme.bodyFont}>{cat}</text>
               ))}
               {/* Intensity legend (vertical gradient bar on the right) */}
               {(() => {
