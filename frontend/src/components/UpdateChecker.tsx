@@ -30,7 +30,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { isNativeApp } from '../lib/native'
+import { isNativeApp, notify } from '../lib/native'
 
 interface UpdateInfo {
   version: string
@@ -60,6 +60,14 @@ export default function UpdateChecker() {
         const snoozed = sessionStorage.getItem(SNOOZE_KEY)
         if (snoozed === u.version) return
         setUpdate({ version: u.version, body: u.body })
+        // Ping the OS as well so the user notices if humanovo isn't
+        // focused at the 3 s mark — they probably already tabbed away.
+        // notify() no-ops when the window has focus (in-app banner is
+        // enough then) and in web mode.
+        void notify(
+          'humanovo update available',
+          `Version ${u.version} is ready to install. Open humanovo and click Restart to install.`,
+        )
       } catch (err) {
         // Swallow + log. Update-check failures are silent UX —
         // we'd rather miss an update than nag the user with an
