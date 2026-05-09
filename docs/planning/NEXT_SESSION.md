@@ -175,6 +175,21 @@ the file current.
   shared `pages/genomics/constants.ts`. Keep `GenomicsAnalysis.tsx`
   as the orchestrator/router.
 
+### Desktop shell hardening — DONE (commit `f3b69f4`)
+* Inert `plugins.updater` stub committed in tauri.conf.json — fixes
+  the May 7 local-dev `PluginInitialization` crash without changing
+  CI behaviour (configure_tauri_updater.py still overwrites with
+  real keys when TAURI_SIGNING_PUBLIC_KEY is set).
+* tauri-plugin-window-state + lib.rs init — window position / size /
+  maximized state persists across launches.
+* New components/DeepLinkRouter.tsx mounted at app root — receives
+  `humanovo://` URLs via the single-instance plugin's emitted event,
+  routes to React Router based on host+path with query preserved.
+  Stripe billing redirects + future deep links now actually navigate.
+* `@tauri-apps/plugin-*` packages installed as devDeps so Vite's
+  pre-transform resolves the lazy imports in `lib/native.ts` once
+  it's pulled into the production tree.
+
 ### Stage 5 admin rate limit — DONE (commit `4a4d7f6`)
 * New `app/core/rate_limit.py` — in-process per-IP token bucket
   + FastAPI dependency. Wired to /admin/* router as defence-in-depth
