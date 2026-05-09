@@ -469,9 +469,36 @@ interface ThemeStyle {
   gridStrokeWidth: number
   gridDash: string | undefined
   tooltipBg: string
+  // Per-theme typography baselines, multiplied by FONT_SCALE_MULT at
+  // render time. Journal themes use smaller baselines than `screen`
+  // (Nature column figure conventions: 7pt tick, 8pt axis label,
+  // 9pt legend; screen interactive convention: 10pt tick, 11pt axis
+  // label, 11pt legend). Without these, every theme rendered with
+  // screen-sized type, which made the journal preview look like a
+  // screenshot of the screen view rather than a paper figure.
+  tickFontSize: number
+  axisLabelFontSize: number
+  legendFontSize: number
+  titleFontSize: number
+  subtitleFontSize: number
+  // Type weights — journal type is set heavier than browser default
+  // (axis labels usually 500, body 400). Specifying explicitly so the
+  // browser's font-substitution doesn't drop us to Helvetica Light or
+  // similar inconsistencies.
+  tickFontWeight: number
+  axisLabelFontWeight: number
+  titleFontWeight: number
+  // Whether to suppress the gridline in this theme regardless of the
+  // user's `showGrid` option. Nature/Science don't use gridlines on
+  // most published figures; the user's `showGrid: true` default would
+  // otherwise render them on every chart and immediately break the
+  // visual contract of the chosen theme.
+  forceHideGrid: boolean
 }
 
 const THEMES: Record<PublicationTheme, ThemeStyle> = {
+  // Interactive in-app theme. Larger baselines + dashed gridlines so
+  // the chart reads at viewport distance, not column-width distance.
   screen: {
     bg: 'transparent',
     axisColor: 'var(--color-text-muted)',
@@ -484,7 +511,19 @@ const THEMES: Record<PublicationTheme, ThemeStyle> = {
     gridStrokeWidth: 1,
     gridDash: '3 3',
     tooltipBg: 'var(--color-surface-solid)',
+    tickFontSize: 10,
+    axisLabelFontSize: 11,
+    legendFontSize: 11,
+    titleFontSize: 16,
+    subtitleFontSize: 11,
+    tickFontWeight: 400,
+    axisLabelFontWeight: 500,
+    titleFontWeight: 600,
+    forceHideGrid: false,
   },
+  // Generic "paper" — neutral white background with restrained type.
+  // Slightly larger than journal column-grade so it works for slide
+  // decks too, where 7pt would be unreadable.
   paper: {
     bg: '#FFFFFF',
     axisColor: '#222222',
@@ -497,7 +536,19 @@ const THEMES: Record<PublicationTheme, ThemeStyle> = {
     gridStrokeWidth: 0.75,
     gridDash: undefined,
     tooltipBg: '#FFFFFF',
+    tickFontSize: 9,
+    axisLabelFontSize: 10,
+    legendFontSize: 9,
+    titleFontSize: 14,
+    subtitleFontSize: 10,
+    tickFontWeight: 400,
+    axisLabelFontWeight: 500,
+    titleFontWeight: 600,
+    forceHideGrid: false,
   },
+  // Nature column-figure conventions: 7pt tick, 8pt axis label, no
+  // gridlines, slightly heavier axis stroke so the box reads cleanly
+  // at column width (~3.5"). Helvetica matches Nature's house style.
   nature: {
     bg: '#FFFFFF',
     axisColor: '#000000',
@@ -510,7 +561,18 @@ const THEMES: Record<PublicationTheme, ThemeStyle> = {
     gridStrokeWidth: 0.5,
     gridDash: undefined,
     tooltipBg: '#FFFFFF',
+    tickFontSize: 7,
+    axisLabelFontSize: 8,
+    legendFontSize: 7,
+    titleFontSize: 10,
+    subtitleFontSize: 8,
+    tickFontWeight: 400,
+    axisLabelFontWeight: 500,
+    titleFontWeight: 600,
+    forceHideGrid: true,
   },
+  // Science: very similar to Nature but slightly larger type and
+  // Inter (sans, near-Helvetica metrics) instead of Helvetica Neue.
   science: {
     bg: '#FFFFFF',
     axisColor: '#000000',
@@ -523,7 +585,19 @@ const THEMES: Record<PublicationTheme, ThemeStyle> = {
     gridStrokeWidth: 0.5,
     gridDash: undefined,
     tooltipBg: '#FFFFFF',
+    tickFontSize: 8,
+    axisLabelFontSize: 9,
+    legendFontSize: 8,
+    titleFontSize: 11,
+    subtitleFontSize: 9,
+    tickFontWeight: 400,
+    axisLabelFontWeight: 500,
+    titleFontWeight: 600,
+    forceHideGrid: true,
   },
+  // IEEE: serif type (Times) per IEEE figure house style; slightly
+  // smaller again. Subtle gridlines acceptable in IEEE conference
+  // papers, hence forceHideGrid: false.
   ieee: {
     bg: '#FFFFFF',
     axisColor: '#000000',
@@ -536,6 +610,15 @@ const THEMES: Record<PublicationTheme, ThemeStyle> = {
     gridStrokeWidth: 0.5,
     gridDash: undefined,
     tooltipBg: '#FFFFFF',
+    tickFontSize: 8,
+    axisLabelFontSize: 9,
+    legendFontSize: 8,
+    titleFontSize: 11,
+    subtitleFontSize: 9,
+    tickFontWeight: 400,
+    axisLabelFontWeight: 500,
+    titleFontWeight: 700, // IEEE titles are slightly heavier in print
+    forceHideGrid: false,
   },
 }
 
@@ -1293,12 +1376,30 @@ export default function DataVisualization() {
     // ── Apply publication theme ──
     const theme = THEMES[o.pubTheme || 'screen']
     const fs = FONT_SCALE_MULT[o.fontScale || 'normal']
-    const tickStyle = { fontSize: 10 * fs, fill: theme.mutedColor, fontFamily: theme.bodyFont }
-    const labelStyle = { fontSize: 11 * fs, fill: theme.mutedColor, fontFamily: theme.bodyFont }
+    // Per-theme typography baselines (Nature: 7pt tick / 8pt label,
+    // screen: 10/11). The user's fontScale option still scales them.
+    const tickStyle = {
+      fontSize: theme.tickFontSize * fs,
+      fontWeight: theme.tickFontWeight,
+      fill: theme.mutedColor,
+      fontFamily: theme.bodyFont,
+    }
+    const labelStyle = {
+      fontSize: theme.axisLabelFontSize * fs,
+      fontWeight: theme.axisLabelFontWeight,
+      fill: theme.textColor,
+      fontFamily: theme.bodyFont,
+    }
     const xTickFmt = makeTickFormatter(o.tickFormatX || 'auto', o.decimalPlaces ?? 2)
     const yTickFmt = makeTickFormatter(o.tickFormatY || 'auto', o.decimalPlaces ?? 2)
     const tooltipStyle = { ...TOOLTIP_STYLE, background: theme.tooltipBg, color: theme.textColor, border: `1px solid ${theme.gridColor}` }
-    const gridEl = o.showGrid ? <CartesianGrid strokeDasharray={theme.gridDash} stroke={theme.gridColor} strokeWidth={theme.gridStrokeWidth} /> : null
+    // Themes with `forceHideGrid: true` (Nature, Science) suppress
+    // gridlines regardless of the user's `showGrid` option — without
+    // this override the user's screen-mode default of showGrid=true
+    // would render gridlines on Nature-themed charts and break the
+    // visual contract of the chosen theme.
+    const showGridEffective = o.showGrid && !theme.forceHideGrid
+    const gridEl = showGridEffective ? <CartesianGrid strokeDasharray={theme.gridDash} stroke={theme.gridColor} strokeWidth={theme.gridStrokeWidth} /> : null
     const cursorStyle = o.showCrosshair ? { stroke: theme.mutedColor, strokeWidth: 1, strokeDasharray: '4 4' } : undefined
     const tooltipEl = <Tooltip contentStyle={tooltipStyle} cursor={cursorStyle} formatter={(v) => yTickFmt(Number(v ?? 0))} />
     const hidden = hiddenSeries[chart.id] || new Set<string>()
@@ -1306,7 +1407,7 @@ export default function DataVisualization() {
       const k = e?.dataKey
       if (typeof k === 'string' || typeof k === 'number') toggleSeries(chart.id, String(k))
     }
-    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: 11 * fs, cursor: 'pointer', fontFamily: theme.bodyFont, color: theme.textColor }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none', color: theme.textColor }}>{value}</span>} /> : null
+    const legendEl = o.showLegend ? <Legend wrapperStyle={{ fontSize: theme.legendFontSize * fs, cursor: 'pointer', fontFamily: theme.bodyFont, color: theme.textColor }} onClick={handleLegendClick} formatter={(value: string) => <span style={{ opacity: hidden.has(value) ? 0.3 : 1, textDecoration: hidden.has(value) ? 'line-through' : 'none', color: theme.textColor }}>{value}</span>} /> : null
     const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke={theme.axisColor} fill={theme.bg === 'transparent' ? 'var(--glass-bg)' : '#F0F0F0'} travellerWidth={8} /> : null
     const xAxisProps: Record<string, unknown> = {
       dataKey: 'label',
@@ -2135,18 +2236,27 @@ export default function DataVisualization() {
           </defs>
         </svg>
 
-        {/* Title block */}
+        {/* Title block — typography from the per-theme baseline so a
+            Nature-themed chart renders with a 10pt title not 16pt. */}
         {o.showTitle && (chart.title || chart.subtitle) && (
           <div style={{ marginBottom: 12 }}>
             {chart.title && (
               <h3 style={{
-                margin: 0, fontSize: 16 * fs, fontWeight: 600,
-                fontFamily: theme.titleFont, color: theme.textColor,
+                margin: 0,
+                fontSize: theme.titleFontSize * fs,
+                fontWeight: theme.titleFontWeight,
+                fontFamily: theme.titleFont,
+                color: theme.textColor,
                 letterSpacing: o.pubTheme === 'ieee' ? 0 : '-0.01em',
               }}>{chart.title}</h3>
             )}
             {chart.subtitle && (
-              <p style={{ margin: '2px 0 0', fontSize: 11 * fs, color: theme.mutedColor, fontFamily: theme.bodyFont }}>
+              <p style={{
+                margin: '2px 0 0',
+                fontSize: theme.subtitleFontSize * fs,
+                color: theme.mutedColor,
+                fontFamily: theme.bodyFont,
+              }}>
                 {chart.subtitle}
               </p>
             )}
