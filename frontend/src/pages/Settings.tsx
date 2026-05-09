@@ -26,6 +26,8 @@ import {
   getAppVersion,
   getPlatform,
   getNotificationPermission,
+  getAutostartEnabled,
+  setAutostartEnabled,
   notify,
 } from '../lib/native'
 import { toast } from '../contexts/ToastContext'
@@ -83,13 +85,24 @@ const ADMIN_SECTION = { id: 'admin', label: 'Admin · Seed demo data', icon: FiD
 // in the web build. Injected when `isNativeApp()` is true.
 const DESKTOP_SECTION = { id: 'desktop', label: 'Desktop App', icon: FiMonitor }
 
-function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  enabled,
+  onChange,
+  disabled = false,
+}: {
+  enabled: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+}) {
   return (
     <button
-      onClick={() => onChange(!enabled)}
+      type="button"
+      onClick={() => !disabled && onChange(!enabled)}
+      disabled={disabled}
       className={clsx(
         'relative w-9 h-5 rounded-full transition-colors',
-        enabled ? 'bg-[var(--color-text)]' : 'bg-white/10'
+        enabled ? 'bg-[var(--color-text)]' : 'bg-white/10',
+        disabled && 'opacity-50 cursor-not-allowed',
       )}
     >
       <span
@@ -1521,6 +1534,8 @@ function DesktopSettings() {
   const [plat, setPlat] = useState<string | null>(null)
   const [notifPerm, setNotifPerm] = useState<'granted' | 'denied' | 'default' | null>(null)
   const [testingNotif, setTestingNotif] = useState(false)
+  const [autostart, setAutostart] = useState<boolean | null>(null)
+  const [togglingAutostart, setTogglingAutostart] = useState(false)
 
   const refreshNotifPerm = useCallback(async () => {
     const p = await getNotificationPermission()
@@ -1532,18 +1547,40 @@ function DesktopSettings() {
     // the user shouldn't see them shift between dashes and the real
     // string after a render. Helpers are no-throw.
     let cancelled = false
-    void Promise.all([getAppVersion(), getPlatform(), getNotificationPermission()]).then(
-      ([v, p, n]) => {
-        if (cancelled) return
-        setVersion(v)
-        setPlat(p)
-        setNotifPerm(n)
-      },
-    )
+    void Promise.all([
+      getAppVersion(),
+      getPlatform(),
+      getNotificationPermission(),
+      getAutostartEnabled(),
+    ]).then(([v, p, n, a]) => {
+      if (cancelled) return
+      setVersion(v)
+      setPlat(p)
+      setNotifPerm(n)
+      setAutostart(a)
+    })
     return () => {
       cancelled = true
     }
   }, [])
+
+  const toggleAutostart = useCallback(async () => {
+    if (autostart === null) return
+    setTogglingAutostart(true)
+    const next = !autostart
+    const ok = await setAutostartEnabled(next)
+    if (!ok) {
+      toast('error', 'Couldn’t update auto-launch — see console for details.', {
+        title: 'humanovo',
+      })
+    }
+    // Re-read so the toggle reflects the actual OS state, not just
+    // what we asked for. On macOS the LaunchAgent registration can be
+    // declined silently.
+    const actual = await getAutostartEnabled()
+    setAutostart(actual)
+    setTogglingAutostart(false)
+  }, [autostart])
 
   const sendTestNotification = useCallback(async () => {
     setTestingNotif(true)
@@ -1690,6 +1727,27 @@ function DesktopSettings() {
           >
             {testingNotif ? 'Sending…' : 'Send test'}
           </button>
+        </div>
+
+        <div
+          className="flex items-start justify-between gap-4 p-4 rounded-lg"
+          style={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)' }}
+        >
+          <div className="min-w-0">
+            <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              Launch on login
+            </div>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              Start humanovo automatically when you log in. Convenient for overnight
+              discoveries — your morning starts with results in hand instead of with
+              waiting for the app to spin up.
+            </p>
+          </div>
+          <Toggle
+            enabled={autostart === true}
+            disabled={autostart === null || togglingAutostart}
+            onChange={toggleAutostart}
+          />
         </div>
 
         <div

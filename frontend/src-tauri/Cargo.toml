@@ -39,6 +39,10 @@ tauri-plugin-notification = "2"
 # "Quit humanovo? A discovery is running" before letting the window
 # close while long-running work is in flight.
 tauri-plugin-dialog = "2"
+# Auto-launch on login. Surfaces a toggle in Settings → Desktop App
+# so users running overnight discoveries can have humanovo restart
+# with their OS without re-launching by hand.
+tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

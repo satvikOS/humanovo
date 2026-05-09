@@ -66,6 +66,16 @@ pub fn run() {
         // Native confirm dialogs. Backs the CloseGuardManager prompt
         // when the user tries to quit while a discovery is running.
         .plugin(tauri_plugin_dialog::init())
+        // Auto-launch on login. The plugin needs to be registered at
+        // build time even when the user has the toggle disabled — the
+        // plugin's enable/disable APIs read/mutate OS-level startup
+        // entries (Windows registry / macOS LaunchAgents / Linux
+        // .desktop autostart). No CLI args passed; humanovo opens to
+        // the dashboard like a normal launch.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             // Re-register `humanovo://` at runtime so the scheme is
             // associated with this binary on first launch (Linux),

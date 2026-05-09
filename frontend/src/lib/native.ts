@@ -126,6 +126,43 @@ export async function getPlatform(): Promise<string> {
 }
 
 /**
+ * Read whether humanovo is registered to launch on login (Windows
+ * registry Run key / macOS LaunchAgent / Linux .desktop autostart).
+ * Returns null in web mode where the concept doesn't apply.
+ */
+export async function getAutostartEnabled(): Promise<boolean | null> {
+  if (!isNativeApp()) return null
+  try {
+    const mod = await import(/* @vite-ignore */ '@tauri-apps/plugin-autostart')
+    return await mod.isEnabled()
+  } catch (err) {
+    console.warn('native.getAutostartEnabled: failed', err)
+    return null
+  }
+}
+
+/**
+ * Toggle whether humanovo launches on login. Returns true on success.
+ * Failures (insufficient permissions, OS-specific quirks) log + return
+ * false so the caller can re-read the actual state.
+ */
+export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
+  if (!isNativeApp()) return false
+  try {
+    const mod = await import(/* @vite-ignore */ '@tauri-apps/plugin-autostart')
+    if (enabled) {
+      await mod.enable()
+    } else {
+      await mod.disable()
+    }
+    return true
+  } catch (err) {
+    console.warn('native.setAutostartEnabled: failed', err)
+    return false
+  }
+}
+
+/**
  * Read the current OS notification permission for humanovo. Returns
  * 'granted' / 'denied' / 'default' (never asked) / null in web mode.
  *
