@@ -211,14 +211,40 @@ export default function PlotlyPlot3D({
         }
 
         case 'surface_3d': {
+          // MATLAB-style 3D surface: gradient color + black mesh
+          // wireframe (the x/y contour grid lines that follow the
+          // surface) + floor contour projection at z=zmin. Together
+          // these give the chart the publication look from
+          // ref Image 4 — a smooth coloured surface with the wire
+          // overlay and the level-curve shadow on the bounding box
+          // floor. Without the wire overlay the surface looks like
+          // a featureless paint blob; without the floor projection
+          // there's no way to read out level values.
+          const buildMatlabSurface = (x: number[], y: number[], z: number[][]): Plot3DTrace[] => [{
+            type: 'surface' as const,
+            x, y, z,
+            colorscale,
+            opacity: 0.95,
+            // Wireframe overlay: x and y contour lines on the
+            // surface itself (MATLAB's `surf` default). Black at
+            // 0.6 opacity reads cleanly against any colormap.
+            contours: {
+              x: { show: true, color: 'rgba(0,0,0,0.6)', width: 1 },
+              y: { show: true, color: 'rgba(0,0,0,0.6)', width: 1 },
+              // Floor projection: project the z-level curves down
+              // onto the box floor so the user can read the contour
+              // shadow underneath the surface. The `usecolormap`
+              // makes the projected lines pick up the surface's
+              // colour mapping.
+              z: { show: true, usecolormap: true, highlight: false, project: { z: true } },
+            },
+            lighting: { ambient: 0.55, diffuse: 0.85, specular: 0.2, fresnel: 0.1, roughness: 0.5 },
+            lightposition: { x: 100, y: 200, z: 100 },
+            colorbar: { title: zLabel, thickness: 14, len: 0.6 },
+          }]
           if (surfaceFunction) {
             const { x, y, z } = generateSurfaceData(surfaceFunction)
-            return [{
-              type: 'surface' as const,
-              x: x[0], y: y.map(r => r[0]), z,
-              colorscale,
-              opacity: 0.9,
-            }]
+            return buildMatlabSurface(x[0], y.map(r => r[0]), z)
           }
           // Auto-generate surface from scattered points using IDW interpolation
           const res = 40
@@ -234,7 +260,6 @@ export default function PlotlyPlot3D({
           if (!Number.isFinite(yMin)) { yMin = 0; yMax = 1 }
           const xRange = Array.from({ length: res }, (_, i) => xMin + (xMax - xMin) * i / (res - 1))
           const yRange = Array.from({ length: res }, (_, i) => yMin + (yMax - yMin) * i / (res - 1))
-          // Inverse-distance-weighted interpolation for accurate surface
           const zGrid = yRange.map(yi => xRange.map(xi => {
             let wSum = 0, zSum = 0
             for (const d of data) {
@@ -246,49 +271,64 @@ export default function PlotlyPlot3D({
             }
             return wSum > 0 ? zSum / wSum : 0
           }))
-          return [{
-            type: 'surface' as const,
-            x: xRange, y: yRange, z: zGrid,
-            colorscale,
-            opacity: 0.9,
-          }]
+          return buildMatlabSurface(xRange, yRange, zGrid)
         }
 
         case 'wireframe_3d': {
+          // MATLAB-style mesh: hide the filled surface, keep the
+          // x/y wire crossings only. Ref Image 5 (blue+red
+          // intersecting surfaces) is a special case of two
+          // overlaid wires — here we render a single blue wire on
+          // a transparent surface, which lets the back faces show
+          // through naturally.
+          const buildWire = (x: number[], y: number[], z: number[][]): Plot3DTrace[] => [{
+            type: 'surface' as const,
+            x, y, z,
+            colorscale,
+            opacity: 0,           // surface fully transparent
+            hidesurface: true,    // suppress the colour fill entirely
+            contours: {
+              x: { show: true, color: '#3D5A80', width: 2 }, // muted ocean blue
+              y: { show: true, color: '#3D5A80', width: 2 },
+            },
+            showscale: false,
+            lighting: { ambient: 1, diffuse: 0, specular: 0 },
+          } as Plot3DTrace]
           if (surfaceFunction) {
             const { x, y, z } = generateSurfaceData(surfaceFunction)
-            return [{
-              type: 'surface' as const,
-              x: x[0], y: y.map(r => r[0]), z,
-              colorscale,
-              opacity: 0.6,
-              hidesurface: true,
-              contours: {
-                x: { show: true, color: '#8b5cf6', width: 1 },
-                y: { show: true, color: '#3b82f6', width: 1 },
-                z: { show: true, color: '#22c55e', width: 1 },
-              },
-            } as Plot3DTrace]
+            return buildWire(x[0], y.map(r => r[0]), z)
           }
           return [{
             type: 'scatter3d' as const,
             mode: 'lines' as const,
             x: xs, y: ys, z: zs,
-            line: { width: 2, color: '#8b5cf6' },
+            line: { width: 2, color: '#3D5A80' },
           }]
         }
 
         case 'contour_3d': {
+          // 3D-in-2D contour plot: render as a flat plotly contour
+          // (ref Image 7 shows a 3D-perspective contour but Plotly's
+          // contour with multi-level lines + filled bands gives the
+          // same scientific-figure look). Wrap as a surface with z=0
+          // and aggressive z-projection so the user reads the levels
+          // both as the surface colour and as the projected lines.
+          const buildContour = (x: number[], y: number[], z: number[][]): Plot3DTrace[] => [{
+            type: 'surface' as const,
+            x, y, z,
+            colorscale,
+            opacity: 0.9,
+            contours: {
+              z: { show: true, usecolormap: true, highlight: true, project: { z: true } },
+              x: { show: true, color: 'rgba(0,0,0,0.5)', width: 1 },
+              y: { show: true, color: 'rgba(0,0,0,0.5)', width: 1 },
+            },
+            colorbar: { title: zLabel, thickness: 14, len: 0.6 },
+            lighting: { ambient: 0.65, diffuse: 0.85, specular: 0.15 },
+          } as Plot3DTrace]
           if (surfaceFunction) {
             const { x, y, z } = generateSurfaceData(surfaceFunction)
-            return [{
-              type: 'surface' as const,
-              x: x[0], y: y.map(r => r[0]), z,
-              colorscale,
-              contours: {
-                z: { show: true, usecolormap: true, project: { z: true } },
-              },
-            } as Plot3DTrace]
+            return buildContour(x[0], y.map(r => r[0]), z)
           }
           return [{
             type: 'scatter3d' as const,
@@ -694,13 +734,40 @@ export default function PlotlyPlot3D({
     }
 
     if (!is2D) {
+      // MATLAB-style scene: tighter aspect, axis labels at journal
+      // size, camera angle at 30°/45° (the standard isometric view
+      // used in MATLAB's surf default), and a slight grid contrast
+      // bump so the bounding-box edges are visible enough to read
+      // axis ticks against. Background stays transparent so the
+      // chart card chrome dictates the surrounding bg, matching
+      // every 2D chart's behaviour.
+      const axisFont = { size: 11, color: '#8a8a92' }
+      const tickFont = { size: 9, color: '#8a8a92' }
+      const axisStyle = {
+        color: '#8a8a92',
+        gridcolor: 'rgba(255,255,255,0.12)',
+        zerolinecolor: 'rgba(255,255,255,0.18)',
+        showbackground: true,
+        backgroundcolor: 'rgba(0,0,0,0)',
+        gridwidth: 1,
+        showspikes: false,
+        tickfont: tickFont,
+      }
       baseLayout.scene = {
-        xaxis: { title: { text: xLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
-        yaxis: { title: { text: yLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
-        zaxis: { title: { text: zLabel, font: { size: 10, color: '#8a8a92' } }, color: '#8a8a92', gridcolor: 'rgba(255,255,255,0.08)', zerolinecolor: 'rgba(255,255,255,0.12)', showbackground: true, backgroundcolor: 'rgba(0,0,0,0)' },
+        xaxis: { ...axisStyle, title: { text: xLabel, font: axisFont } },
+        yaxis: { ...axisStyle, title: { text: yLabel, font: axisFont } },
+        zaxis: { ...axisStyle, title: { text: zLabel, font: axisFont } },
         bgcolor: 'rgba(0,0,0,0)',
-        aspectmode: 'cube' as const,
-        camera: { eye: { x: 1.6, y: 1.6, z: 1.3 }, center: { x: 0, y: 0, z: 0 } },
+        // `data` aspect mode preserves the data ranges (so a tall
+        // narrow surface looks tall narrow, not auto-cubed). For
+        // surface_3d / contour_3d / wireframe_3d that's what
+        // MATLAB's `axis tight` produces — the natural shape of
+        // the data set.
+        aspectmode: 'data' as const,
+        // Standard MATLAB azimuth/elevation 30°/45°. eye distance
+        // 1.4 keeps the surface filling the chart card without
+        // clipping the axis labels.
+        camera: { eye: { x: 1.4, y: -1.6, z: 1.1 }, center: { x: 0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } },
       }
     }
 

@@ -1449,7 +1449,23 @@ export default function DataVisualization() {
     // visual contract of the chosen theme.
     const showGridEffective = o.showGrid && !theme.forceHideGrid
     const gridEl = showGridEffective ? <CartesianGrid strokeDasharray={theme.gridDash} stroke={theme.gridColor} strokeWidth={theme.gridStrokeWidth} /> : null
-    const cursorStyle = o.showCrosshair ? { stroke: theme.mutedColor, strokeWidth: 1, strokeDasharray: '4 4' } : undefined
+    // Hover cursor styling. Recharts picks the cursor type from the
+    // chart variant: line / area / scatter use a vertical *stroke*,
+    // bar / histogram / waterfall use a *fill* rectangle. The default
+    // bar fill is rgba(204,204,204,0.1) — light gray — which on a
+    // dark app shell renders as a white-ish flash behind the hovered
+    // bar (user-reported on histograms). Setting both stroke and fill
+    // explicitly, with muted-policy values, kills the flash on bars
+    // and keeps the dashed crosshair on lines. Journal themes get a
+    // fully disabled cursor since static figures have no hover.
+    const cursorStyle = !o.showCrosshair || isJournal
+      ? false as const
+      : {
+          stroke: theme.mutedColor,
+          strokeWidth: 1,
+          strokeDasharray: '4 4',
+          fill: 'rgba(160, 160, 160, 0.06)',
+        }
     const tooltipEl = <Tooltip contentStyle={tooltipStyle} cursor={cursorStyle} formatter={(v) => yTickFmt(Number(v ?? 0))} />
     const hidden = hiddenSeries[chart.id] || new Set<string>()
     const handleLegendClick = (e: { dataKey?: string | number | ((obj: unknown) => unknown) }) => {
