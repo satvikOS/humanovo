@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-09 · **Branch:** `humanovo` · **Last commit:** `1fe4712`
+**Last touched:** 2026-05-09 · **Branch:** `humanovo` · **Last commit:** `7a0018f`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -174,6 +174,21 @@ the file current.
   `pages/genomics/{Variants,Expression,Pathway,Drug}.tsx` plus a
   shared `pages/genomics/constants.ts`. Keep `GenomicsAnalysis.tsx`
   as the orchestrator/router.
+
+### A3 Phase 3 — DONE (commit `7a0018f`)
+* `get_graph_store()` now consults `settings.KG_BACKEND` and returns
+  the Neo4j or Postgres implementation accordingly. Default stays
+  `"neo4j"` so this is opt-in until a deploy flips it.
+* PostgresGraphStore signatures harmonised with GraphStore so the
+  factory swap is drop-in (search_entities entity_types list,
+  get_neighborhood relation_types filter, find_paths max_length+limit,
+  get_stats output keys).
+* New `get_neo4j_graph_store()` direct accessor for paths that need
+  the Neo4j side regardless of the read flag.
+* `GET /admin/kg-parity` — dual-backend parity-check endpoint
+  (postgres counts vs neo4j counts, deltas, `in_parity` verdict,
+  live `kg_backend` / `kg_dual_write` echo). Operators flip
+  KG_BACKEND only after this reports parity.
 
 ### A3 Phase 2 — DONE (commit `1fe4712`)
 * `KG_DUAL_WRITE: bool = True` setting + `KG_BACKEND: str = "neo4j"`
