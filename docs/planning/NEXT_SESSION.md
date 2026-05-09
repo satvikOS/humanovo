@@ -175,6 +175,13 @@ the file current.
   shared `pages/genomics/constants.ts`. Keep `GenomicsAnalysis.tsx`
   as the orchestrator/router.
 
+### Stage 6 docs — DEVELOPMENT.md + OPERATIONS.md DONE (commit `6352b64`)
+* DEVELOPMENT.md: cold-start setup, env-var table, repo layout,
+  frontend/backend/KG conventions, common gotchas. ~200 lines.
+* OPERATIONS.md: deploy + rollback + per-credential secret rotation
+  + A3 KG migration ops + 5-step incident response + backup/restore
+  + cost monitoring. ~250 lines.
+
 ### Stage 4 bundle audit follow-on — DONE (commit `00f6231`)
 * Main bundle 2,021 KB → 911 KB (-55%, ~1.1 MB shaved). Lazy-loaded
   ProjectDetail, Settings, Notebook, Timeline, DataManager;
