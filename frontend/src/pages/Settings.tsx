@@ -20,6 +20,8 @@ import {
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
 import api, { type IngestionJob } from '../services/api'
+import { isNativeApp, openExternal } from '../lib/native'
+import { toast } from '../contexts/ToastContext'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
@@ -69,6 +71,10 @@ const BASE_SETTINGS_SECTIONS = [
   { id: 'integrations', label: 'Integrations', icon: FiGlobe },
 ]
 const ADMIN_SECTION = { id: 'admin', label: 'Admin · Seed demo data', icon: FiDatabase }
+// Desktop-only section — surfaces native-shell affordances (manual
+// update check, deep-links to Issue tracker) that don't make sense
+// in the web build. Injected when `isNativeApp()` is true.
+const DESKTOP_SECTION = { id: 'desktop', label: 'Desktop App', icon: FiMonitor }
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -1493,6 +1499,138 @@ function IntegrationSettings() {
   )
 }
 
+// ── Desktop App Settings ───────────────────────────────────────
+// Section only injected when isNativeApp() is true. Surfaces the
+// affordances that don't make sense in the web build: a manual
+// "Check for updates now" trigger that mirrors the launch-time
+// UpdateChecker (commit ad3d61d), and a "Report an issue" external
+// link to the GitHub Issues page via openExternal so the OS browser
+// owns the Authentication flow with GitHub instead of the WebView.
+
+function DesktopSettings() {
+  const [checking, setChecking] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; current: string } | null>(null)
+
+  const checkForUpdates = useCallback(async () => {
+    setChecking(true)
+    setUpdateInfo(null)
+    try {
+      const updaterMod = await import('@tauri-apps/plugin-updater')
+      const u = await updaterMod.check()
+      if (u) {
+        setUpdateInfo({ version: u.version, current: u.currentVersion })
+        toast(
+          'success',
+          `Update available — humanovo ${u.version}. Restart-to-install banner is at the bottom-right.`,
+          { title: 'humanovo' },
+        )
+      } else {
+        toast('info', 'You’re running the latest version.', { title: 'humanovo' })
+      }
+    } catch (err) {
+      toast(
+        'error',
+        err instanceof Error ? err.message : 'Update check failed',
+        { title: 'humanovo' },
+      )
+    } finally {
+      setChecking(false)
+    }
+  }, [])
+
+  const reportIssue = useCallback(async () => {
+    // Pre-fill the issue title with the platform so triage doesn't
+    // have to ask. Body is left blank for the user; the Settings
+    // surface can't know what they want to file.
+    const url = 'https://github.com/satvikOS/humanovo/issues/new?labels=desktop'
+    try {
+      await openExternal(url)
+    } catch (err) {
+      toast(
+        'error',
+        err instanceof Error ? err.message : 'Couldn’t open the browser',
+        { title: 'humanovo' },
+      )
+    }
+  }, [])
+
+  return (
+    <div className="max-w-2xl">
+      <h2 className="text-lg font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
+        Desktop App
+      </h2>
+      <p className="text-xs mb-6" style={{ color: 'var(--color-text-muted)' }}>
+        Native-shell affordances. The auto-updater also runs ~3 seconds after launch and
+        surfaces a Restart-to-install banner when an update is available.
+      </p>
+
+      <div className="space-y-4">
+        <div
+          className="flex items-start justify-between gap-4 p-4 rounded-lg"
+          style={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)' }}
+        >
+          <div className="min-w-0">
+            <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              Check for updates
+            </div>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              Triggers an immediate check against the GitHub Releases manifest. The
+              installed version updates only on restart — the banner appears with a
+              one-click Restart-to-install button when an update is found.
+            </p>
+            {updateInfo && (
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+                Available: {updateInfo.version} (current: {updateInfo.current}).
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={checkForUpdates}
+            disabled={checking}
+            className="text-xs px-3 py-1.5 rounded-md disabled:opacity-50 active:scale-95 shrink-0"
+            style={{
+              background: 'var(--color-text)',
+              color: 'var(--color-bg)',
+              fontWeight: 500,
+            }}
+          >
+            {checking ? 'Checking…' : 'Check now'}
+          </button>
+        </div>
+
+        <div
+          className="flex items-start justify-between gap-4 p-4 rounded-lg"
+          style={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)' }}
+        >
+          <div className="min-w-0">
+            <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              Report an issue
+            </div>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              Opens the humanovo GitHub Issues page in your system browser so the
+              GitHub login + 2FA flow happens in your normal browser session, not
+              inside the desktop app’s WebView.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={reportIssue}
+            className="text-xs px-3 py-1.5 rounded-md active:scale-95 shrink-0"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+          >
+            Open issue tracker
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 export default function Settings() {
   const [searchParams] = useSearchParams()
@@ -1503,9 +1641,16 @@ export default function Settings() {
       .then(s => setIsDevEnv(s.environment === 'development'))
       .catch(() => setIsDevEnv(false))
   }, [])
-  const settingsSections = isDevEnv
-    ? [...BASE_SETTINGS_SECTIONS, ADMIN_SECTION]
-    : BASE_SETTINGS_SECTIONS
+  // Desktop section toggles on for the Tauri shell only — gated at
+  // runtime via the `__TAURI_INTERNALS__` window-property check inside
+  // isNativeApp() so the web build never offers update-check / native-
+  // shell affordances that wouldn't work there anyway.
+  const isDesktop = isNativeApp()
+  const settingsSections = [
+    ...BASE_SETTINGS_SECTIONS,
+    ...(isDesktop ? [DESKTOP_SECTION] : []),
+    ...(isDevEnv ? [ADMIN_SECTION] : []),
+  ]
   const [activeSection, setActiveSection] = useState(
     tabParam && settingsSections.some(s => s.id === tabParam) ? tabParam : 'appearance'
   )
@@ -1547,6 +1692,8 @@ export default function Settings() {
         return <IntegrationSettings />
       case 'admin':
         return <AdminSeedSettings />
+      case 'desktop':
+        return <DesktopSettings />
       default:
         return <AppearanceSettings />
     }
