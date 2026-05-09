@@ -175,9 +175,11 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
  */
 export async function getDiagnostics(): Promise<string> {
   // Imported lazily to avoid a cycle if errorLog ever needs to call
-  // anything from native.ts. Static import works today, lazy keeps
-  // the option open.
-  const { recentErrors } = await import('./errorLog')
+  // anything from native.ts. Lazy keeps the option open.
+  const [{ recentErrors }, { getToken }] = await Promise.all([
+    import('./errorLog'),
+    import('../services/auth'),
+  ])
   const [version, plat, notifPerm, autostart] = await Promise.all([
     getAppVersion(),
     getPlatform(),
@@ -193,6 +195,12 @@ export async function getDiagnostics(): Promise<string> {
         : 'n/a'
     }`,
     `Native: ${isNativeApp() ? 'yes' : 'no'}`,
+    `Current path: ${typeof location !== 'undefined' ? location.pathname : 'n/a'}`,
+    // Boolean only — never include the JWT or the user's email here.
+    // Diagnostics blocks frequently end up in public GitHub issues;
+    // PII would leak. "yes/no" is enough for triage to know whether
+    // a 401 is "user wasn't logged in" vs "auth was broken".
+    `Logged in: ${getToken() ? 'yes' : 'no'}`,
   ]
   if (isNativeApp()) {
     lines.push(`Notifications: ${notifPerm ?? 'unknown'}`)
