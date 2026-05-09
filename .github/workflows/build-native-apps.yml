@@ -11,7 +11,7 @@ name: Build Native Apps (Win/Mac/Linux)
 #
 # Build matrix:
 #   - macos-latest    -> .app + .dmg (universal: x86_64 + aarch64)
-#   - windows-2025    -> .exe + .msi
+#   - windows-2025-vs2026 -> .exe + .msi (VS 2026 bundled image)
 #   - ubuntu-22.04    -> .deb + .AppImage  (22.04 not 24.04 because of
 #                        the libwebkit2gtk-4.1 ABI break)
 #
@@ -85,14 +85,15 @@ jobs:
           - platform: ubuntu-22.04
             args: ''
             label: linux-x86_64
-          # `windows-2025` is the recommended Windows runner. GitHub
-          # announced the image will redirect to a VS-2026-bundled
-          # variant on 2026-05-12; the Tauri build is toolchain-version-
-          # tolerant (uses MSBuild, which both VS 2022 and VS 2026 ship
-          # with) so the cutover doesn't break us. Using `windows-2025`
-          # rather than the transitional `-vs2026` suffix because the
-          # latter is not yet a runner label actionlint recognises.
-          - platform: windows-2025
+          # `windows-2025-vs2026` is the explicit VS-2026-bundled
+          # Windows runner. GitHub auto-redirects `windows-2025` to
+          # this variant after 2026-05-12 (per the deprecation notice
+          # surfaced on every recent run); pinning the explicit label
+          # now means we don't get caught between "the redirect hasn't
+          # fired yet" and "the redirect just fired and broke
+          # something subtly". Tauri's MSBuild path is identical on
+          # VS 2022 and VS 2026, so the cutover is a no-op for us.
+          - platform: windows-2025-vs2026
             args: ''
             label: windows-x86_64
 
