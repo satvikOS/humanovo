@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `90bcb56`
+**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `3a97a4e`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -226,11 +226,13 @@ the file current.
   bios (gated on user-blocked item 5 above), product video embed
   (when produced).
 
-### B4. Onboarding flow / first-run experience
-* New-user signup currently lands on the empty Projects page. Add
-  a `<Onboarding>` step that fires on `user.created_at` < 5 minutes
-  showing: create-project CTA → upload-corpus CTA → first-discovery
-  CTA. Skippable, dismissed forever via `users.has_completed_onboarding`.
+### B4. Onboarding flow / first-run experience — DONE (commit `3a97a4e`)
+* Migration 022 added `users.has_completed_onboarding` (TRUE for legacy
+  rows, FALSE for new signups). PATCH /me accepts the flag.
+  Onboarding.tsx renders a modal 3-step wizard (create-project →
+  upload-corpus → first-discovery) gated on `user.has_completed_onboarding
+  === false`. Surfaced + fixed a separate gap: AuthProvider was
+  defined but never wrapped around <App/>; main.tsx now wires it.
 
 ### B5. Mobile responsiveness review
 * The desktop app is the primary surface but the landing site +
