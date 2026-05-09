@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { type ReactNode } from 'react'
 import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
+import RouteGatePlaceholder from './components/RouteGatePlaceholder'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import ProjectDetail from './pages/ProjectDetail'
@@ -57,8 +58,15 @@ function PageWrapper({ children }: { children: ReactNode }) {
   // Pass the current pathname as resetKey so a user who crashes on
   // /projects and navigates to /dashboard doesn't stay stuck on the
   // error screen — the boundary auto-resets when the route changes.
+  // Every route also funnels through RouteGatePlaceholder so Stage 5
+  // of PATH_TO_100_PERCENT.md can flip auth on with a single edit
+  // to that component.
   const { pathname } = useLocation()
-  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
+  return (
+    <ErrorBoundary resetKey={pathname}>
+      <RouteGatePlaceholder>{children}</RouteGatePlaceholder>
+    </ErrorBoundary>
+  )
 }
 
 // Legacy /simulations etc. redirects. We want to preserve the ?tab=…
@@ -73,13 +81,15 @@ function LazyPageWrapper({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   return (
     <ErrorBoundary resetKey={pathname}>
-      <Suspense fallback={
-        <div className="flex items-center justify-center h-full p-8">
-          <div className="animate-pulse text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading...</div>
-        </div>
-      }>
-        {children}
-      </Suspense>
+      <RouteGatePlaceholder>
+        <Suspense fallback={
+          <div className="flex items-center justify-center h-full p-8">
+            <div className="animate-pulse text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading...</div>
+          </div>
+        }>
+          {children}
+        </Suspense>
+      </RouteGatePlaceholder>
     </ErrorBoundary>
   )
 }
