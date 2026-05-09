@@ -158,7 +158,10 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         // macOS: clicking the tray icon directly should pop the menu,
         // matching system convention. Windows / Linux: leave default
         // (false) so the click event can route to "show window".
-        .menu_on_left_click(cfg!(target_os = "macos"))
+        // Tauri 2 renamed `menu_on_left_click` -> `show_menu_on_left_click`;
+        // tracking the new name avoids the deprecated-warning noise on
+        // every CI build.
+        .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
                 if let Some(w) = app.get_webview_window("main") {
