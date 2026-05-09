@@ -18,7 +18,7 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Builder, Emitter, Manager,
+    Builder, Emitter, Manager, RunEvent, WindowEvent,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -104,8 +104,35 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running humanovo desktop app");
+        // `.build()` + manual `.run(callback)` instead of plain `.run()`
+        // so we can intercept lifecycle events. Specifically, when the
+        // user closes the main window we need to terminate the process
+        // — without this, the single-instance plugin keeps the runtime
+        // alive after the WebView destroys, leaving humanovo hanging
+        // in the background until the user opens Task Manager and
+        // forces it to end. Reported by users as "humanovo doesn't
+        // close at all".
+        .build(tauri::generate_context!())
+        .expect("error while building humanovo desktop app")
+        .run(|app, event| {
+            match event {
+                // Default close behaviour: destroy the window. We
+                // explicitly call exit(0) on the AppHandle when the
+                // window is destroyed so the process actually
+                // terminates instead of lingering as a zombie.
+                RunEvent::WindowEvent {
+                    label,
+                    event: WindowEvent::Destroyed,
+                } if label == "main" => {
+                    app.exit(0);
+                }
+                // ExitRequested fires when something already asked
+                // the app to exit (e.g. tray Quit forwarded through
+                // window.close()). Let it through; the default
+                // behaviour from here is correct.
+                _ => {}
+            }
+        });
 }
 
 /// Initialise the system tray. Extracted from `setup` so the bulky
