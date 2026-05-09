@@ -710,7 +710,13 @@ function makeTickFormatter(fmt: TickFormat, decimals: number): (v: unknown) => s
         const abs = Math.abs(n)
         if (n === 0) return '0'
         if (abs >= 1e4 || abs < 1e-3) return n.toExponential(Math.min(2, dp))
-        return n.toFixed(dp)
+        // Drop trailing zeros so integer ticks render "80" not "80.00"
+        // — the previous .toFixed(dp) ignored whether the value
+        // actually carries fractional information. Visible in every
+        // bar/line chart with integer Y-data; made the journal-theme
+        // typography look sloppy.
+        if (Number.isInteger(n) && dp > 0) return n.toFixed(0)
+        return parseFloat(n.toFixed(dp)).toString()
       }
   }
 }

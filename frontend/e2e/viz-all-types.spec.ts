@@ -118,6 +118,11 @@ function seedCharts() {
 }
 
 test('every chart type renders without crash', async ({ page }) => {
+  // Larger viewport so the fullPage screenshot resolves enough
+  // detail per chart to spot typography / overlap issues — at the
+  // default 1280px the grid only fits 2 charts wide and they shrink
+  // unreadably small.
+  await page.setViewportSize({ width: 1920, height: 1080 })
   const pageErrors: { type: string; err: string }[] = []
   page.on('pageerror', (err) => {
     pageErrors.push({ type: 'global', err: `${err.name}: ${err.message}` })
