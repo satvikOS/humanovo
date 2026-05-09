@@ -32,7 +32,7 @@ import api, { apiClient } from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
-import { notify } from '../lib/native'
+import { notify, setTrayTooltip } from '../lib/native'
 import { register as registerCloseGuard } from '../lib/closeGuard'
 
 // Types
@@ -174,11 +174,16 @@ export default function Agents() {
   // State
   const [state, setState] = useState<string>('idle')
   // Block native window close while discovery is mid-run; users
-  // can still explicitly stop or pause from the UI.
+  // can still explicitly stop or pause from the UI. Also flip the
+  // tray tooltip so a tabbed-away user can glance at it.
   useEffect(() => {
     if (state !== 'running') return
     const unregister = registerCloseGuard('A discovery is running')
-    return unregister
+    void setTrayTooltip('humanovo · Discovery running')
+    return () => {
+      unregister()
+      void setTrayTooltip('humanovo')
+    }
   }, [state])
   const [stats, setStats] = useState<OrchestratorStatus | null>(null)
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([])

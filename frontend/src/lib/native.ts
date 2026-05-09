@@ -163,6 +163,27 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 }
 
 /**
+ * Update the system tray's tooltip text. Used to surface long-running
+ * activity (e.g. "humanovo · Discovery running") so the user can
+ * glance at the tray without unminimising humanovo.
+ *
+ * Web mode: no-op. Native mode where the tray didn't initialise (e.g.
+ * Linux without dbus, see `setup_tray` in lib.rs): also no-op since
+ * `getById` returns null.
+ */
+export async function setTrayTooltip(tooltip: string): Promise<void> {
+  if (!isNativeApp()) return
+  try {
+    const { TrayIcon } = await import(/* @vite-ignore */ '@tauri-apps/api/tray')
+    const tray = await TrayIcon.getById('main')
+    if (!tray) return
+    await tray.setTooltip(tooltip)
+  } catch (err) {
+    console.warn('native.setTrayTooltip: failed', err)
+  }
+}
+
+/**
  * Build a one-shot diagnostics block: version, platform, perms, etc.
  *
  * Used by the Settings "Copy diagnostics" affordance so a user filing
