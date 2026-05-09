@@ -306,7 +306,16 @@ class Settings(BaseSettings):
     # blocked at startup by the validator below.
     PUBMED_EMAIL: str = ""
     PUBMED_API_KEY: SecretStr | None = None
-    PUBMED_RATE_LIMIT: int = 10  # requests per second
+    PUBMED_RATE_LIMIT: int = 10  # requests per second; PubMed allows
+    # 3/s without an API key, 10/s with one — the RateLimiter still
+    # protects us when the key isn't set because the source-side rate
+    # limiter is more permissive than NCBI's, not less.
+
+    # Europe PMC — polite-pool guidance is 10 req/s; no API key
+    # required. We respect the same ceiling as PubMed by default so a
+    # single env var change can dial both literature sources back if
+    # we get rate-limited.
+    EUROPEPMC_RATE_LIMIT: int = 10
 
     # Elsevier Scopus / ScienceDirect API
     ELSEVIER_API_KEY: str = ""  # Set via ELSEVIER_API_KEY env var or GitHub Actions secret

@@ -182,6 +182,21 @@ class DataSourceBase(ABC):
 # ===================================================================
 
 
+def _pubmed_api_key() -> str | None:
+    """Read PUBMED_API_KEY (SecretStr) from settings and unwrap it.
+    Centralised so PubMedSource.search() and any future NCBI-backed
+    source share the same lookup; previous code consulted a non-
+    existent `settings.NCBI_API_KEY`, so the key was never sent and
+    PubMed was permanently rate-limited at the no-key tier."""
+    raw = getattr(settings, "PUBMED_API_KEY", None)
+    if raw is None:
+        return None
+    # SecretStr in Pydantic v2 — get_secret_value() unwraps. Plain
+    # strings (older builds / tests) pass through unchanged.
+    get = getattr(raw, "get_secret_value", None)
+    return get() if callable(get) else str(raw) or None
+
+
 class PubMedSource(DataSourceBase):
     """NCBI PubMed — biomedical literature."""
 
@@ -192,7 +207,12 @@ class PubMedSource(DataSourceBase):
     description = "Biomedical literature from MEDLINE, life science journals, and online books."
 
     def _rate_limit(self) -> float:
-        return 3.0  # NCBI allows 3/s without API key, 10/s with
+        # NCBI allows 3 req/s without an API key and 10 req/s with one.
+        # PUBMED_RATE_LIMIT (default 10) is the ceiling we apply when a
+        # key is present; without one we fall back to 3 to stay polite.
+        if _pubmed_api_key():
+            return float(getattr(settings, "PUBMED_RATE_LIMIT", 10))
+        return 3.0
 
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
         session = await self._get_session()
@@ -204,7 +224,7 @@ class PubMedSource(DataSourceBase):
             "retmode": "json",
             "sort": "relevance",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             search_params["api_key"] = api_key
 
@@ -1015,6 +1035,13 @@ class EuropePMCSource(DataSourceBase):
     phase = 1
     description = "Full-text biomedical and life science literature."
 
+    def _rate_limit(self) -> float:
+        # Europe PMC's polite-pool guidance is 10 req/s; no API key
+        # required. Previously inheriting the 3/s base default cost us
+        # ~3x latency on literature batches that hit Europe PMC inside
+        # the 12-source concurrency window.
+        return float(getattr(settings, "EUROPEPMC_RATE_LIMIT", 10))
+
     async def search(self, query: str, max_results: int = 20) -> DataSourceResult:
         session = await self._get_session()
         params = {
@@ -1106,7 +1133,7 @@ class ClinVarSource(DataSourceBase):
             "retmax": min(max_results, 20),
             "retmode": "json",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             params["api_key"] = api_key
 
@@ -1165,7 +1192,7 @@ class RefSeqSource(DataSourceBase):
             "retmax": min(max_results, 20),
             "retmode": "json",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             params["api_key"] = api_key
 
@@ -1224,7 +1251,7 @@ class GeneCardsSource(DataSourceBase):
             "retmax": min(max_results, 20),
             "retmode": "json",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             params["api_key"] = api_key
 
@@ -1812,7 +1839,7 @@ class DepMapSource(DataSourceBase):
             "retmax": min(max_results, 20),
             "retmode": "json",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             params["api_key"] = api_key
 
@@ -1947,7 +1974,7 @@ class GEOSource(DataSourceBase):
             "retmax": min(max_results, 20),
             "retmode": "json",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             params["api_key"] = api_key
 
@@ -2100,7 +2127,7 @@ class SNPediaSource(DataSourceBase):
             "retmax": min(max_results, 20),
             "retmode": "json",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             params["api_key"] = api_key
 
@@ -2693,7 +2720,7 @@ class MalaCardsSource(DataSourceBase):
             "retmax": min(max_results, 20),
             "retmode": "json",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             params["api_key"] = api_key
 
@@ -2832,7 +2859,7 @@ class CellMarkerSource(DataSourceBase):
             "retmax": min(max_results, 20),
             "retmode": "json",
         }
-        api_key = getattr(settings, "NCBI_API_KEY", None)
+        api_key = _pubmed_api_key()
         if api_key:
             params["api_key"] = api_key
 
