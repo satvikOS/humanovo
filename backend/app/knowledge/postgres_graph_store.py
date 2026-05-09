@@ -288,21 +288,28 @@ class PostgresGraphStore(LoggerMixin):
     async def search_entities(
         self,
         query: str,
-        *,
+        entity_types: list[str] | None = None,
         limit: int = 20,
-        type_filter: str | None = None,
+        *,
         owner_id: UUID | None = None,
         include_common: bool = True,
     ) -> list[Entity]:
         """Search by ILIKE on name + description.
 
+        Signature mirrors GraphStore.search_entities (positional
+        `entity_types` list + `limit`) so the Phase-3 KG_BACKEND
+        factory swap is drop-in for existing callers. The keyword-
+        only `owner_id` / `include_common` extras are Postgres-only
+        scope filters used by the visual KG endpoints; legacy callers
+        that don't pass them get the unfiltered behaviour.
+
         Phase 1 doesn't compute query embeddings on the fly — that
-        plumbing lands in Phase 2. The ILIKE fallback covers the
-        90% case (name lookup) and lets the visual KG ship now.
+        plumbing lands in a later phase. The ILIKE fallback covers
+        the 90% case (name lookup) and lets the visual KG ship now.
         """
         like = f"%{query.strip()}%"
         scope_clause = _scope_clause(owner_id, include_common)
-        type_clause = "AND type = :type_filter" if type_filter else ""
+        type_clause = "AND type = ANY(:entity_types)" if entity_types else ""
         sql = (
             "SELECT id, name, type, description, properties "
             "FROM knowledge_graph_nodes "
@@ -318,8 +325,8 @@ class PostgresGraphStore(LoggerMixin):
             "exact": query.strip(),
             "limit": limit,
         }
-        if type_filter:
-            params["type_filter"] = type_filter
+        if entity_types:
+            params["entity_types"] = list(entity_types)
         if owner_id is not None:
             params["owner_id"] = owner_id
 
@@ -330,18 +337,24 @@ class PostgresGraphStore(LoggerMixin):
     async def get_neighborhood(
         self,
         entity_id: str,
-        *,
         depth: int = 1,
-        limit: int = 100,
+        relation_types: list[str] | None = None,
+        limit: int = 50,
+        *,
         owner_id: UUID | None = None,
         include_common: bool = True,
     ) -> GraphNeighborhood | None:
         """Return the n-hop neighbourhood of a center entity.
 
+        Signature mirrors GraphStore.get_neighborhood (positional
+        depth / relation_types / limit, default limit=50) so the
+        KG_BACKEND factory can swap implementations without changing
+        callers. `relation_types` filters edges by `relationship` —
+        empty / None means no filter.
+
         Recursive CTE with cycle detection — visited node ids are
         accumulated per row so we don't revisit. `depth` caps the
-        BFS, `limit` caps the result rows on each side (nodes,
-        edges).
+        BFS; `limit` caps the result row counts.
         """
         try:
             center_uuid = UUID(entity_id)
@@ -402,15 +415,28 @@ class PostgresGraphStore(LoggerMixin):
             )
             entities = [_node_row_to_entity(r) for r in nodes_result.fetchall()]
 
+            # Optional relation_types filter mirrors the GraphStore
+            # signature. We compare case-insensitively because Cypher's
+            # rel-type space is uppercase by convention while Postgres
+            # rows store the original-case label from the orchestrator.
+            edge_filter = ""
+            edge_params: dict[str, Any] = {
+                "ids": node_ids,
+                "edge_limit": limit,
+            }
+            if relation_types:
+                edge_filter = " AND lower(relationship) = ANY(:rel_types)"
+                edge_params["rel_types"] = [r.lower() for r in relation_types]
             edges_result = await session.execute(
                 text(
                     "SELECT id, source_id, target_id, source_name, target_name, "
                     "       relationship, strength, evidence "
                     "FROM knowledge_graph_edges "
                     "WHERE source_id = ANY(:ids) AND target_id = ANY(:ids) "
+                    f"{edge_filter} "
                     "LIMIT :edge_limit"
                 ),
-                {"ids": node_ids, "edge_limit": limit},
+                edge_params,
             )
             relations = [_edge_row_to_relation(r) for r in edges_result.fetchall()]
 
@@ -446,15 +472,17 @@ class PostgresGraphStore(LoggerMixin):
         self,
         source_id: str,
         target_id: str,
-        *,
-        max_depth: int = 4,
+        max_length: int = 4,
+        limit: int = 5,
     ) -> list[GraphPath]:
         """Recursive CTE shortest-paths.
 
-        Documented divergence from `GraphStore.find_paths`:
-        the Cypher implementation returns every variable-length
-        match; this returns deduplicated shortest paths only. Tests
-        assert this explicitly.
+        Signature mirrors GraphStore.find_paths (positional
+        `max_length` + `limit`) so the KG_BACKEND factory swap is
+        drop-in. `max_length` caps the recursion depth; `limit` caps
+        the number of paths returned. Documented divergence from
+        Cypher: this returns deduplicated shortest paths only, while
+        Cypher's variable-length matches return every walk.
         """
         try:
             src_uuid = UUID(source_id)
@@ -481,18 +509,23 @@ class PostgresGraphStore(LoggerMixin):
                     (CASE WHEN e.source_id = w.node_id
                           THEN e.target_id ELSE e.source_id END)
                     <> ALL(w.path_ids)
-                    AND w.depth < :max_depth
+                    AND w.depth < :max_length
             )
             SELECT path_ids, edge_ids, depth
             FROM walk
             WHERE node_id = :tgt::uuid
             ORDER BY depth ASC
-            LIMIT 5
+            LIMIT :path_limit
         """
         async with self._session_factory() as session:
             result = await session.execute(
                 text(sql),
-                {"src": src_uuid, "tgt": tgt_uuid, "max_depth": max_depth},
+                {
+                    "src": src_uuid,
+                    "tgt": tgt_uuid,
+                    "max_length": max_length,
+                    "path_limit": limit,
+                },
             )
             rows = result.fetchall()
             if not rows:
@@ -564,26 +597,62 @@ class PostgresGraphStore(LoggerMixin):
     async def get_stats(
         self, *, owner_id: UUID | None = None, include_common: bool = True
     ) -> dict[str, Any]:
+        """Return aggregate counts.
+
+        Output keys mirror GraphStore.get_stats:
+          {total_entities, total_relations, entity_counts,
+           relation_counts, last_updated}
+        plus a `backend: "postgres"` discriminator that callers can
+        use to verify which backend served the response (the parity-
+        check endpoint in /admin/kg/stats relies on this).
+        """
+        from datetime import UTC, datetime  # local import — no top-of-file churn
+
         scope_node_clause = _scope_clause(owner_id, include_common, table="n")
         scope_edge_clause = _scope_clause(owner_id, include_common, table="e")
+        params = {"owner_id": owner_id} if owner_id is not None else {}
+
         async with self._session_factory() as session:
-            n = await session.execute(
+            n_total = await session.execute(
                 text(
-                    f"SELECT COUNT(*) AS c FROM knowledge_graph_nodes n "
+                    f"SELECT COUNT(*) FROM knowledge_graph_nodes n "
                     f"WHERE 1=1 {scope_node_clause}"
                 ),
-                {"owner_id": owner_id} if owner_id is not None else {},
+                params,
             )
-            e = await session.execute(
+            e_total = await session.execute(
                 text(
-                    f"SELECT COUNT(*) AS c FROM knowledge_graph_edges e "
+                    f"SELECT COUNT(*) FROM knowledge_graph_edges e "
                     f"WHERE 1=1 {scope_edge_clause}"
                 ),
-                {"owner_id": owner_id} if owner_id is not None else {},
+                params,
+            )
+            n_by_type = await session.execute(
+                text(
+                    f"SELECT n.type, COUNT(*) FROM knowledge_graph_nodes n "
+                    f"WHERE 1=1 {scope_node_clause} GROUP BY n.type"
+                ),
+                params,
+            )
+            e_by_type = await session.execute(
+                text(
+                    f"SELECT e.relationship, COUNT(*) FROM knowledge_graph_edges e "
+                    f"WHERE 1=1 {scope_edge_clause} GROUP BY e.relationship"
+                ),
+                params,
             )
             return {
-                "node_count": int(n.scalar() or 0),
-                "edge_count": int(e.scalar() or 0),
+                "total_entities": int(n_total.scalar() or 0),
+                "total_relations": int(e_total.scalar() or 0),
+                "entity_counts": {
+                    (row[0] or "unknown"): int(row[1])
+                    for row in n_by_type.fetchall()
+                },
+                "relation_counts": {
+                    (row[0] or "unknown"): int(row[1])
+                    for row in e_by_type.fetchall()
+                },
+                "last_updated": datetime.now(UTC),
                 "backend": "postgres",
             }
 

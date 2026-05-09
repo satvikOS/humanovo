@@ -629,14 +629,61 @@ class GraphStore(LoggerMixin):
 
 
 async def init_graph_store() -> None:
-    """Initialize the global graph store."""
+    """Initialize the global graph store(s).
+
+    Always wires up the Neo4j-backed `GraphStore` since it is the
+    write path through Phase 4 of the A3 migration (see
+    docs/planning/A3_NEO4J_TO_PGVECTOR_PLAN.md). The Postgres-backed
+    sibling has no driver to bring up — it lives behind a session
+    factory and gets initialised lazily by `get_graph_store()` when
+    `KG_BACKEND=postgres` is selected.
+    """
     global _graph_store
     _graph_store = GraphStore()
     await _graph_store.initialize()
 
 
-def get_graph_store() -> GraphStore:
-    """Get the global graph store instance."""
+def get_graph_store():
+    """Return the active KG read-store.
+
+    A3 Phase 3 — KG_BACKEND-aware factory. The setting
+    `KG_BACKEND` (default `"neo4j"`) selects which implementation
+    serves reads; both expose the same public method surface so
+    call sites don't change. When `KG_BACKEND=postgres` and the
+    Postgres store hasn't been touched yet, the singleton is
+    instantiated lazily — no migration required.
+
+    The escape hatch is a single env-var flip back to `neo4j`; the
+    Neo4j-backed `GraphStore` keeps writing through the dual-write
+    wired in Phase 2, so flipping the read backend back is instant
+    and stays consistent with whatever wrote last.
+
+    Note that the return type is intentionally untyped — both
+    implementations conform to the implicit Protocol of GraphStore's
+    public methods, but they don't share a base class. Callers can
+    treat the returned object as a GraphStore for typing purposes.
+    """
+    backend = (getattr(settings, "KG_BACKEND", "neo4j") or "neo4j").lower()
+    if backend == "postgres":
+        # Lazy import to avoid a circular import: PostgresGraphStore
+        # imports Entity / Relation from this module.
+        from app.knowledge.postgres_graph_store import (
+            get_postgres_graph_store,
+        )
+        return get_postgres_graph_store()
+
+    if _graph_store is None:
+        raise RuntimeError("Graph store not initialized")
+    return _graph_store
+
+
+def get_neo4j_graph_store() -> GraphStore:
+    """Direct accessor for the Neo4j-backed store.
+
+    Used by the parity-check stats endpoint and by paths that
+    explicitly need the Neo4j write side regardless of the read
+    KG_BACKEND setting (e.g. the dual-write helpers in Phase 2).
+    """
     if _graph_store is None:
         raise RuntimeError("Graph store not initialized")
     return _graph_store

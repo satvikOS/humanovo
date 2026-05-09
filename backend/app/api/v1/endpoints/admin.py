@@ -201,6 +201,74 @@ async def get_kg_stats(
     }
 
 
+@router.get("/kg-parity")
+async def get_kg_parity(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """A3 Phase 3 parity check — counts from BOTH backends side-by-side.
+
+    Operators flip `KG_BACKEND=postgres` only after this endpoint
+    reports parity (or an acceptable lag) between the Neo4j read store
+    and the Postgres mirror that the Phase 2 dual-write has been
+    populating. Both sides surface their `total_entities` /
+    `total_relations` so a quick eyeball comparison is enough; the
+    `delta_*` keys do the math for you.
+
+    Failure modes are explicit: if Neo4j is down we report
+    `neo4j: {error: "..."}` rather than 500, so the parity dashboard
+    keeps rendering even mid-incident. The Postgres counts come from
+    the same per-table SQL that /kg-stats uses, so they're guaranteed
+    consistent across both endpoints.
+    """
+    # Postgres side — direct table counts.
+    pg_nodes = (await db.execute(select(func.count(KnowledgeGraphNode.id)))).scalar() or 0
+    pg_edges = (await db.execute(select(func.count(KnowledgeGraphEdge.id)))).scalar() or 0
+
+    # Neo4j side — go through the live GraphStore so we honour the
+    # in-memory-fallback path and don't paper over a dead driver.
+    neo4j_block: dict[str, Any] = {}
+    try:
+        from app.knowledge.graph_store import get_neo4j_graph_store
+        neo4j = get_neo4j_graph_store()
+        stats = await neo4j.get_stats()
+        neo4j_block = {
+            "total_entities": int(stats.get("total_entities", 0)),
+            "total_relations": int(stats.get("total_relations", 0)),
+        }
+    except Exception as exc:  # noqa: BLE001 — explicit catch-all for parity report
+        neo4j_block = {"error": str(exc)[:200]}
+
+    delta_nodes = (
+        pg_nodes - neo4j_block["total_entities"]
+        if "total_entities" in neo4j_block else None
+    )
+    delta_edges = (
+        pg_edges - neo4j_block["total_relations"]
+        if "total_relations" in neo4j_block else None
+    )
+
+    return {
+        "kg_backend": getattr(settings, "KG_BACKEND", "neo4j"),
+        "kg_dual_write": getattr(settings, "KG_DUAL_WRITE", False),
+        "postgres": {
+            "total_entities": pg_nodes,
+            "total_relations": pg_edges,
+        },
+        "neo4j": neo4j_block,
+        "delta_entities": delta_nodes,
+        "delta_relations": delta_edges,
+        # Quick-glance verdict for the parity dashboard. Tolerates a
+        # small lag (≤ 5 rows) since the Phase 2 dual-write is async
+        # and a snapshot taken mid-burst can show transient drift.
+        "in_parity": (
+            delta_nodes is not None
+            and delta_edges is not None
+            and abs(delta_nodes) <= 5
+            and abs(delta_edges) <= 5
+        ),
+    }
+
+
 @router.post("/seed-corpus", response_model=dict)
 async def seed_evidence_corpus(
     force: bool = Query(False),
