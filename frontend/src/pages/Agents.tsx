@@ -32,6 +32,7 @@ import api, { apiClient } from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
 import { toast } from '../contexts/ToastContext'
+import { notify } from '../lib/native'
 
 // Types
 interface TranslationalPhaseDetail {
@@ -289,17 +290,26 @@ export default function Agents() {
 
       // Log discovery completion
       if ((newState === 'completed' || newState === 'stopping') && prevStateRef.current === 'running') {
+        const hypothesesCount = r.top_hypotheses?.length || 0
+        const subject = r.disease || config.disease || 'Discovery'
         logActivity({
           type: 'discovery', action: 'completed',
-          title: `Discovery ${newState}: ${r.disease || config.disease} — ${r.top_hypotheses?.length || 0} hypotheses`,
+          title: `Discovery ${newState}: ${subject} — ${hypothesesCount} hypotheses`,
           project: r.project_name || config.disease,
           // project_id lets the ActivityFeed / notification rows route
           // directly to the dedicated project folder instead of /agents.
           metadata: {
-            hypotheses_count: r.top_hypotheses?.length || 0,
+            hypotheses_count: hypothesesCount,
             project_id: r.project_id || '',
           },
         })
+        // Native OS notification when humanovo isn't focused — caller
+        // is on a poll, so the user has typically tabbed away by now.
+        // No-op in web mode and when humanovo already has focus.
+        void notify(
+          newState === 'completed' ? 'Discovery complete' : 'Discovery stopped',
+          `${subject} — ${hypothesesCount} hypotheses generated.`,
+        )
       }
       prevStateRef.current = newState
 
