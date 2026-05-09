@@ -415,6 +415,12 @@ export default function Agents() {
       }
     }
     loadProjectHypotheses()
+    // hypotheses.length is intentionally omitted — adding it would
+    // re-run this effect every time setHypotheses fires (including
+    // from the polling effect above), defeating the early-return
+    // guard at the top of the body. The effect should run once per
+    // (projectId, state) transition; if data already exists, skip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, state])
 
   // Load discovery history from API when projectId is available

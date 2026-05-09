@@ -302,20 +302,12 @@ export default function Agents() {
 
   // ── Hypothesis save routing ──
 
-  const handleCardAction = useCallback(async (kind: string, payload: Record<string, unknown>) => {
-    if (kind !== 'save-hypothesis') return
-    if (!activeProjectId) {
-      // Prompt the user to pick a project.
-      setProjectPickerOpen(true)
-      // Stash the pending hypothesis; the picker's confirm handler
-      // will re-run the save.
-      ;(window as unknown as { __pendingHypothesisCard?: Record<string, unknown> }).__pendingHypothesisCard = payload
-      return
-    }
-    await saveHypothesisToProject(payload, activeProjectId)
-  }, [activeProjectId])
-
-  const saveHypothesisToProject = async (payload: Record<string, unknown>, projectId: string) => {
+  // Stable identity (useCallback w/ no reactive deps) so the
+  // handleCardAction useCallback below can list it as a dep without
+  // re-creating on every render. Body uses only the two arguments,
+  // imported `toast`, and the in-component `apiCreateHypothesis`
+  // helper which itself never reads reactive state.
+  const saveHypothesisToProject = useCallback(async (payload: Record<string, unknown>, projectId: string) => {
     try {
       // api.ts exposes `createHypothesis` via POST /hypotheses; we
       // stitch the card payload into the backend schema.
@@ -332,7 +324,20 @@ export default function Agents() {
       const msg = err instanceof Error ? err.message : 'Save failed'
       toast('error', msg)
     }
-  }
+  }, [])
+
+  const handleCardAction = useCallback(async (kind: string, payload: Record<string, unknown>) => {
+    if (kind !== 'save-hypothesis') return
+    if (!activeProjectId) {
+      // Prompt the user to pick a project.
+      setProjectPickerOpen(true)
+      // Stash the pending hypothesis; the picker's confirm handler
+      // will re-run the save.
+      ;(window as unknown as { __pendingHypothesisCard?: Record<string, unknown> }).__pendingHypothesisCard = payload
+      return
+    }
+    await saveHypothesisToProject(payload, activeProjectId)
+  }, [activeProjectId, saveHypothesisToProject])
 
   // Minimal inline wrapper — api.ts already has createHypothesis but
   // threads it through a different path; we keep the call shape tight.

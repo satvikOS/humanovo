@@ -594,6 +594,29 @@ function caretViewportAnchor(ta: HTMLTextAreaElement, fontSize: number): { top: 
   return { top, left }
 }
 
+/* ── Command-palette taxonomy ────────────────────────────────────────────
+   Lifted out of the component body so the references stay stable across
+   renders — keeps the `groupedPaletteRows` useMemo deps minimal without
+   a per-render reallocation. Pure data + pure id→category mapping; no
+   closure state. */
+const PALETTE_CATEGORY_ORDER = [
+  'Run', 'Edit', 'Navigate', 'Scripts', 'View', 'Console', 'Workspace', 'Figures', 'Snippets', 'Help',
+] as const
+
+function categoryOfPaletteCommand(id: string): typeof PALETTE_CATEGORY_ORDER[number] {
+  if (id === 'run' || id.startsWith('run-')) return 'Run'
+  if (id === 'goto-sym' || id === 'next-err' || id === 'prev-err' || id.startsWith('bm-')) return 'Navigate'
+  if (id.startsWith('snip-')) return 'Snippets'
+  if (id === 'find' || id === 'goto' || id === 'rename-id' || id === 'trim-ws' || id === 'tabs-spaces' || id === 'join-lines' || id === 'upper-sel' || id === 'lower-sel' || id === 'sort-lines' || id === 'unique-lines' || id === 'drop-blank' || id === 'reverse-lines' || id === 'goto-bracket' || id === 'sel-bracket') return 'Edit'
+  if (id === 'new-script' || id === 'dup-script' || id === 'close-script' || id === 'close-other' || id === 'close-right' || id === 'reopen' || id === 'rename') return 'Scripts'
+  if (id === 'wrap' || id === 'font-up' || id === 'font-down' || id === 'font-reset' || id.startsWith('res-')) return 'View'
+  if (id === 'clear-con' || id === 'clear-err' || id === 'con-time' || id === 'copy-con' || id === 'dl-con') return 'Console'
+  if (id === 'reset-ws' || id === 'exp-ws') return 'Workspace'
+  if (id === 'exp-svg' || id === 'exp-png' || id === 'exp-csv' || id === 'clear-figs') return 'Figures'
+  if (id === 'help') return 'Help'
+  return 'Edit'
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 export default function Workstation() {
   const { showAlert, showPrompt, AlertDialog } = useAlertDialog()
@@ -3167,7 +3190,12 @@ export default function Workstation() {
         ta.selectionStart = ta.selectionEnd = s + 1 + newIndent.length
       })
     }
-  }, [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError, joinLines, bumpEditorFont, resetEditorFont])
+    // updateCursor is intentionally omitted: it's declared further down
+    // as useCallback([]), so its identity is permanently stable across
+    // renders — listing it would force a forward reference (TDZ) for
+    // no observable benefit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runScript, runSelection, runSection, runUntilCursor, rerunLastFragment, openFind, openGoto, openSymbolNav, setScript, vars, acOpen, acItems, acIndex, acceptAutocomplete, closeAutocomplete, editorFontSize, editorLineHeight, sigHint, toggleBookmarkAtCaret, gotoBookmark, gotoMatchingBracket, gotoNextError, joinLines, bumpEditorFont, resetEditorFont])
 
   // Track cursor position and selection size for the status bar.
   const updateCursor = useCallback((ta: HTMLTextAreaElement) => {
@@ -3792,25 +3820,8 @@ export default function Workstation() {
     })
   }, [paletteCommands, paletteQuery])
 
-  // Map a command id to a human-friendly category. The order in this
-  // list matches the order categories appear in the unfiltered palette
-  // view, so the most-used groups (Run, Edit, Navigate) sit at the top.
-  const PALETTE_CATEGORY_ORDER = [
-    'Run', 'Edit', 'Navigate', 'Scripts', 'View', 'Console', 'Workspace', 'Figures', 'Snippets', 'Help',
-  ] as const
-  const categoryOfPaletteCommand = (id: string): typeof PALETTE_CATEGORY_ORDER[number] => {
-    if (id === 'run' || id.startsWith('run-')) return 'Run'
-    if (id === 'goto-sym' || id === 'next-err' || id === 'prev-err' || id.startsWith('bm-')) return 'Navigate'
-    if (id.startsWith('snip-')) return 'Snippets'
-    if (id === 'find' || id === 'goto' || id === 'rename-id' || id === 'trim-ws' || id === 'tabs-spaces' || id === 'join-lines' || id === 'upper-sel' || id === 'lower-sel' || id === 'sort-lines' || id === 'unique-lines' || id === 'drop-blank' || id === 'reverse-lines' || id === 'goto-bracket' || id === 'sel-bracket') return 'Edit'
-    if (id === 'new-script' || id === 'dup-script' || id === 'close-script' || id === 'close-other' || id === 'close-right' || id === 'reopen' || id === 'rename') return 'Scripts'
-    if (id === 'wrap' || id === 'font-up' || id === 'font-down' || id === 'font-reset' || id.startsWith('res-')) return 'View'
-    if (id === 'clear-con' || id === 'clear-err' || id === 'con-time' || id === 'copy-con' || id === 'dl-con') return 'Console'
-    if (id === 'reset-ws' || id === 'exp-ws') return 'Workspace'
-    if (id === 'exp-svg' || id === 'exp-png' || id === 'exp-csv' || id === 'clear-figs') return 'Figures'
-    if (id === 'help') return 'Help'
-    return 'Edit'
-  }
+  // PALETTE_CATEGORY_ORDER + categoryOfPaletteCommand were moved to
+  // module scope above the component for stable identity across renders.
   // When the palette is unfiltered, walk paletteCommands once and emit
   // a flat array of either category headings or commands so the render
   // pass stays simple and the keyboard cursor still maps cleanly to a
@@ -5518,7 +5529,7 @@ export default function Workstation() {
       background: 'var(--glass-bg-hover)',
       borderColor: 'var(--color-border-strong)',
     },
-  }), [library, editorFontSize, editorWrapOn, editorLineHeight, editorCharWidth])
+  }), [editorFontSize, editorWrapOn, editorLineHeight, editorCharWidth])
 
   const currentPlot = plots[activePlot] ?? null
 

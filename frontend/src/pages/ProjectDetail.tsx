@@ -400,6 +400,41 @@ export default function ProjectDetail() {
     setPaperError(null)
   }, [stopPhaseAnimation])
 
+  // Defined ahead of `generateHypothesisPaper` so that callback can list
+  // it as a dep without hitting a TDZ ReferenceError. Behaviour is
+  // unchanged — the original location was below `generateHypothesisPaper`,
+  // which only worked at runtime because the body resolved the symbol
+  // lazily at call time and stale closures were tolerated.
+  const _saveResearchPaper = useCallback(async (hypothesis: SavedHypothesis, html?: string) => {
+    // Skip if we have no rendered HTML — saving a row with an empty body
+    // creates an artifact the user can't actually open. The earlier
+    // localStorage version stored html-less stub rows; the backend
+    // `paper_html` column is NOT NULL, so this guard is required.
+    if (!html) return
+    const filename = `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`
+    try {
+      // Upsert semantics — if the user re-runs paper generation for the
+      // same hypothesis, replace the prior row rather than accumulate
+      // duplicates. Until a PATCH /saved-papers/{id} endpoint lands,
+      // delete-then-create is the simplest path.
+      const existing = projectPapers.find(p => p.hypothesis_id === hypothesis.id)
+      if (existing) {
+        await apiDeletePaper(existing.id)
+      }
+      await apiCreatePaper({
+        hypothesis_id: hypothesis.id,
+        project_id: hypothesis.project_id,
+        hypothesis_title: hypothesis.title,
+        disease: hypothesis.disease || project?.disease_focus || 'Unknown',
+        filename,
+        paper_html: html,
+      })
+      logActivity({ type: 'evidence', action: 'created', title: `Research paper: ${hypothesis.title}`, project: project?.name })
+    } catch (e) {
+      console.error('Failed to save research paper:', e)
+    }
+  }, [project, projectPapers, apiCreatePaper, apiDeletePaper])
+
   const generateHypothesisPaper = useCallback(async (hypothesis: SavedHypothesis) => {
     generatingPaperRef.current = true
     setGeneratingPaper(true)
@@ -599,7 +634,7 @@ export default function ProjectDetail() {
       setPaperError(`Paper generation failed: ${e instanceof Error ? e.message : String(e)}`)
       setGeneratingPaper(false)
     }
-  }, [project, startPhaseAnimation, stopPhaseAnimation])
+  }, [project, startPhaseAnimation, stopPhaseAnimation, _saveResearchPaper])
 
   const confirmDeletePaper = useCallback(async () => {
     if (!deletePaperId) return
@@ -611,36 +646,6 @@ export default function ProjectDetail() {
       setDeletePaperId(null)
     }
   }, [deletePaperId, apiDeletePaper])
-
-  const _saveResearchPaper = useCallback(async (hypothesis: SavedHypothesis, html?: string) => {
-    // Skip if we have no rendered HTML — saving a row with an empty body
-    // creates an artifact the user can't actually open. The earlier
-    // localStorage version stored html-less stub rows; the backend
-    // `paper_html` column is NOT NULL, so this guard is required.
-    if (!html) return
-    const filename = `humanovo-${hypothesis.title.replace(/\s+/g, '-').toLowerCase().slice(0, 50)}.pdf`
-    try {
-      // Upsert semantics — if the user re-runs paper generation for the
-      // same hypothesis, replace the prior row rather than accumulate
-      // duplicates. Until a PATCH /saved-papers/{id} endpoint lands,
-      // delete-then-create is the simplest path.
-      const existing = projectPapers.find(p => p.hypothesis_id === hypothesis.id)
-      if (existing) {
-        await apiDeletePaper(existing.id)
-      }
-      await apiCreatePaper({
-        hypothesis_id: hypothesis.id,
-        project_id: hypothesis.project_id,
-        hypothesis_title: hypothesis.title,
-        disease: hypothesis.disease || project?.disease_focus || 'Unknown',
-        filename,
-        paper_html: html,
-      })
-      logActivity({ type: 'evidence', action: 'created', title: `Research paper: ${hypothesis.title}`, project: project?.name })
-    } catch (e) {
-      console.error('Failed to save research paper:', e)
-    }
-  }, [project, projectPapers, apiCreatePaper, apiDeletePaper])
 
   const handleDocUpload = useCallback(async () => {
     if (!docFile || !docForm.title.trim() || !projectId) return

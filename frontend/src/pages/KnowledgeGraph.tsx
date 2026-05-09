@@ -371,7 +371,7 @@ export default function KnowledgeGraph() {
     })
 
     ctx.restore()
-  }, [filteredGraph, positionedNodes, zoom, pan, selectedEntity, selectedEdge])
+  }, [filteredGraph, positionedNodes, zoom, pan, selectedEntity, selectedEdge, connectMode, connectSource])
 
   // Add a new edge between two nodes
   const addEdge = useCallback((source: GraphNode, target: GraphNode, relation: string) => {
