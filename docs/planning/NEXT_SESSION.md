@@ -1,6 +1,6 @@
 # Next Session — Continuation Map
 
-**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `b2fa446`
+**Last touched:** 2026-05-08 · **Branch:** `humanovo` · **Last commit:** `90bcb56`
 
 This is the canonical "where we left off" document. A future agent
 session (or future you) opens here, reads top-to-bottom, and knows
@@ -156,6 +156,15 @@ the file current.
   Project-level eslint warnings dropped 11 → 7 (the 4 GenomicsAnalysis
   hits cleared exactly as predicted). GenomicsAnalysis.tsx 596 → 414
   lines. No behaviour change.
+
+### A4. Hooks-deps risk-fix sweep — DONE (commit `90bcb56`)
+* All 7 remaining react-hooks/exhaustive-deps warnings closed (→ 0).
+  Three were real stale-closure bugs (KnowledgeGraph connect-mode
+  rendering from stale state, AgentsChatMode save flow, ProjectDetail
+  research-paper save). Two were stable-ref cleanups (palette taxonomy
+  + unused `library` dep in Workstation). Two were intentional
+  suppressions with explanation (forward-ref TDZ avoidance, guard
+  pattern).
 
 ### A2. GenomicsAnalysis.tsx react-refresh split
 * 4 of the remaining 11 frontend lint warnings are here. The file
