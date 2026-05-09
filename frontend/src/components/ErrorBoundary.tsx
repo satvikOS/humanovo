@@ -56,6 +56,13 @@ export default class ErrorBoundary extends Component<Props, State> {
     try {
       window.__humanovoOnError?.(error, info.componentStack)
     } catch { /* noop */ }
+    // Also feed into the in-memory error log so Settings →
+    // Copy diagnostics surfaces the React-boundary catches alongside
+    // the global window.onerror catches. Lazy import avoids a hard
+    // dependency cycle since errorLog itself doesn't reach back here.
+    void import('../lib/errorLog')
+      .then(({ logError }) => logError('error', `${error.message} [boundary]`))
+      .catch(() => { /* noop */ })
   }
 
   render() {

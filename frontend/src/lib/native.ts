@@ -174,6 +174,10 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
  * Web mode returns the platform line only (no native fields apply).
  */
 export async function getDiagnostics(): Promise<string> {
+  // Imported lazily to avoid a cycle if errorLog ever needs to call
+  // anything from native.ts. Static import works today, lazy keeps
+  // the option open.
+  const { recentErrors } = await import('./errorLog')
   const [version, plat, notifPerm, autostart] = await Promise.all([
     getAppVersion(),
     getPlatform(),
@@ -193,6 +197,17 @@ export async function getDiagnostics(): Promise<string> {
   if (isNativeApp()) {
     lines.push(`Notifications: ${notifPerm ?? 'unknown'}`)
     lines.push(`Auto-launch: ${autostart === null ? 'unknown' : autostart ? 'on' : 'off'}`)
+  }
+  const errs = recentErrors()
+  if (errs.length > 0) {
+    lines.push('')
+    lines.push(`Recent errors (last ${errs.length}):`)
+    // Most-recent first reads more naturally for someone scanning
+    // the bottom of the diagnostics block. Cap message length per
+    // line so a giant stack doesn't dominate the paste.
+    for (const e of errs.slice().reverse()) {
+      lines.push(`  [${e.ts}] ${e.source} @ ${e.url} — ${e.message.slice(0, 200)}`)
+    }
   }
   return lines.join('\n')
 }

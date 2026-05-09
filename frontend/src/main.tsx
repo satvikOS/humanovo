@@ -9,7 +9,12 @@ import { AuthProvider } from './contexts/AuthContext'
 import { Toaster } from './components/Toaster'
 import { SkeletonStyles } from './components/Skeleton'
 import App from './App'
+import { installGlobalErrorHandlers } from './lib/errorLog'
 import './index.css'
+
+// Install before render so the very first runtime error gets captured —
+// even errors that surface during initial component mounting.
+installGlobalErrorHandlers()
 
 const queryClient = new QueryClient({
   defaultOptions: {
