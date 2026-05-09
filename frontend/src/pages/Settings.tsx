@@ -20,7 +20,14 @@ import {
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
 import api, { type IngestionJob } from '../services/api'
-import { isNativeApp, openExternal, getAppVersion, getPlatform } from '../lib/native'
+import {
+  isNativeApp,
+  openExternal,
+  getAppVersion,
+  getPlatform,
+  getNotificationPermission,
+  notify,
+} from '../lib/native'
 import { toast } from '../contexts/ToastContext'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -1512,21 +1519,60 @@ function DesktopSettings() {
   const [updateInfo, setUpdateInfo] = useState<{ version: string; current: string } | null>(null)
   const [version, setVersion] = useState<string | null>(null)
   const [plat, setPlat] = useState<string | null>(null)
+  const [notifPerm, setNotifPerm] = useState<'granted' | 'denied' | 'default' | null>(null)
+  const [testingNotif, setTestingNotif] = useState(false)
+
+  const refreshNotifPerm = useCallback(async () => {
+    const p = await getNotificationPermission()
+    setNotifPerm(p)
+  }, [])
 
   useEffect(() => {
     // Pull build info eagerly so the rendered values are stable —
     // the user shouldn't see them shift between dashes and the real
-    // string after a render. Both helpers are no-throw.
+    // string after a render. Helpers are no-throw.
     let cancelled = false
-    void Promise.all([getAppVersion(), getPlatform()]).then(([v, p]) => {
-      if (cancelled) return
-      setVersion(v)
-      setPlat(p)
-    })
+    void Promise.all([getAppVersion(), getPlatform(), getNotificationPermission()]).then(
+      ([v, p, n]) => {
+        if (cancelled) return
+        setVersion(v)
+        setPlat(p)
+        setNotifPerm(n)
+      },
+    )
     return () => {
       cancelled = true
     }
   }, [])
+
+  const sendTestNotification = useCallback(async () => {
+    setTestingNotif(true)
+    try {
+      // force: true so notify() doesn't suppress when humanovo has
+      // focus — the whole point of the test is to verify the OS
+      // surfaces the notification, which we can only confirm if it
+      // actually fires.
+      const fired = await notify(
+        'humanovo',
+        'Test notification — discovery completions will look like this.',
+        { force: true },
+      )
+      if (fired) {
+        toast('success', 'Notification sent. Check your OS notification centre.', {
+          title: 'humanovo',
+        })
+      } else {
+        toast(
+          'error',
+          'Notification was blocked. Enable notifications for humanovo in your OS settings.',
+          { title: 'humanovo' },
+        )
+      }
+      await refreshNotifPerm()
+    } finally {
+      setTestingNotif(false)
+    }
+  }, [refreshNotifPerm])
 
   const checkForUpdates = useCallback(async () => {
     setChecking(true)
@@ -1592,6 +1638,60 @@ function DesktopSettings() {
       </p>
 
       <div className="space-y-4">
+        <div
+          className="flex items-start justify-between gap-4 p-4 rounded-lg"
+          style={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)' }}
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                Notifications
+              </div>
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-full"
+                style={{
+                  background:
+                    notifPerm === 'granted'
+                      ? 'rgba(34, 197, 94, 0.15)'
+                      : notifPerm === 'denied'
+                      ? 'rgba(239, 68, 68, 0.15)'
+                      : 'var(--color-bg-secondary)',
+                  color:
+                    notifPerm === 'granted'
+                      ? '#16a34a'
+                      : notifPerm === 'denied'
+                      ? '#dc2626'
+                      : 'var(--color-text-muted)',
+                }}
+              >
+                {notifPerm === 'granted'
+                  ? 'Allowed'
+                  : notifPerm === 'denied'
+                  ? 'Blocked'
+                  : 'Not yet asked'}
+              </span>
+            </div>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              humanovo pings the OS when a discovery finishes (or fails) while you’re
+              tabbed away — much easier than babysitting the window. Send a test
+              notification to confirm your OS will surface ours.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={sendTestNotification}
+            disabled={testingNotif}
+            className="text-xs px-3 py-1.5 rounded-md disabled:opacity-50 active:scale-95 shrink-0"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+          >
+            {testingNotif ? 'Sending…' : 'Send test'}
+          </button>
+        </div>
+
         <div
           className="flex items-start justify-between gap-4 p-4 rounded-lg"
           style={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)' }}

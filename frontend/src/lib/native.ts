@@ -126,6 +126,33 @@ export async function getPlatform(): Promise<string> {
 }
 
 /**
+ * Read the current OS notification permission for humanovo. Returns
+ * 'granted' / 'denied' / 'default' (never asked) / null in web mode.
+ *
+ * Settings → Desktop App uses this to surface whether discovery-
+ * completion notifications will actually fire, since a denied
+ * permission is silent failure and users would otherwise wonder why
+ * they never got the ping.
+ */
+export async function getNotificationPermission(): Promise<
+  'granted' | 'denied' | 'default' | null
+> {
+  if (!isNativeApp()) return null
+  try {
+    const mod = await import(/* @vite-ignore */ '@tauri-apps/plugin-notification')
+    const granted = await mod.isPermissionGranted()
+    if (granted) return 'granted'
+    // Tauri's plugin doesn't distinguish 'denied' from 'never asked'
+    // without calling requestPermission. We return 'default' to mean
+    // "needs a request" — UI can call notify() to trigger the prompt.
+    return 'default'
+  } catch (err) {
+    console.warn('native.getNotificationPermission: failed', err)
+    return null
+  }
+}
+
+/**
  * Read the bundled native app version (the `version` field from
  * `tauri.conf.json` / `Cargo.toml`). Used by Settings → Desktop App
  * to surface the build the user is running so support tickets can
