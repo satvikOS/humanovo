@@ -21,10 +21,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import ADMIN_REQUIRED
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import rate_limit
 from app.models.platform_entities import KnowledgeGraphEdge, KnowledgeGraphNode
 
 logger = logging.getLogger(__name__)
-router = APIRouter(dependencies=ADMIN_REQUIRED)
+# Stage 5 of PATH_TO_100_PERCENT.md — defence-in-depth on top of
+# ADMIN_REQUIRED. Per-IP token bucket: 30 capacity / 0.5 r/s. Catches a
+# runaway loop or a misuse of one of the seed endpoints; CloudFront /
+# WAF still owns volumetric-attack defence.
+router = APIRouter(dependencies=[*ADMIN_REQUIRED, Depends(rate_limit("admin"))])
 @router.get("/health")
 async def admin_health(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Detailed service-liveness for the Settings → Admin panel.
