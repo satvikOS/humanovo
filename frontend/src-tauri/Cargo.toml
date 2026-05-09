@@ -24,6 +24,10 @@ tauri-plugin-deep-link = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-os = "2"
 tauri-plugin-process = "2"
+# Window-state persistence — remembers size/position/maximized across
+# launches so the user doesn't have to re-resize humanovo every time
+# they reopen it. Wired up in lib.rs.
+tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

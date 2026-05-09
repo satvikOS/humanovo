@@ -49,6 +49,11 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Persists window position / size / maximized state across
+        // launches. Writes to the OS-standard app-data directory; the
+        // first-launch fallback is the size declared in
+        // tauri.conf.json `app.windows[0]` (1440x900 centred).
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             // Re-register `humanovo://` at runtime so the scheme is
             // associated with this binary on first launch (Linux),

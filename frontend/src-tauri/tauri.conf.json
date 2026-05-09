@@ -73,6 +73,12 @@
       "desktop": {
         "schemes": ["humanovo"]
       }
+    },
+    "updater": {
+      "active": false,
+      "endpoints": [],
+      "dialog": false,
+      "pubkey": ""
     }
   }
 }

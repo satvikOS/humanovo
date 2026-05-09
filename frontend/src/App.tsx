@@ -4,6 +4,7 @@ import { type ReactNode } from 'react'
 import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
 import RouteGatePlaceholder from './components/RouteGatePlaceholder'
+import DeepLinkRouter from './components/DeepLinkRouter'
 import Dashboard from './pages/Dashboard'
 import Projects from './pages/Projects'
 import { isHiddenInV1 } from './utils/featureFlags'
@@ -111,7 +112,12 @@ function V1Gate({ path, children }: { path: string; children: ReactNode }) {
 
 function App() {
   return (
-    <Routes>
+    <>
+      {/* Receives `humanovo://` URLs forwarded by the Tauri shell
+          (Stripe redirects, in-app links, etc.) and navigates the
+          React Router accordingly. Renderless; web-mode no-op. */}
+      <DeepLinkRouter />
+      <Routes>
       {/* Marketing lives at https://www.humanovo.net/ — the in-app /welcome,
           /pricing, /docs routes were removed (commit following this one)
           to keep the bundle lean. External site is the canonical surface. */}
@@ -165,7 +171,8 @@ function App() {
         {/* the v2 platform — platform-level pages */}
         <Route path="dev/pgvector" element={<LazyPageWrapper><PgvectorManager /></LazyPageWrapper>} />
       </Route>
-    </Routes>
+      </Routes>
+    </>
   )
 }
 

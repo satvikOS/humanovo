@@ -48,8 +48,12 @@ export function isNativeApp(): boolean {
 export async function openExternal(url: string): Promise<void> {
   if (isNativeApp()) {
     // Lazy-import the plugin so a web-only build doesn't bundle the
-    // Tauri shell module.
-    const { open } = await import('@tauri-apps/plugin-shell')
+    // Tauri shell module. The `@vite-ignore` hint tells Vite's pre-
+    // transform to leave the import alone — the package isn't in
+    // package.json (it's installed at `npm run tauri:dev` time by
+    // the Tauri CLI), so static resolution would fail. Runtime is
+    // gated by `isNativeApp()` so web mode never executes the line.
+    const { open } = await import(/* @vite-ignore */ '@tauri-apps/plugin-shell')
     await open(url)
     return
   }
@@ -78,7 +82,7 @@ export async function onDeepLink(
   if (!isNativeApp()) {
     return () => {}
   }
-  const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link')
+  const { onOpenUrl } = await import(/* @vite-ignore */ '@tauri-apps/plugin-deep-link')
   // The plugin's signature emits the *full* deep link including the
   // scheme. Pass through to the caller as-is.
   return await onOpenUrl((urls) => {
@@ -94,6 +98,6 @@ export async function onDeepLink(
  */
 export async function getPlatform(): Promise<string> {
   if (!isNativeApp()) return 'web'
-  const { platform } = await import('@tauri-apps/plugin-os')
+  const { platform } = await import(/* @vite-ignore */ '@tauri-apps/plugin-os')
   return await platform() // 'macos' | 'windows' | 'linux' | 'ios' | 'android'
 }
