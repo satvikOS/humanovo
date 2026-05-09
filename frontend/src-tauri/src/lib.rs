@@ -15,7 +15,11 @@
 //! release that updates only the frontend doesn't require re-shipping
 //! the native binary.
 
-use tauri::{Builder, Emitter, Manager};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Builder, Emitter, Manager,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -69,8 +73,84 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 app.deep_link().register_all()?;
             }
+
+            // System tray. Left-click anywhere in the tray icon brings
+            // the main window forward (Windows/Linux convention; macOS
+            // uses left-click for the menu, which Tauri handles
+            // automatically once `menu_on_left_click(true)` is set).
+            // Right-click opens the menu on all platforms.
+            //
+            // Failures (missing icon, no D-Bus on Linux, OS without a
+            // tray surface) are logged-and-swallowed: the rest of the
+            // app continues to work. Losing the tray is a degraded
+            // UX, not a fatal error.
+            #[cfg(desktop)]
+            if let Err(e) = setup_tray(app) {
+                eprintln!("tray: setup failed, continuing without it: {e:?}");
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running humanovo desktop app");
+}
+
+/// Initialise the system tray. Extracted from `setup` so the bulky
+/// menu / icon / event-handler code doesn't dominate `run`. Returns
+/// `Err` on missing icon or platform-init failure; the caller logs
+/// and continues without a tray.
+#[cfg(desktop)]
+fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show_item = MenuItem::with_id(app, "show", "Show humanovo", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    let icon = app
+        .default_window_icon()
+        .ok_or("default window icon not bundled — tray skipped")?
+        .clone();
+
+    TrayIconBuilder::with_id("main")
+        .icon(icon)
+        .tooltip("humanovo")
+        .menu(&menu)
+        // macOS: clicking the tray icon directly should pop the menu,
+        // matching system convention. Windows / Linux: leave default
+        // (false) so the click event can route to "show window".
+        .menu_on_left_click(cfg!(target_os = "macos"))
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.unminimize();
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // Single left-click → focus the main window. Skipped on
+            // macOS where the OS routes the click to the menu (see
+            // menu_on_left_click above).
+            if cfg!(target_os = "macos") {
+                return;
+            }
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.unminimize();
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+
+    Ok(())
 }
