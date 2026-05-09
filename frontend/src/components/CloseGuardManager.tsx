@@ -18,6 +18,7 @@
 import { useEffect } from 'react'
 import { isNativeApp } from '../lib/native'
 import { currentGuards } from '../lib/closeGuard'
+import { markClean } from '../lib/lifecycle'
 
 export default function CloseGuardManager() {
   useEffect(() => {
@@ -32,7 +33,13 @@ export default function CloseGuardManager() {
         const w = winMod.getCurrentWindow()
         const handler = await w.onCloseRequested(async (event) => {
           const reasons = currentGuards()
-          if (reasons.length === 0) return // nothing to guard, let it close
+          if (reasons.length === 0) {
+            // Nothing to guard. Stamp the clean-shutdown marker so the
+            // next launch's diagnostics doesn't claim an unclean exit,
+            // then let the close go through.
+            markClean()
+            return
+          }
 
           // Block the close immediately, then ask. preventDefault must
           // run synchronously on the event before any await — Tauri's
@@ -54,6 +61,7 @@ export default function CloseGuardManager() {
             // User confirmed. Re-issue the close — the handler reads
             // currentGuards() afresh, but since they explicitly said
             // "quit anyway" we just trigger destroy directly.
+            markClean()
             await w.destroy()
           }
         })

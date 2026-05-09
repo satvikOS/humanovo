@@ -197,10 +197,12 @@ export async function setTrayTooltip(tooltip: string): Promise<void> {
 export async function getDiagnostics(): Promise<string> {
   // Imported lazily to avoid a cycle if errorLog ever needs to call
   // anything from native.ts. Lazy keeps the option open.
-  const [{ recentErrors }, { getToken }] = await Promise.all([
-    import('./errorLog'),
-    import('../services/auth'),
-  ])
+  const [{ recentErrors }, { getToken }, { wasUncleanLastSession }] =
+    await Promise.all([
+      import('./errorLog'),
+      import('../services/auth'),
+      import('./lifecycle'),
+    ])
   const [version, plat, notifPerm, autostart] = await Promise.all([
     getAppVersion(),
     getPlatform(),
@@ -223,6 +225,12 @@ export async function getDiagnostics(): Promise<string> {
     // a 401 is "user wasn't logged in" vs "auth was broken".
     `Logged in: ${getToken() ? 'yes' : 'no'}`,
   ]
+  const unclean = wasUncleanLastSession()
+  if (unclean !== null) {
+    // Only surface when we have a definitive answer. null = first
+    // launch / cleared storage, which would just be noise.
+    lines.push(`Last shutdown: ${unclean ? 'unclean (process killed / panic)' : 'clean'}`)
+  }
   if (isNativeApp()) {
     lines.push(`Notifications: ${notifPerm ?? 'unknown'}`)
     lines.push(`Auto-launch: ${autostart === null ? 'unknown' : autostart ? 'on' : 'off'}`)

@@ -10,11 +10,17 @@ import { Toaster } from './components/Toaster'
 import { SkeletonStyles } from './components/Skeleton'
 import App from './App'
 import { installGlobalErrorHandlers } from './lib/errorLog'
+import { installLifecycle } from './lib/lifecycle'
 import './index.css'
 
 // Install before render so the very first runtime error gets captured —
 // even errors that surface during initial component mounting.
 installGlobalErrorHandlers()
+// Also snapshot the prior session's shutdown state before we mark
+// this one as "running"; the diagnostics block uses the snapshot to
+// surface unclean shutdowns (Rust panic / OOM kill) that the JS
+// error log can't see.
+installLifecycle()
 
 const queryClient = new QueryClient({
   defaultOptions: {
