@@ -175,12 +175,21 @@ the file current.
   shared `pages/genomics/constants.ts`. Keep `GenomicsAnalysis.tsx`
   as the orchestrator/router.
 
-### Stage 6 docs — DEVELOPMENT.md + OPERATIONS.md DONE (commit `6352b64`)
+### Stage 5 admin rate limit — DONE (commit `4a4d7f6`)
+* New `app/core/rate_limit.py` — in-process per-IP token bucket
+  + FastAPI dependency. Wired to /admin/* router as defence-in-depth
+  on top of ADMIN_REQUIRED (30 cap, 0.5 r/s). Returns 429 with
+  Retry-After. CloudFront / WAF still owns volumetric defence.
+
+### Stage 6 docs — DEVELOPMENT.md + OPERATIONS.md + API_REFERENCE.md DONE (commits `6352b64`, `3d090b4`)
 * DEVELOPMENT.md: cold-start setup, env-var table, repo layout,
   frontend/backend/KG conventions, common gotchas. ~200 lines.
 * OPERATIONS.md: deploy + rollback + per-credential secret rotation
   + A3 KG migration ops + 5-step incident response + backup/restore
   + cost monitoring. ~250 lines.
+* API_REFERENCE.md: 9-domain surface map sourced from
+  app/api/v1/__init__.py + cross-cutting conventions (auth, response
+  shapes, rate limiting, audit log). ~230 lines.
 
 ### Stage 4 bundle audit follow-on — DONE (commit `00f6231`)
 * Main bundle 2,021 KB → 911 KB (-55%, ~1.1 MB shaved). Lazy-loaded
