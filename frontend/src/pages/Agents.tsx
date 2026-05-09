@@ -31,6 +31,7 @@ import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recha
 import api, { apiClient } from '../services/api'
 import type { OrchestratorStatus, DiscoveryConfig } from '../services/api'
 import { logActivity, formatDate } from '../utils/persistence'
+import { toast } from '../contexts/ToastContext'
 
 // Types
 interface TranslationalPhaseDetail {
@@ -518,19 +519,34 @@ export default function Agents() {
     }
   }
 
+  // Stage 3 hardening — control-flow errors now surface as a toast
+  // instead of silent console.error. Pre-Stage-3 a clicked Pause /
+  // Resume / Stop that hit a 5xx left the UI showing the prior state
+  // with no indication anything went wrong.
   const pauseDiscovery = async () => {
-    try { await api.pauseDiscovery(); setState('paused') } catch (e) { console.error(e) }
+    try { await api.pauseDiscovery(); setState('paused') }
+    catch (e) {
+      console.error(e)
+      toast('error', e instanceof Error ? e.message : 'Couldn’t pause discovery', { title: 'Discovery' })
+    }
   }
 
   const resumeDiscovery = async () => {
     try {
       await api.resumeDiscovery()
       setState('running')
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      toast('error', e instanceof Error ? e.message : 'Couldn’t resume discovery', { title: 'Discovery' })
+    }
   }
 
   const stopDiscovery = async () => {
-    try { await api.stopDiscovery(); setState('stopping') } catch (e) { console.error(e) }
+    try { await api.stopDiscovery(); setState('stopping') }
+    catch (e) {
+      console.error(e)
+      toast('error', e instanceof Error ? e.message : 'Couldn’t stop discovery', { title: 'Discovery' })
+    }
   }
 
   const exportPdf = async (h: Hypothesis) => {
