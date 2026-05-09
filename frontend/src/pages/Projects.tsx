@@ -815,10 +815,26 @@ export default function Projects() {
         </div>
       </div>
 
-      {/* API Status Banner */}
+      {/* API Status Banner — Stage 3 hardening adds an inline Retry
+          CTA so the user can recover without a full page reload. The
+          banner itself stays visible (no toast) because Projects is
+          a list page where the empty render below would otherwise
+          look indistinguishable from "no projects yet". */}
       {apiStatus === 'error' && (
-        <div className="mb-4 p-3 rounded-lg border border-[var(--glass-border)] text-sm text-[var(--color-text-muted)]">
-          <strong className="text-[var(--color-text)]">API error:</strong> {apiError}
+        <div
+          role="alert"
+          className="mb-4 p-3 rounded-lg border border-[var(--glass-border)] text-sm text-[var(--color-text-muted)] flex items-start justify-between gap-3 flex-wrap"
+        >
+          <div className="min-w-0">
+            <strong className="text-[var(--color-text)]">API error:</strong> {apiError}
+          </div>
+          <button
+            onClick={loadProjects}
+            disabled={loading}
+            className="text-xs px-2.5 py-1 rounded-lg border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)] transition-colors disabled:opacity-40 active:scale-95"
+          >
+            Try again
+          </button>
         </div>
       )}
 
