@@ -16,10 +16,12 @@
  * the back so a noisy page doesn't push out yesterday's still-
  * relevant error.
  *
- * Persistence: sessionStorage (per-tab, per-window). Errors logged
- * across app restarts are NOT preserved — that's intentional, since
- * a hot crash usually leaves the user wanting to file a fresh ticket
- * with whatever's about to happen, not yesterday's noise.
+ * Persistence: localStorage. Errors persist across app restarts so a
+ * user who files a ticket *the morning after* a crash still has the
+ * original error text. The buffer is small (capped at MAX_ENTRIES)
+ * so old entries fall off naturally. Settings → Desktop App ships a
+ * "Clear diagnostics" button for users who want to reset stale state
+ * before filing a fresh ticket.
  */
 
 export interface ErrorLogEntry {
@@ -36,9 +38,9 @@ const STORAGE_KEY = 'humanovo.errorLog'
 const MAX_ENTRIES = 20
 
 function read(): ErrorLogEntry[] {
-  if (typeof sessionStorage === 'undefined') return []
+  if (typeof localStorage === 'undefined') return []
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed : []
@@ -48,9 +50,9 @@ function read(): ErrorLogEntry[] {
 }
 
 function write(entries: ErrorLogEntry[]): void {
-  if (typeof sessionStorage === 'undefined') return
+  if (typeof localStorage === 'undefined') return
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(-MAX_ENTRIES)))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(-MAX_ENTRIES)))
   } catch {
     // Storage quota or disabled — silently drop. The point of this
     // module is to *help* support, not become a bug source itself.
@@ -79,6 +81,20 @@ export function logError(
 /** Snapshot of the recent errors, oldest → newest. */
 export function recentErrors(): ErrorLogEntry[] {
   return read()
+}
+
+/**
+ * Erase the persisted error log. Wired to the Settings "Clear
+ * diagnostics" button so users can drop stale entries before filing
+ * a fresh ticket.
+ */
+export function clearErrors(): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    /* storage disabled / quota — degraded but not fatal */
+  }
 }
 
 /**

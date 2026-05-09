@@ -1715,6 +1715,15 @@ function DesktopSettings() {
     }
   }, [])
 
+  const clearDiagnostics = useCallback(async () => {
+    // Lazy import keeps errorLog out of the Settings chunk's hot path
+    // — the helper is tiny but the principle keeps the lazy-import
+    // pattern consistent with how getDiagnostics pulls it in.
+    const { clearErrors } = await import('../lib/errorLog')
+    clearErrors()
+    toast('info', 'Diagnostics cleared.', { title: 'humanovo' })
+  }, [])
+
   return (
     <div className="max-w-2xl">
       <h2 className="text-lg font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
@@ -1875,6 +1884,17 @@ function DesktopSettings() {
               }}
             >
               Copy diagnostics
+            </button>
+            <button
+              type="button"
+              onClick={clearDiagnostics}
+              className="text-xs px-3 py-1.5 rounded-md active:scale-95 opacity-70 hover:opacity-100"
+              style={{
+                background: 'transparent',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              Clear diagnostics
             </button>
           </div>
         </div>
