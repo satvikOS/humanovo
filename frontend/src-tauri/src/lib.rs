@@ -123,6 +123,7 @@ pub fn run() {
                 RunEvent::WindowEvent {
                     label,
                     event: WindowEvent::Destroyed,
+                    ..
                 } if label == "main" => {
                     app.exit(0);
                 }
