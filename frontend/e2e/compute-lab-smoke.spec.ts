@@ -68,13 +68,57 @@ test.describe('compute-lab smoke', () => {
     await page.goto('/compute-lab', { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(2000) // workstation pulls in a 410 KB bundle
 
-    // Workstation has a script editor + Run button. The full Run path
-    // hits the in-browser MATLAB-style interpreter which is heavy to
-    // exercise from a smoke test; for now we just verify the panel
-    // mounts and exposes its Run control. Future test should script-
-    // type a basic expression and assert the output.
     const runBtn = page.getByRole('button', { name: /^Run$/ })
     expect(await runBtn.count(), 'Workstation should expose a Run button').toBeGreaterThan(0)
+
+    expect(pageErrors, `Workstation page errors: ${pageErrors.join('; ')}`).toEqual([])
+  })
+
+  test('Workstation: typing 1+1 in editor + clicking Run produces 2 in output', async ({ page }) => {
+    const pageErrors: string[] = []
+    page.on('pageerror', (err) => pageErrors.push(`${err.name}: ${err.message}`))
+
+    await page.goto('/compute-lab', { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(2500) // workstation lazy bundle + editor mount
+
+    // The script editor is the lone <textarea> on the workstation
+    // surface (everything else uses input or contenteditable). Fill
+    // with the simplest possible expression that exercises the
+    // interpreter: literal addition.
+    const editor = page.locator('textarea').first()
+    await expect(editor, 'editor textarea should be visible').toBeVisible()
+    // Use editor.fill(...) — replaces existing content cleanly. The
+    // workstation seeds the editor with a default sample script;
+    // overwrite with our trivial expression so the output is
+    // deterministic.
+    await editor.fill('1 + 1')
+
+    // Click Run.
+    const runBtn = page.getByRole('button', { name: /^Run$/ }).first()
+    await runBtn.click()
+    // Run completes quickly (~5 ms for trivial expressions); give
+    // it a beat for state to settle.
+    await page.waitForTimeout(500)
+
+    // The result lives in the Results overlay, which doesn't open
+    // automatically — Workstation surfaces a "Results ▸" button in
+    // the toolbar after a successful run. Click it to expose the
+    // console/workspace where the value appears.
+    const resultsBtn = page.getByRole('button', { name: /Results ▸|results overlay/i }).first()
+    if (await resultsBtn.count() > 0) {
+      await resultsBtn.click()
+      await page.waitForTimeout(500)
+    }
+
+    // Now look for "ans = 2" — the workstation interpreter assigns
+    // the value of a bare expression to the implicit `ans`
+    // variable (matlab convention). Anchored to that exact string
+    // so we don't false-match on the "Console 2" tab pill (where
+    // 2 is the entry count) or any other stray digit on the page.
+    await expect(
+      page.locator('text=/ans\\s*=\\s*2/').first(),
+      '`1 + 1` should produce `ans = 2` in the console',
+    ).toBeVisible({ timeout: 4000 })
 
     expect(pageErrors, `Workstation page errors: ${pageErrors.join('; ')}`).toEqual([])
   })
