@@ -55,30 +55,91 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 # Stripe retries non-2xx events for up to 3 days. The underlying
 # apply_*() service functions are idempotent (UPSERT semantics on
 # stripe_customer_id / tier), so a retry doesn't corrupt state - but
-# it does waste DB round-trips and log lines.
+# it does waste DB round-trips and log lines, AND a horizontally-
+# scaled deployment can't trust an in-process LRU alone (worker A's
+# cache doesn't help worker B).
 #
-# This in-process LRU short-circuits same-host retry storms. For
-# cross-host idempotence (multiple worker processes) the durable
-# fallback is the underlying handlers themselves; a future commit can
-# promote this to a stripe_processed_events table when there's enough
-# traffic to warrant the schema change.
+# Two-layer dedup:
+#   1. In-process LRU — fast-path, eliminates DB round trip on the
+#      common case of Stripe re-delivering within seconds to the
+#      same worker.
+#   2. Persistent stripe_processed_events table (migration 025) —
+#      cross-worker truth. Insert ON CONFLICT DO NOTHING; the
+#      RETURNING xmax tells us whether the row was already there.
+#
+# `_seen_event_in_memory` retains the synchronous LRU contract; the
+# new `_record_event_seen` helper is async (DB write) and is the
+# authoritative dedup gate in the webhook handler.
 
 _RECENT_EVENT_IDS: OrderedDict[str, None] = OrderedDict()
 _RECENT_EVENT_CAP = 4096
 
 
-def _seen_event(event_id: str) -> bool:
-    """Track the event_id in an LRU. Returns True if already seen."""
+def _seen_event_in_memory(event_id: str) -> bool:
+    """In-process LRU fast-path. Returns True if already seen on
+    this worker. Doesn't update the LRU on a hit — that happens on
+    the WRITE path (`_record_event_seen`)."""
     if not event_id:
         return False
-    if event_id in _RECENT_EVENT_IDS:
-        # Move-to-end so frequently-retried IDs stay in the cache.
-        _RECENT_EVENT_IDS.move_to_end(event_id)
+    return event_id in _RECENT_EVENT_IDS
+
+
+async def _record_event_seen(
+    db: AsyncSession,
+    event_id: str,
+    event_type: str,
+    *,
+    stripe_created_ts: int | None = None,
+    customer_id: str | None = None,
+) -> bool:
+    """Record an event_id in the persistent dedup table. Returns True
+    if this is the FIRST time we've seen this event (we should
+    process it), False if it was already there (replay — short-
+    circuit). Uses INSERT ... ON CONFLICT DO NOTHING so the path is
+    a single round-trip with no race.
+
+    Also updates the in-process LRU on first-see so subsequent
+    same-worker checks short-circuit before reaching the DB."""
+    if not event_id:
+        # Should never happen — Stripe always includes event.id.
+        # Fail open (allow processing) rather than silently swallow.
         return True
-    _RECENT_EVENT_IDS[event_id] = None
-    while len(_RECENT_EVENT_IDS) > _RECENT_EVENT_CAP:
-        _RECENT_EVENT_IDS.popitem(last=False)
-    return False
+
+    from datetime import UTC, datetime
+    from sqlalchemy import text
+
+    stripe_ts = (
+        datetime.fromtimestamp(stripe_created_ts, tz=UTC)
+        if stripe_created_ts else None
+    )
+    # ON CONFLICT DO NOTHING + RETURNING returns 1 row if inserted,
+    # 0 rows if conflict. We use that to disambiguate first-see vs.
+    # replay without a separate SELECT.
+    result = await db.execute(
+        text(
+            """
+            INSERT INTO stripe_processed_events
+                (event_id, event_type, stripe_created_at, customer_id)
+            VALUES (:event_id, :event_type, :stripe_created_at, :customer_id)
+            ON CONFLICT (event_id) DO NOTHING
+            RETURNING event_id
+            """
+        ),
+        {
+            "event_id": event_id,
+            "event_type": event_type,
+            "stripe_created_at": stripe_ts,
+            "customer_id": customer_id,
+        },
+    )
+    inserted = result.scalar_one_or_none() is not None
+    if inserted:
+        # Update the in-process LRU so a same-worker replay short-
+        # circuits without re-hitting the DB.
+        _RECENT_EVENT_IDS[event_id] = None
+        while len(_RECENT_EVENT_IDS) > _RECENT_EVENT_CAP:
+            _RECENT_EVENT_IDS.popitem(last=False)
+    return inserted
 
 
 # ─── Schemas ────────────────────────────────────────────────────────
@@ -208,21 +269,41 @@ async def stripe_webhook(
     except StripeNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
-    # Idempotency: Stripe retries non-2xx for ~3 days. Short-circuit
-    # if we've already successfully processed this event_id. The
-    # underlying apply_*() service functions are inherently idempotent
-    # (UPSERT semantics), so this cache is a fast-path optimisation
-    # rather than a correctness guarantee.
+    # Idempotency. Two-layer dedup: in-process LRU first (cheap),
+    # then persistent stripe_processed_events table (cross-worker
+    # truth). The persistent insert is ON CONFLICT DO NOTHING; if
+    # the row already exists we short-circuit before applying
+    # business logic. The underlying apply_*() service functions are
+    # inherently idempotent (UPSERT on stripe_customer_id / tier),
+    # so this is a defence-in-depth layer rather than the only line.
     event_id = event.get("id", "")
-    if _seen_event(event_id):
-        logger.info(
-            "stripe webhook: replay short-circuited",
-            extra={"event_id": event_id, "event_type": event.get("type")},
-        )
-        return {"received": True, "event": event.get("type"), "status": "duplicate"}
-
     event_type = event["type"]
     data = event["data"]["object"]
+
+    if _seen_event_in_memory(event_id):
+        logger.info(
+            "stripe webhook: in-memory replay short-circuited",
+            extra={"event_id": event_id, "event_type": event_type},
+        )
+        return {"received": True, "event": event_type, "status": "duplicate"}
+
+    # Persistent dedup. `is_first_seen` is True iff this insert
+    # actually wrote a new row — same single round-trip handles both
+    # the dedup check and the dedup write.
+    customer_id = (data.get("customer") if isinstance(data, dict) else None)
+    is_first_seen = await _record_event_seen(
+        db,
+        event_id=event_id,
+        event_type=event_type,
+        stripe_created_ts=event.get("created"),
+        customer_id=customer_id,
+    )
+    if not is_first_seen:
+        logger.info(
+            "stripe webhook: persistent replay short-circuited",
+            extra={"event_id": event_id, "event_type": event_type},
+        )
+        return {"received": True, "event": event_type, "status": "duplicate"}
 
     if event_type == "checkout.session.completed":
         # Persist the stripe_customer_id on the user so subsequent
