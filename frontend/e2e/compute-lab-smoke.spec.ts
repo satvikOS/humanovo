@@ -122,4 +122,65 @@ test.describe('compute-lab smoke', () => {
 
     expect(pageErrors, `Workstation page errors: ${pageErrors.join('; ')}`).toEqual([])
   })
+
+  // sqrt(16) → 4: exercises the function-call dispatch + numeric
+  // stdlib paths that 1+1 doesn't reach. Single check kept simple
+  // (separate test from the addition case) — combining them required
+  // closing the Results overlay between runs and the close-button
+  // selectors were brittle.
+  test('Workstation: sqrt(16) returns 4 (builtin function + Results overlay)', async ({ page }) => {
+    const pageErrors: string[] = []
+    page.on('pageerror', (err) => pageErrors.push(`${err.name}: ${err.message}`))
+
+    await page.goto('/compute-lab', { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(2500)
+
+    const editor = page.locator('textarea').first()
+    await editor.fill('sqrt(16)')
+
+    const runBtn = page.getByRole('button', { name: /^Run$/ }).first()
+    await runBtn.click()
+    await page.waitForTimeout(600)
+
+    const resultsBtn = page.getByRole('button', { name: /Results ▸|results overlay/i }).first()
+    if (await resultsBtn.count() > 0) await resultsBtn.click()
+    await page.waitForTimeout(400)
+
+    await expect(
+      page.locator('text=/ans\\s*=\\s*4/').first(),
+      '`sqrt(16)` should produce `ans = 4` in the console',
+    ).toBeVisible({ timeout: 4000 })
+
+    expect(pageErrors, `Workstation page errors: ${pageErrors.join('; ')}`).toEqual([])
+  })
+
+  // mean(1:10) → 5.5: exercises range-expression syntax + reducing
+  // builtin together. The `1:10` range is a matlab idiom for
+  // [1, 2, 3, ..., 10], so this catches both the range parser and
+  // the array-reducing function.
+  test('Workstation: mean(1:10) returns 5.5 (range + reduce)', async ({ page }) => {
+    const pageErrors: string[] = []
+    page.on('pageerror', (err) => pageErrors.push(`${err.name}: ${err.message}`))
+
+    await page.goto('/compute-lab', { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(2500)
+
+    const editor = page.locator('textarea').first()
+    await editor.fill('mean(1:10)')
+
+    const runBtn = page.getByRole('button', { name: /^Run$/ }).first()
+    await runBtn.click()
+    await page.waitForTimeout(600)
+
+    const resultsBtn = page.getByRole('button', { name: /Results ▸|results overlay/i }).first()
+    if (await resultsBtn.count() > 0) await resultsBtn.click()
+    await page.waitForTimeout(400)
+
+    await expect(
+      page.locator('text=/ans\\s*=\\s*5\\.5/').first(),
+      '`mean(1:10)` should produce `ans = 5.5` in the console',
+    ).toBeVisible({ timeout: 4000 })
+
+    expect(pageErrors, `Workstation page errors: ${pageErrors.join('; ')}`).toEqual([])
+  })
 })
