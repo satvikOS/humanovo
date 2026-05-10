@@ -1594,6 +1594,16 @@ export default function DataVisualization() {
         strokeWidth={1.5} label={{ value: ann.label, position: 'insideTopRight', style: { fontSize: 10 * fs, fill: ann.color, fontWeight: 600, fontFamily: theme.bodyFont } }} />
     ))
 
+    // Auto error-bar support — when DataPoint.errorPlus / errorMinus
+    // are populated (CSV import or manual entry), render whisker
+    // overlays inside the relevant series. Previously only the
+    // dedicated `error_bar` chart type used these fields, so a user
+    // adding error data to a regular bar chart got a silently
+    // ignored input. Standard publication-grade convention.
+    const hasErrorPlus = data.some(d => typeof d.errorPlus === 'number')
+    const hasErrorMinus = data.some(d => typeof d.errorMinus === 'number')
+    const errorBarColor = theme.textColor === '#E5E7EB' ? '#A8B0BA' : '#333333'
+
     const renderChartSwitch = (): React.ReactNode => { switch (type) {
       // ── BAR CHARTS ──────────────────────────────────────────
       case 'bar':
@@ -1604,6 +1614,8 @@ export default function DataVisualization() {
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={animDur} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
+                  {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
+                  {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                 </Bar>
                 <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />
               </ComposedChart>
@@ -1612,6 +1624,8 @@ export default function DataVisualization() {
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={animDur} hide={hidden.has('value')}>
                   {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
+                  {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
+                  {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                 </Bar>
               </BarChart>
             )}
