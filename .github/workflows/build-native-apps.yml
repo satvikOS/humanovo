@@ -70,7 +70,15 @@ concurrency:
   # commit gets a real build artifact and a clean conclusion. Tag
   # builds are unaffected because they get their own concurrency
   # group via github.ref.
-  group: native-build-${{ github.ref }}
+  #
+  # Per-SHA group so every commit gets its own queue slot. With
+  # `group: native-build-${{ github.ref }}` and rapid push streams,
+  # GitHub's queue manager kept only the running + latest-queued
+  # runs and cancelled older queued runs before they could start —
+  # producing a long history of "cancelled" middle commits with no
+  # build artifact. The per-SHA group means each commit's run sits
+  # in its own group of 1, so it always gets to run.
+  group: native-build-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
