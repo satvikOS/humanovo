@@ -29,8 +29,11 @@ import {
   getAutostartEnabled,
   setAutostartEnabled,
   getDiagnostics,
+  getAiHealth,
   notify,
+  type AiHealthReport,
 } from '../lib/native'
+import { useAuth } from '../contexts/useAuth'
 import { toast } from '../contexts/ToastContext'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -1561,7 +1564,117 @@ function formatRelative(iso: string | null): string {
   return `${diffDay}d ago`
 }
 
+function AiProvidersRow() {
+  // Admin-only diagnostic. Non-admin users never see this card —
+  // the wrapper conditionally renders it based on user.role. The
+  // probe behind /admin/ai/health takes 1-5 s (concurrent calls
+  // out to Bedrock + Azure with a 1-token prompt each) so we
+  // gate the initial fetch on a button click rather than on
+  // mount; that avoids paying the probe cost every time the
+  // user opens Settings.
+  const [report, setReport] = useState<AiHealthReport | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+
+  const probe = useCallback(async (force = false) => {
+    setLoading(true)
+    const r = await getAiHealth(force)
+    setReport(r)
+    setLoading(false)
+  }, [])
+
+  return (
+    <div
+      className="flex items-start justify-between gap-4 p-4 rounded-lg"
+      style={{ background: 'var(--glass-bg)', border: '1px solid var(--color-border)' }}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+          AI providers
+        </div>
+        <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+          Probes every configured Bedrock + Azure deployment with a 1-token call so you can
+          verify your secrets bootstrap reaches each provider before a discovery run fails on
+          the first LLM call. Cached server-side for 30 s.
+        </p>
+        {report && (
+          <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+            {report.summary.reachable}/{report.summary.configured} reachable
+            {report.summary.down > 0 && ` · ${report.summary.down} down`}
+            {report.cached && ` · cached ${report.cache_age_s}s`}
+            {' · '}
+            <button
+              type="button"
+              className="underline opacity-70 hover:opacity-100"
+              onClick={() => setExpanded(e => !e)}
+            >
+              {expanded ? 'hide details' : 'show details'}
+            </button>
+          </p>
+        )}
+        {report && expanded && (
+          <div className="mt-3 space-y-1">
+            {[...report.providers.bedrock, ...report.providers.azure].map(m => (
+              <div
+                key={m.model}
+                className="flex items-center justify-between text-xs px-2 py-1 rounded"
+                style={{ background: 'var(--color-bg-secondary)' }}
+              >
+                <span style={{ color: m.reachable ? 'var(--color-text)' : 'var(--color-text-muted)' }}>
+                  <span style={{ marginRight: 6 }}>
+                    {m.reachable ? '✓' : m.configured ? '✗' : '·'}
+                  </span>
+                  {m.model}
+                </span>
+                <span className="text-xxs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+                  {m.reachable
+                    ? `${m.latency_ms}ms`
+                    : m.configured
+                    ? (m.error || 'down').slice(0, 40)
+                    : 'not configured'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex flex-col gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => probe(false)}
+          disabled={loading}
+          className="text-xs px-3 py-1.5 rounded-md disabled:opacity-50 active:scale-95"
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-text)',
+          }}
+        >
+          {loading ? 'Probing…' : report ? 'Re-probe' : 'Probe now'}
+        </button>
+        {report && (
+          <button
+            type="button"
+            onClick={() => probe(true)}
+            disabled={loading}
+            className="text-xxs px-3 py-1.5 rounded-md disabled:opacity-50 active:scale-95 opacity-60 hover:opacity-100"
+            style={{ background: 'transparent', color: 'var(--color-text-muted)' }}
+          >
+            Force refresh
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function DesktopSettings() {
+  // Pull current user once so we can conditionally show the
+  // AI Providers row only to admins (the endpoint behind it 403s
+  // for non-admins; rendering the chrome would just frustrate
+  // researcher-tier users).
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [checking, setChecking] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<{ version: string; current: string } | null>(null)
   // Phase the update button cycles through. `idle` → click → `checking`
@@ -1888,6 +2001,12 @@ function DesktopSettings() {
             onChange={toggleAutostart}
           />
         </div>
+
+        {/* AI providers — admin-only diagnostic surfacing
+            /admin/ai/health. Hidden for researcher-tier users
+            since the endpoint 403s for them and the panel would
+            just be frustrating chrome. */}
+        {isAdmin && <AiProvidersRow />}
 
         <div
           className="flex items-start justify-between gap-4 p-4 rounded-lg"

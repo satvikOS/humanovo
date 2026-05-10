@@ -184,6 +184,50 @@ export async function setTrayTooltip(tooltip: string): Promise<void> {
 }
 
 /**
+ * Probe each backend AI provider/model and return a per-model
+ * report. Backed by `/admin/ai/health` (admin-only). Settings →
+ * Desktop App surfaces the result so admins can verify their
+ * Bedrock + Azure secrets reach each model before a discovery run
+ * fails on the first LLM call.
+ *
+ * Returns null for non-admin users (the endpoint 403s) so the
+ * caller can hide the surface entirely. We don't want to render
+ * "permission denied" chrome to researcher-tier users — they're
+ * not the audience for this readout.
+ */
+export interface AiHealthEntry {
+  model: string
+  configured: boolean
+  reachable: boolean
+  latency_ms: number | null
+  error: string | null
+}
+
+export interface AiHealthReport {
+  providers: { bedrock: AiHealthEntry[]; azure: AiHealthEntry[] }
+  summary: { total: number; configured: number; reachable: number; down: number }
+  cached: boolean
+  cache_age_s: number
+}
+
+export async function getAiHealth(forceRefresh = false): Promise<AiHealthReport | null> {
+  // Caller is responsible for gating this on `user.role === 'admin'`
+  // before invoking — the endpoint 403s for non-admins and the global
+  // axios interceptor would surface that as a confusing "Request
+  // failed" toast. This helper just wraps the call + null-on-error
+  // so the consumer can render a "couldn't probe" empty state.
+  try {
+    const { apiClient } = await import('../services')
+    const url = `/admin/ai/health${forceRefresh ? '?force_refresh=true' : ''}`
+    const resp = await apiClient.get<AiHealthReport>(url)
+    return resp.data
+  } catch (err) {
+    console.warn('native.getAiHealth: failed', err)
+    return null
+  }
+}
+
+/**
  * Build a one-shot diagnostics block: version, platform, perms, etc.
  *
  * Used by the Settings "Copy diagnostics" affordance so a user filing
