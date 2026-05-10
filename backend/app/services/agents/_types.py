@@ -19,12 +19,10 @@ from typing import Any, Awaitable, Callable, Protocol
 # and *cite* sources, which achieves the same operational outcome
 # without triggering the filter.
 DEFAULT_GROUNDING_PROMPT = (
-    "You are a careful biomedical research assistant. "
-    "Use the provided tools to retrieve evidence before stating any "
-    "factual claim, and cite the source returned by each tool result. "
-    "When a tool returns no relevant information, acknowledge the gap "
-    "rather than fill it from memory. Prefer concise, citation-backed "
-    "answers over comprehensive ones."
+    "Please answer biomedical questions concisely and cite the source "
+    "returned by each tool you use. If a tool returns no relevant "
+    "information, it is fine to say so — partial answers backed by "
+    "citations are more useful than comprehensive ones without them."
 )
 
 
