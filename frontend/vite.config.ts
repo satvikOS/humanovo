@@ -3,7 +3,14 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 import { constantChatPlugin } from './vite-chat-plugin'
 
-export default defineConfig({
+// Mock-auth gate: VITE_ENABLE_MOCK_AUTH defaults to "true" in dev /
+// non-production builds, "false" in production. Vite passes `mode`
+// at config-eval time — `vite build` sets it to "production",
+// `vite dev` to "development". The Tauri release workflow runs
+// `vite build` (production); local dev + the Tauri debug shell
+// run `vite dev` (development). Operator can override either way
+// via the VITE_ENABLE_MOCK_AUTH env var on the build command.
+export default defineConfig(({ mode }) => ({
   // plotly.js (modular, used via lib/plotlyMin.ts) was authored for
   // Node and references `global` at module-init time. Browser globals
   // resolve via globalThis; without this define every page that
@@ -13,6 +20,12 @@ export default defineConfig({
   // — no runtime cost, no shim shipped to the user.
   define: {
     global: 'globalThis',
+    // Bake the mock-auth gate at build time. Default: enabled in dev,
+    // disabled in production. Operator can override either way via
+    // VITE_ENABLE_MOCK_AUTH=true|false on the build command.
+    'import.meta.env.VITE_ENABLE_MOCK_AUTH': JSON.stringify(
+      process.env.VITE_ENABLE_MOCK_AUTH ?? (mode === 'production' ? 'false' : 'true')
+    ),
   },
   plugins: [
     react(),
@@ -36,4 +49,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

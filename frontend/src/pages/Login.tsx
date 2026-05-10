@@ -28,13 +28,27 @@ export default function Login() {
 
   const next = searchParams.get('next') || '/dashboard'
 
+  // Mock-auth visible only when the gate is on. Build sets
+  // VITE_ENABLE_MOCK_AUTH=true for dev / E2E / Tauri-debug; release
+  // builds omit it so the hint banner never ships to production users.
+  const mockAuthEnabled = (
+    (import.meta.env.VITE_ENABLE_MOCK_AUTH as string | undefined) === 'true'
+  )
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!email.trim() || !password) return
     setSubmitting(true)
     setError(null)
     try {
-      await login({ email: email.trim().toLowerCase(), password })
+      // Mock credentials are case-sensitive numerics — don't lowercase
+      // them or we'd break the literal-match path in services/auth.ts.
+      const submitEmail = (
+        mockAuthEnabled && email.trim() === '1234'
+          ? '1234'
+          : email.trim().toLowerCase()
+      )
+      await login({ email: submitEmail, password })
       // Redirect to ?next= if present and safe (relative path only).
       const target = /^\/[^/]/.test(next) ? next : '/dashboard'
       navigate(target, { replace: true })
@@ -87,21 +101,54 @@ export default function Login() {
             Welcome back to your research workspace.
           </p>
 
+          {mockAuthEnabled && (
+            <div
+              data-testid="mock-auth-banner"
+              role="note"
+              className="mb-4 rounded-md px-3 py-2 text-xxs flex items-center justify-between gap-3"
+              style={{
+                background: 'rgba(180, 110, 60, 0.10)',
+                border: '1px solid rgba(180, 110, 60, 0.40)',
+                color: 'var(--color-text)',
+              }}
+            >
+              <span>
+                <strong>Dev / E2E mode.</strong> Test login:{' '}
+                <code style={{ fontFamily: 'monospace' }}>1234</code> /{' '}
+                <code style={{ fontFamily: 'monospace' }}>1234</code>.
+              </span>
+              <button
+                type="button"
+                data-testid="mock-auth-fill"
+                onClick={() => { setEmail('1234'); setPassword('1234') }}
+                className="underline hover:no-underline whitespace-nowrap"
+                style={{ color: 'var(--color-text)' }}
+              >
+                Fill
+              </button>
+            </div>
+          )}
+
           <form onSubmit={onSubmit} noValidate>
             <label className="block mb-3">
               <span className="block text-xs mb-1" style={{ color: 'var(--color-text-muted)' }}>
                 Email
               </span>
               <input
-                type="email"
+                // Was type="email" — mock-auth path needs to accept
+                // "1234" which fails HTML5 email validation. The
+                // backend still validates the email format on the
+                // login endpoint for non-mock paths.
+                type={mockAuthEnabled ? 'text' : 'email'}
                 autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@university.edu"
+                placeholder={mockAuthEnabled ? '1234 (or you@university.edu)' : 'you@university.edu'}
                 className="input w-full text-sm"
                 disabled={submitting}
                 aria-label="Email"
+                data-testid="login-email"
               />
             </label>
 
@@ -119,6 +166,7 @@ export default function Login() {
                 className="input w-full text-sm"
                 disabled={submitting}
                 aria-label="Password"
+                data-testid="login-password"
               />
             </label>
 
@@ -141,6 +189,7 @@ export default function Login() {
               type="submit"
               disabled={submitting || !email.trim() || !password}
               className="btn w-full text-sm justify-center"
+              data-testid="login-submit"
               style={{
                 background: 'var(--color-text)',
                 color: 'var(--color-bg)',

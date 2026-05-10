@@ -118,7 +118,59 @@ const authClient: AxiosInstance = axios.create({
   timeout: 15_000,
 })
 
+// Mock-auth bypass for headed E2E + dev environments. When a caller
+// submits the literal credentials `1234 / 1234`, fabricate a token
+// + user pair locally instead of hitting the backend. The mock token
+// carries a `mock-` prefix so any backend that receives it (it
+// shouldn't — getMe() returns the local mock user too) recognises it
+// as fake and refuses to mint real records against it.
+//
+// Gated so production builds NEVER honour this path: the bypass only
+// runs when import.meta.env.VITE_ENABLE_MOCK_AUTH === 'true'. The
+// Tauri app's debug builds and local Vite dev set this; release
+// builds explicitly omit it via the build-native-apps workflow.
+const MOCK_AUTH_ENABLED = (
+  (import.meta.env.VITE_ENABLE_MOCK_AUTH as string | undefined) === 'true'
+)
+const MOCK_USERNAME = '1234'
+const MOCK_PASSWORD = '1234'
+
+function _mockToken(): AuthToken {
+  return {
+    access_token: 'mock-' + Math.random().toString(36).slice(2) + '.dev-only',
+    token_type: 'bearer',
+    expires_in: 60 * 60 * 24,  // 24 hours
+  }
+}
+
+function _mockUser(): AuthUser {
+  return {
+    id: 'mock-user-1234',
+    email: '1234',
+    full_name: 'Mock User (E2E)',
+    role: 'admin',
+    is_active: true,
+    is_verified: true,
+    has_completed_onboarding: true,
+    created_at: new Date().toISOString(),
+  }
+}
+
+function _isMockToken(): boolean {
+  const t = getToken()
+  return MOCK_AUTH_ENABLED && t !== null && t.startsWith('mock-')
+}
+
 export async function login(req: LoginRequest): Promise<AuthToken> {
+  if (
+    MOCK_AUTH_ENABLED
+    && req.email.trim() === MOCK_USERNAME
+    && req.password === MOCK_PASSWORD
+  ) {
+    const token = _mockToken()
+    setToken(token)
+    return token
+  }
   const { data } = await authClient.post<AuthToken>('/login', req)
   setToken(data)
   return data
@@ -132,6 +184,12 @@ export async function register(req: RegisterRequest): Promise<AuthUser> {
 export async function getMe(): Promise<AuthUser> {
   const token = getToken()
   if (!token) throw new Error('Not authenticated')
+  // Mock auth: short-circuit /me when the stored token is a mock —
+  // no backend round-trip, returns the canned mock user. Same gate
+  // as login(): only honoured when VITE_ENABLE_MOCK_AUTH=true.
+  if (_isMockToken()) {
+    return _mockUser()
+  }
   const { data } = await authClient.get<AuthUser>('/me', {
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -149,6 +207,11 @@ export async function patchMe(updates: {
 }): Promise<AuthUser> {
   const token = getToken()
   if (!token) throw new Error('Not authenticated')
+  if (_isMockToken()) {
+    // Apply updates locally to the canned mock user; no backend.
+    const u = _mockUser()
+    return { ...u, ...updates }
+  }
   const { data } = await authClient.patch<AuthUser>('/me', updates, {
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -160,7 +223,8 @@ export async function logout(): Promise<void> {
   // Best-effort server notification — JWTs aren't revocable server-side
   // without a blacklist (Sprint-2 work), so the canonical logout is
   // discarding the token client-side regardless of network outcome.
-  if (token) {
+  // Mock tokens are already not sent to the backend; just clear local.
+  if (token && !_isMockToken()) {
     try {
       await authClient.post('/logout', null, {
         headers: { Authorization: `Bearer ${token}` },
