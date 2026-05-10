@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     admin,
     agent_chat_stream,
     agents,
+    ai_health,
     auth,
     billing,
     biobank,
@@ -158,6 +159,11 @@ router.include_router(paper_qa.cost_router)
 
 # Admin (non-prod): kg-stats, seed-kg. Disabled in production via guard.
 router.include_router(admin.router, prefix="/admin", tags=["admin"])
+
+# AI provider health probes — admin-only, /admin/ai/health.
+# Probes each Bedrock model + Azure deployment with a 1-token call
+# and reports per-model latency_ms / reachable / error. Cached 30 s.
+router.include_router(ai_health.router, tags=["admin", "ai"])
 
 # Citation verification — CrossRef + NCBI round-trip for single citations.
 router.include_router(citation_verify.router, prefix="/citation", tags=["citation"])
