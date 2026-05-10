@@ -160,7 +160,18 @@ export default function PlotlyPlot3D({
             mode: 'markers' as const,
             x: xs, y: ys, z: zs,
             text: labels,
-            marker: { size: pointSize, color: zs, colorscale, opacity: 0.85, colorbar: { title: zLabel } },
+            // Marker line outline (thin dark stroke around each
+            // point) gives publication-grade readability — without
+            // it, points blend into the surface gridlines on dense
+            // plots. Same convention as MATLAB's `scatter3` default.
+            marker: {
+              size: pointSize,
+              color: zs,
+              colorscale,
+              opacity: 0.9,
+              line: { color: 'rgba(0,0,0,0.55)', width: 0.5 },
+              colorbar: { title: zLabel, thickness: 14, len: 0.6 },
+            },
           }]
         }
 
@@ -170,7 +181,14 @@ export default function PlotlyPlot3D({
             mode: 'markers' as const,
             x: xs, y: ys, z: zs,
             text: labels,
-            marker: { size: sizes.map(s => s * 2), color: zs, colorscale, opacity: 0.7, colorbar: { title: zLabel } },
+            marker: {
+              size: sizes.map(s => s * 2),
+              color: zs,
+              colorscale,
+              opacity: 0.78,
+              line: { color: 'rgba(0,0,0,0.55)', width: 0.5 },
+              colorbar: { title: zLabel, thickness: 14, len: 0.6 },
+            },
           }]
         }
 
@@ -180,17 +198,40 @@ export default function PlotlyPlot3D({
             mode: 'lines+markers' as const,
             x: xs, y: ys, z: zs,
             text: labels,
-            line: { width: 3, color: zs, colorscale },
-            marker: { size: 3, color: zs, colorscale },
+            // Thicker line so it reads at journal-card size; markers
+            // shrunk so the line itself dominates rather than the
+            // dot strip. Same gradient applied to both for a
+            // unified look.
+            line: { width: 5, color: zs, colorscale },
+            marker: {
+              size: 2.5,
+              color: zs,
+              colorscale,
+              line: { color: 'rgba(0,0,0,0.55)', width: 0.5 },
+            },
           }]
         }
 
         case 'bar_3d': {
           // Plotly doesn't have native 3D bars — simulate with mesh3d.
-          // alphahull=-1 asks Plotly to convex-hull the 8 corner points,
-          // which always yields a valid box (hand-rolled i/j/k indices
-          // can collapse on some inputs, producing invisible bars).
+          // alphahull=-1 asks Plotly to convex-hull the 8 corner
+          // points, which always yields a valid box (hand-rolled
+          // i/j/k indices can collapse on some inputs, producing
+          // invisible bars). Bar colour now picks up the chart's
+          // colorscale interpolated against the z-value — gives
+          // the matlab `bar3` look where bar height + colour both
+          // encode magnitude. Edge mesh adds black wire seams so
+          // bar boundaries read cleanly when packed.
           const traces: Plot3DTrace[] = []
+          // Compute z-range once so we can normalise each bar's
+          // colour onto [0,1] for the colorscale lookup.
+          let zMin = Infinity, zMax = -Infinity
+          for (const d of data) {
+            if (d.z < zMin) zMin = d.z
+            if (d.z > zMax) zMax = d.z
+          }
+          if (!Number.isFinite(zMin)) { zMin = 0; zMax = 1 }
+          const zSpan = zMax - zMin || 1
           for (let i = 0; i < data.length; i++) {
             const d = data[i]
             traces.push({
@@ -199,11 +240,19 @@ export default function PlotlyPlot3D({
               y: [d.y - 0.3, d.y - 0.3, d.y + 0.3, d.y + 0.3, d.y - 0.3, d.y - 0.3, d.y + 0.3, d.y + 0.3],
               z: [0, 0, 0, 0, d.z, d.z, d.z, d.z],
               alphahull: -1,
-              opacity: 0.85,
-              color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+              opacity: 0.92,
+              // intensity per-bar so colorscale interpolates each
+              // bar to a single colour band based on its height —
+              // matches matlab `bar3(z, 'detached')` behaviour.
+              intensity: Array(8).fill((d.z - zMin) / zSpan),
+              colorscale,
+              cmin: 0, cmax: 1,
+              showscale: i === 0, // only first bar carries the colorbar
+              colorbar: i === 0 ? { title: zLabel, thickness: 14, len: 0.6 } : undefined,
               name: labels[i] || `Bar ${i + 1}`,
-              showlegend: i < 10,
+              showlegend: false,
               flatshading: true,
+              lighting: { ambient: 0.6, diffuse: 0.85, specular: 0.15 },
               hovertext: `${labels[i] || ''}<br>(${d.x}, ${d.y}, ${d.z})`,
             } as Plot3DTrace)
           }
