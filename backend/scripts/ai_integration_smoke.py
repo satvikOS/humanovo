@@ -361,7 +361,7 @@ async def main() -> int:
         latency = f"{r.latency_ms}ms" if r.latency_ms else "    "
         line = f"  [{status}] {r.label:<32} {latency}"
         if r.error and r.configured:
-            line += f"  err: {r.error[:80]}"
+            line += f"  err: {r.error}"
         elif r.response_preview:
             line += f"  → {r.response_preview!r}"
         print(line)
