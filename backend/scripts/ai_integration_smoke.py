@@ -148,12 +148,21 @@ async def _probe_azure_foundry_deployment(
             except Exception as e:
                 last_error = f"{deployment}: {str(e)[:300]}"
 
-    # Endpoint pattern 2: Foundry shared (AsyncOpenAI base_url)
+    # Endpoint pattern 2: Foundry shared (AsyncOpenAI base_url).
+    # Foundry-shared endpoints REQUIRE `?api-version=...` on every
+    # request — AsyncOpenAI doesn't append it automatically (that's
+    # Azure-specific behaviour AsyncAzureOpenAI handles, not the
+    # OpenAI-compatibility client). Pass `default_query` so every
+    # subsequent .chat.completions.create() carries it.
     if project_endpoint:
         base_url = project_endpoint.rstrip("/")
         if "services.ai.azure.com" in base_url and not base_url.endswith("/models"):
             base_url = f"{base_url}/models"
-        client_b = AsyncOpenAI(base_url=base_url, api_key=key)
+        client_b = AsyncOpenAI(
+            base_url=base_url,
+            api_key=key,
+            default_query={"api-version": api_version},
+        )
         for deployment in deployment_candidates:
             t0 = time.monotonic()
             try:
