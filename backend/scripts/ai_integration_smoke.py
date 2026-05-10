@@ -122,6 +122,17 @@ async def _probe_azure_foundry_deployment(
 
     last_error: str | None = None
 
+    # Foundry projects don't always accept the latest preview api-
+    # version — older provisions may pin to 2024-08-01 / 2024-10-21
+    # / 2025-01-01-preview etc. Cycle through known-good versions
+    # alongside the user-configured one. First match wins.
+    api_version_candidates: list[str] = []
+    seen: set[str] = set()
+    for v in [api_version, "2024-12-01-preview", "2024-10-21", "2024-08-01-preview", "2025-01-01-preview", "2024-05-01-preview"]:
+        if v and v not in seen:
+            api_version_candidates.append(v)
+            seen.add(v)
+
     # Endpoint pattern 1: AsyncAzureOpenAI (resource-style)
     if openai_endpoint:
         client_a = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_endpoint, api_version=api_version)
@@ -153,38 +164,41 @@ async def _probe_azure_foundry_deployment(
     # request — AsyncOpenAI doesn't append it automatically (that's
     # Azure-specific behaviour AsyncAzureOpenAI handles, not the
     # OpenAI-compatibility client). Pass `default_query` so every
-    # subsequent .chat.completions.create() carries it.
+    # subsequent .chat.completions.create() carries it. We also
+    # cycle through api-version candidates because not every
+    # Foundry provision accepts the same preview version.
     if project_endpoint:
         base_url = project_endpoint.rstrip("/")
         if "services.ai.azure.com" in base_url and not base_url.endswith("/models"):
             base_url = f"{base_url}/models"
-        client_b = AsyncOpenAI(
-            base_url=base_url,
-            api_key=key,
-            default_query={"api-version": api_version},
-        )
-        for deployment in deployment_candidates:
-            t0 = time.monotonic()
-            try:
-                resp = await asyncio.wait_for(
-                    client_b.chat.completions.create(
-                        model=deployment,
-                        messages=[{"role": "user", "content": PROBE_PROMPT}],
-                        max_tokens=10,
-                    ),
-                    timeout=PROBE_TIMEOUT_S,
-                )
-                latency = int((time.monotonic() - t0) * 1000)
-                text = (resp.choices[0].message.content or "").strip()[:80]
-                return ProbeResult(
-                    label=f"{label} [{deployment} via foundry-shared]",
-                    configured=True, reachable=True, latency_ms=latency,
-                    error=None, response_preview=text,
-                )
-            except asyncio.TimeoutError:
-                last_error = f"timeout {deployment} (foundry)"
-            except Exception as e:
-                last_error = f"{deployment} (foundry): {str(e)[:300]}"
+        for av in api_version_candidates:
+            client_b = AsyncOpenAI(
+                base_url=base_url,
+                api_key=key,
+                default_query={"api-version": av},
+            )
+            for deployment in deployment_candidates:
+                t0 = time.monotonic()
+                try:
+                    resp = await asyncio.wait_for(
+                        client_b.chat.completions.create(
+                            model=deployment,
+                            messages=[{"role": "user", "content": PROBE_PROMPT}],
+                            max_tokens=10,
+                        ),
+                        timeout=PROBE_TIMEOUT_S,
+                    )
+                    latency = int((time.monotonic() - t0) * 1000)
+                    text = (resp.choices[0].message.content or "").strip()[:80]
+                    return ProbeResult(
+                        label=f"{label} [{deployment} via foundry-shared @ {av}]",
+                        configured=True, reachable=True, latency_ms=latency,
+                        error=None, response_preview=text,
+                    )
+                except asyncio.TimeoutError:
+                    last_error = f"timeout {deployment} (foundry @ {av})"
+                except Exception as e:
+                    last_error = f"{deployment} (foundry @ {av}): {str(e)[:300]}"
 
     return ProbeResult(
         label=label, configured=True, reachable=False, latency_ms=None,
