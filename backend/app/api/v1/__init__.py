@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     agent_chat_stream,
     agents,
     account,
+    account_usage,
     admin_users,
     ai_cost_estimate,
     ai_health,
@@ -172,6 +173,7 @@ router.include_router(ai_health.router, tags=["admin", "ai"])
 router.include_router(ai_cost_estimate.router, tags=["admin", "ai"])
 router.include_router(ai_runs.router, tags=["admin", "ai"])
 router.include_router(account.router, tags=["account", "gdpr"])
+router.include_router(account_usage.router, tags=["account", "usage"])
 router.include_router(admin_users.router, tags=["admin", "users"])
 router.include_router(metrics.router, tags=["metrics"])
 
