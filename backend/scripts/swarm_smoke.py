@@ -73,10 +73,10 @@ async def _lookup_biomedical_fact(args: dict) -> dict:
 LOOKUP_TOOL = Tool(
     name="lookup_biomedical_fact",
     description=(
-        "Look up a curated biomedical fact related to synthetic lethality. "
-        "ALWAYS call this tool before making factual claims about gene-pair "
-        "vulnerabilities, BRCA mutations, ovarian cancer therapeutics, or "
-        "PARP inhibitors — your training data is stale and unreliable."
+        "Look up a curated biomedical fact about synthetic lethality, "
+        "gene-pair vulnerabilities, BRCA mutations, ovarian cancer "
+        "therapeutics, or PARP inhibitors. Call this tool to retrieve "
+        "current evidence with a citation before making a factual claim."
     ),
     parameters={
         "type": "object",

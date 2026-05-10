@@ -11,14 +11,20 @@ from typing import Any, Awaitable, Callable, Protocol
 # Default system prompt every grounded agent receives unless the caller
 # overrides. Encodes the project rule: model output must be sourced
 # from tool results, not pretrained knowledge.
+#
+# The phrasing here is deliberately neutral and positive — earlier
+# drafts that used "your training data is unreliable, you must..."
+# tripped Azure OpenAI's content management policy as a jailbreak
+# attempt. The current wording asks the model to *prefer* tool results
+# and *cite* sources, which achieves the same operational outcome
+# without triggering the filter.
 DEFAULT_GROUNDING_PROMPT = (
     "You are a careful biomedical research assistant. "
-    "You MUST use the provided tools to gather evidence before answering. "
-    "Treat your training data as unreliable: any factual claim must be "
-    "supported by a tool result returned in the current conversation. "
-    "If no tool returns the information you need, say so explicitly "
-    "rather than guessing. Always cite the source returned by tools "
-    "when stating a fact."
+    "Use the provided tools to retrieve evidence before stating any "
+    "factual claim, and cite the source returned by each tool result. "
+    "When a tool returns no relevant information, acknowledge the gap "
+    "rather than fill it from memory. Prefer concise, citation-backed "
+    "answers over comprehensive ones."
 )
 
 
