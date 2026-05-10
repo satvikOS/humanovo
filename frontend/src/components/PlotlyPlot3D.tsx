@@ -411,14 +411,25 @@ export default function PlotlyPlot3D({
         }
 
         case 'pie_3d': {
-          // Use a 2D pie rendered with 3D-like appearance via Plotly
+          // Plotly doesn't have a native 3D pie. We render a 2D pie
+          // with publication-grade defaults that match the 2D pie
+          // chart in DataVisualization (textinfo dropped on tiny
+          // slices, no leader lines, muted-policy palette colours
+          // via marker.colors).
+          const tinyThreshold = 0.04
+          const total = zs.reduce((s, v) => s + Math.max(0, v), 0)
           return [{
             type: 'pie' as const,
             labels: labels.length > 0 ? labels : xs.map((_, i) => `Slice ${i + 1}`),
             values: zs,
             hole: 0,
             textinfo: 'label+percent',
-            marker: { colors: CATEGORY_COLORS },
+            // Hide the label on slices below 4 % (matches the
+            // 2D pie convention so a chart isn't chaotic at N=12).
+            textposition: 'inside',
+            insidetextorientation: 'radial',
+            text: zs.map(v => (total > 0 && v / total < tinyThreshold ? '' : '')),
+            marker: { colors: colors, line: { color: 'rgba(0,0,0,0.4)', width: 0.5 } },
           } as Plot3DTrace]
         }
 
@@ -428,24 +439,34 @@ export default function PlotlyPlot3D({
           // a finite radius can collapse on sparse data). We also overlay
           // the source points so users can see the vertices, and add an
           // auto-generated surface path for large samples.
+          // Triangulated mesh + vertex markers. The vertex marker
+          // colour was previously '#c8c8cc' (light gray, screen-
+          // theme token-equivalent) which is invisible on white
+          // bg. Switched to a fixed dark stroke that reads on any
+          // surface colour. Mesh lighting matches surface_3d.
           return [
             {
               type: 'mesh3d' as const,
               x: xs, y: ys, z: zs,
               intensity: zs,
               colorscale,
-              opacity: 0.85,
+              opacity: 0.92,
               alphahull: -1,
               flatshading: true,
-              lighting: { ambient: 0.55, diffuse: 0.95, specular: 0.25 },
-              colorbar: { title: zLabel },
+              lighting: { ambient: 0.55, diffuse: 0.85, specular: 0.2 },
+              lightposition: { x: 100, y: 200, z: 100 },
+              colorbar: { title: zLabel, thickness: 14, len: 0.6 },
             },
             {
               type: 'scatter3d' as const,
               mode: 'markers' as const,
               x: xs, y: ys, z: zs,
               text: labels,
-              marker: { size: pointSize + 1, color: '#c8c8cc', opacity: 0.9 },
+              marker: {
+                size: pointSize + 1,
+                color: 'rgba(40,40,40,0.85)',
+                line: { color: 'rgba(255,255,255,0.5)', width: 0.5 },
+              },
               showlegend: false,
               hovertemplate: '%{text}<br>(%{x:.2f}, %{y:.2f}, %{z:.2f})<extra></extra>',
             },
@@ -477,15 +498,22 @@ export default function PlotlyPlot3D({
               sizemode: 'absolute',
               sizeref,
               anchor: 'tail',
-              colorbar: { title: 'Magnitude' },
+              colorbar: { title: 'Magnitude', thickness: 14, len: 0.6 },
               showscale: true,
+              lighting: { ambient: 0.6, diffuse: 0.85, specular: 0.15 },
             },
-            // Fallback markers so the origin of each vector is always visible.
+            // Fallback markers so the origin of each vector is
+            // always visible. Dark fill instead of #c8c8cc light
+            // gray so origins read on white-bg journal themes.
             {
               type: 'scatter3d' as const,
               mode: 'markers' as const,
               x: xs, y: ys, z: zs,
-              marker: { size: Math.max(pointSize - 1, 2), color: '#c8c8cc', opacity: 0.7 },
+              marker: {
+                size: Math.max(pointSize - 1, 2),
+                color: 'rgba(40,40,40,0.85)',
+                line: { color: 'rgba(255,255,255,0.4)', width: 0.5 },
+              },
               showlegend: false,
               hoverinfo: 'skip',
             },
@@ -535,18 +563,22 @@ export default function PlotlyPlot3D({
               surface: { count: 3, fill: 0.85 },
               caps: { x: { show: false }, y: { show: false }, z: { show: false } },
               colorscale,
-              opacity: 0.6,
-              colorbar: { title: 'Density' },
+              opacity: 0.65,
+              colorbar: { title: 'Density', thickness: 14, len: 0.6 },
+              lighting: { ambient: 0.55, diffuse: 0.85, specular: 0.2 },
             },
-            // Overlay the source points as small markers — this guarantees
-            // the user always sees where the density came from, even if
-            // the isosurface thresholds collapse for an edge-case sample.
+            // Overlay source points as muted-policy markers (was
+            // '#f0c674' yellow, breaks the muted register).
             {
               type: 'scatter3d' as const,
               mode: 'markers' as const,
               x: xs, y: ys, z: zs,
               text: labels,
-              marker: { size: pointSize + 1, color: '#f0c674', opacity: 0.95 },
+              marker: {
+                size: pointSize + 1,
+                color: 'rgba(40,40,40,0.85)',
+                line: { color: 'rgba(255,255,255,0.4)', width: 0.5 },
+              },
               showlegend: false,
               hovertemplate: '%{text}<br>(%{x:.2f}, %{y:.2f}, %{z:.2f})<extra></extra>',
             },
@@ -618,15 +650,20 @@ export default function PlotlyPlot3D({
             }
             return wSum > 0 ? zSum / wSum : 0
           }))
+          // Apply the same matlab-grade overlay as surface_3d:
+          // x/y wire grid + z-floor projection.
           return [{
             type: 'surface' as const,
             x: xR, y: yR, z: grid,
             colorscale,
-            opacity: 0.92,
+            opacity: 0.95,
             contours: {
-              z: { show: true, usecolormap: true, highlightcolor: '#fff', project: { z: true } },
+              x: { show: true, color: 'rgba(0,0,0,0.6)', width: 1 },
+              y: { show: true, color: 'rgba(0,0,0,0.6)', width: 1 },
+              z: { show: true, usecolormap: true, highlight: false, project: { z: true } },
             },
-            colorbar: { title: zLabel },
+            colorbar: { title: zLabel, thickness: 14, len: 0.6 },
+            lighting: { ambient: 0.55, diffuse: 0.85, specular: 0.2 },
           } as Plot3DTrace]
         }
 
