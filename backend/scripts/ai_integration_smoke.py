@@ -456,9 +456,14 @@ async def _probe_azure_foundry_deployment(
 # the operator can pin that in the real backend config.
 STAGE_ASSIGNMENTS: list[dict[str, object]] = [
     {
-        "label": "explorer (Stage 1) — Claude Opus",
+        "label": "explorer (Stage 1) — Claude Opus 4.6",
         "provider": "bedrock",
+        # 4.6 first — that's the production target. 4.1 / 4.0 fallbacks
+        # remain so partial-account access still passes the smoke and
+        # the operator sees which alias actually answered.
         "model_ids": [
+            "us.anthropic.claude-opus-4-6-20251201-v1:0",
+            "anthropic.claude-opus-4-6-20251201-v1:0",
             "us.anthropic.claude-opus-4-6-v1:0",
             "anthropic.claude-opus-4-6-v1:0",
             "us.anthropic.claude-opus-4-1-20250805-v1:0",
@@ -468,12 +473,17 @@ STAGE_ASSIGNMENTS: list[dict[str, object]] = [
         ],
     },
     {
-        "label": "expand-validate (Stage 2-4) — Claude Sonnet",
+        "label": "expand-validate (Stage 2/7/11/12) — Claude Sonnet 4.6",
         "provider": "bedrock",
         "model_ids": [
+            "us.anthropic.claude-sonnet-4-6-20251201-v1:0",
+            "anthropic.claude-sonnet-4-6-20251201-v1:0",
+            "us.anthropic.claude-sonnet-4-6-v1:0",
+            "anthropic.claude-sonnet-4-6-v1:0",
+            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "anthropic.claude-sonnet-4-5-20250929-v1:0",
             "us.anthropic.claude-sonnet-4-20250514-v1:0",
             "anthropic.claude-sonnet-4-20250514-v1:0",
-            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
         ],
     },
     {

@@ -48,11 +48,58 @@ if str(ROOT) not in sys.path:
 
 from app.services.agents import (  # noqa: E402
     BedrockClaudeAgent,
+    FoundryEmbedder,
     FoundryResponsesAgent,
     Swarm,
+    SwarmStage,
 )
 from app.services.agents._types import Tool  # noqa: E402
-from app.services.agents.swarm import SwarmStage  # noqa: E402
+
+
+async def _pick_bedrock_alias(
+    region: str,
+    access_key: str,
+    secret_key: str,
+    *,
+    candidates: list[str],
+    label: str,
+) -> str:
+    """Probe each Bedrock model ID with a 10-token "hi" call; return the
+    first one that answers. Logged so the operator sees which alias the
+    swarm pinned for this run."""
+    import asyncio as _asyncio
+    import json as _json
+
+    try:
+        import boto3  # type: ignore
+    except ImportError:
+        return candidates[0]
+
+    client = boto3.client(
+        "bedrock-runtime", region_name=region,
+        aws_access_key_id=access_key, aws_secret_access_key=secret_key,
+    )
+    body = _json.dumps({
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 10,
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    loop = _asyncio.get_event_loop()
+    for mid in candidates:
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda m=mid: client.invoke_model(
+                    modelId=m, contentType="application/json",
+                    accept="application/json", body=body,
+                ),
+            )
+            print(f"[alias] {label}: pinned {mid}", flush=True)
+            return mid
+        except Exception:
+            continue
+    print(f"[alias] {label}: no candidate worked, falling back to {candidates[0]}", flush=True)
+    return candidates[0]
 
 
 async def _lookup_biomedical_fact(args: dict) -> dict:
@@ -102,6 +149,11 @@ class StageSpec:
     instruction: str
     max_output_tokens: int = 768
     max_steps: int = 4
+    is_critic: bool = False
+    """Critic stages (validate/ground/score) get the
+    request_pipeline_loopback tool so they can send the pipeline back
+    to an earlier stage when QA/QC finds a problem the chain cannot
+    repair going forward."""
 
 
 # Substitution map: where the production STAGES list calls for a model
@@ -174,13 +226,17 @@ PIPELINE_SPEC: list[StageSpec] = [
         ),
     ),
     StageSpec(
-        num=7, name="validate", target_role="Claude Sonnet 4 (Bedrock)",
+        num=7, name="validate", target_role="Claude Sonnet 4.6 (Bedrock)",
         agent_key="bedrock-sonnet",
         instruction=(
             "Please cross-validate the mechanism by calling "
-            "lookup_biomedical_fact one more time, then state in one sentence "
-            "whether the central claim is supported."
+            "lookup_biomedical_fact one more time. If the evidence_strength "
+            "is anything other than 'high', use request_pipeline_loopback to "
+            "send the pipeline back to the 'revise' stage with a brief reason. "
+            "Otherwise, state in one sentence that the central claim is "
+            "supported."
         ),
+        is_critic=True,
     ),
     StageSpec(
         num=8, name="ground", target_role="Grok-4-1-fast (Foundry — substituted with o4-mini)",
@@ -188,8 +244,11 @@ PIPELINE_SPEC: list[StageSpec] = [
         instruction=(
             "Please apply three-layer grounding in two sentences: cite the "
             "source, mention the evidence_strength returned by the tool, and "
-            "note any claim not supported by a tool result."
+            "note any claim not supported by a tool result. If you spot an "
+            "ungrounded claim, please call request_pipeline_loopback with "
+            "target_stage='mechanism'."
         ),
+        is_critic=True,
     ),
     StageSpec(
         num=9, name="score", target_role="GPT-4.1 (Foundry — substituted with gpt-4o)",
@@ -197,8 +256,10 @@ PIPELINE_SPEC: list[StageSpec] = [
         instruction=(
             "Please assign a confidence between 0.0 and 1.0 based on the "
             "evidence_strength field of the tool result, with a one-sentence "
-            "justification."
+            "justification. If confidence would be below 0.6, please call "
+            "request_pipeline_loopback with target_stage='evidence'."
         ),
+        is_critic=True,
     ),
     StageSpec(
         num=10, name="refine", target_role="GPT-4o (Foundry)",
@@ -246,8 +307,36 @@ async def main() -> int:
     if not (azure_key and azure_project_endpoint):
         return _missing("Azure Foundry credentials missing — swarm smoke requires both Bedrock + Foundry")
 
-    bedrock_opus_id = "us.anthropic.claude-opus-4-1-20250805-v1:0"
-    bedrock_sonnet_id = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    # Try Claude 4.6 first (production target); fall back through
+    # 4.5 / 4.1 / 4.0 if a particular alias isn't enabled on this
+    # account. The per-model smoke (ai_integration_smoke.py) reports
+    # which alias actually answers — once confirmed, pin the exact
+    # ID into config.BEDROCK_MODEL_CLAUDE_OPUS / _SONNET.
+    bedrock_opus_id = await _pick_bedrock_alias(
+        aws_region, aws_key, aws_secret,
+        candidates=[
+            "us.anthropic.claude-opus-4-6-20251201-v1:0",
+            "anthropic.claude-opus-4-6-20251201-v1:0",
+            "us.anthropic.claude-opus-4-6-v1:0",
+            "anthropic.claude-opus-4-6-v1:0",
+            "us.anthropic.claude-opus-4-1-20250805-v1:0",
+            "anthropic.claude-opus-4-1-20250805-v1:0",
+        ],
+        label="Claude Opus",
+    )
+    bedrock_sonnet_id = await _pick_bedrock_alias(
+        aws_region, aws_key, aws_secret,
+        candidates=[
+            "us.anthropic.claude-sonnet-4-6-20251201-v1:0",
+            "anthropic.claude-sonnet-4-6-20251201-v1:0",
+            "us.anthropic.claude-sonnet-4-6-v1:0",
+            "anthropic.claude-sonnet-4-6-v1:0",
+            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "us.anthropic.claude-sonnet-4-20250514-v1:0",
+        ],
+        label="Claude Sonnet",
+    )
 
     # Construct each unique agent ONCE — multiple stages reuse the same
     # agent instance. This is fine: each call to .run() is stateless,
@@ -279,21 +368,44 @@ async def main() -> int:
             agent=agents[spec.agent_key],
             instruction=spec.instruction,
             max_steps=spec.max_steps,
+            is_critic=spec.is_critic,
         )
         for spec in PIPELINE_SPEC
-    ])
+    ], loopback_budget=3)
 
     initial_query = (
         "What synthetic-lethal target might be useful for BRCA1-deficient "
         "ovarian cancer cells? Citation-backed answers are preferred."
     )
 
+    # Dual-embedding probe — proves the FoundryEmbedder dispatches both
+    # text-embedding-3-large + text-embedding-3-small in parallel and
+    # returns matched DualEmbedding records with the right dim assertion.
+    # The discovery pipeline relies on this for hybrid retrieval (small
+    # for pre-filter, large for re-rank).
+    embedder = FoundryEmbedder(
+        base_url=azure_project_endpoint,
+        api_key=azure_key,
+        large_deployment="text-embedding-3-large",
+        small_deployment="text-embedding-3-small",
+    )
+    print("\n[dual-embed] probing both deployments...", flush=True)
+    dual = await embedder.embed_dual_one(
+        "PARP1 inhibition synthetic lethality with BRCA1-deficient cancer cells"
+    )
+    print(f"[dual-embed]   large dims={len(dual.large)} (want 3072)", flush=True)
+    print(f"[dual-embed]   small dims={len(dual.small)} (want 1536)", flush=True)
+    if len(dual.large) != 3072 or len(dual.small) != 1536:
+        print("[FAIL] dual-embedding dim mismatch", flush=True)
+        return 1
+
     print("\n=== 12-stage discovery swarm smoke ===", flush=True)
     print(f"Query: {initial_query}", flush=True)
-    print(f"Stages: {len(PIPELINE_SPEC)}\n", flush=True)
+    print(f"Stages: {len(PIPELINE_SPEC)} (critic stages: {sum(1 for s in PIPELINE_SPEC if s.is_critic)})\n", flush=True)
     print("Stage map (production target → substituted agent for this smoke):", flush=True)
     for spec in PIPELINE_SPEC:
-        print(f"  {spec.num:02d}. {spec.name:<10} target={spec.target_role:<55} agent={agents[spec.agent_key].label}", flush=True)
+        critic = " [CRITIC]" if spec.is_critic else ""
+        print(f"  {spec.num:02d}. {spec.name:<10} target={spec.target_role:<60} agent={agents[spec.agent_key].label}{critic}", flush=True)
     print("", flush=True)
 
     try:
@@ -303,29 +415,39 @@ async def main() -> int:
         return 1
 
     md_lines = ["## 12-stage discovery swarm", "",
-                "| # | Stage | Model | Steps | Tool calls | Latency | Output (preview) |",
-                "|---|---|---|---|---|---|---|"]
+                "| # | Stage | Iter | Model | Steps | Tool calls | Latency | Loopback | Output (preview) |",
+                "|---|---|---|---|---|---|---|---|---|"]
 
     for stage in result.stages:
         preview = (stage.text or "").replace("\n", " ").replace("|", "\\|")[:160]
+        loopback_tag = ""
+        if stage.triggered_loopback_to:
+            loopback_tag = f" → loopback to {stage.triggered_loopback_to}: {stage.loopback_reason or ''}"
         line = (
-            f"  [{stage.name:<14}] {stage.model_label:<32} "
+            f"  [{stage.name:<14}] iter={stage.iteration} {stage.model_label:<32} "
             f"steps={stage.step_count} tools={stage.tool_call_count} "
-            f"latency={stage.latency_ms}ms"
+            f"latency={stage.latency_ms}ms{loopback_tag}"
         )
         print(line, flush=True)
         print(f"     → {(stage.text or '').strip()[:240]}\n", flush=True)
         md_lines.append(
             f"| {stage.name.split('-')[0]} | {stage.name.split('-', 1)[1]} | "
-            f"`{stage.model_label}` | {stage.step_count} | {stage.tool_call_count} | "
-            f"{stage.latency_ms} ms | {preview} |"
+            f"{stage.iteration} | `{stage.model_label}` | {stage.step_count} | "
+            f"{stage.tool_call_count} | {stage.latency_ms} ms | "
+            f"{stage.triggered_loopback_to or ''} | {preview} |"
         )
 
-    print(f"Total swarm latency: {result.total_latency_ms}ms ({result.total_latency_ms/1000:.1f}s)", flush=True)
+    if result.loopbacks:
+        print(f"\nLoopbacks fired ({len(result.loopbacks)}/{3} budget):", flush=True)
+        for ev in result.loopbacks:
+            print(f"  • {ev.from_stage} → {ev.to_stage} (iter {ev.iteration_after}): {ev.reason}", flush=True)
+
+    print(f"\nTotal swarm latency: {result.total_latency_ms}ms ({result.total_latency_ms/1000:.1f}s)", flush=True)
     print(f"Final answer: {result.final_text}", flush=True)
 
     md_lines.append("")
     md_lines.append(f"**Total latency:** {result.total_latency_ms} ms ({result.total_latency_ms/1000:.1f}s)")
+    md_lines.append(f"**Loopbacks fired:** {len(result.loopbacks)} (budget: 3)")
     md_lines.append("")
     md_lines.append(f"**Final answer:** {result.final_text}")
 

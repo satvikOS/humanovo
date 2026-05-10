@@ -19,7 +19,21 @@ via the deployment-name parameter."""
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import Iterable, Literal
+
+
+@dataclass
+class DualEmbedding:
+    """Result of a dual-embedding call. Carries both vectors so the
+    caller can write to the matching pgvector columns
+    (`embedding_general_3072` + `embedding_general_1536` or whatever
+    the schema names are). Two vectors instead of one because the
+    discovery pipeline does hybrid retrieval — large-dim for accurate
+    top-k re-ranking, small-dim for cheap pre-filtering at scale."""
+    text: str
+    large: list[float]   # 3072 dims (text-embedding-3-large)
+    small: list[float]   # 1536 dims (text-embedding-3-small)
 
 
 def _ensure_v1_path(url: str) -> str:
@@ -116,3 +130,36 @@ class FoundryEmbedder:
         """Convenience: embed a single string."""
         vecs = await self.embed_texts([text], model=model)
         return vecs[0] if vecs else []
+
+    async def embed_dual(
+        self,
+        texts: Iterable[str],
+    ) -> list[DualEmbedding]:
+        """Embed each text against BOTH the large and small models in
+        parallel. Returns a `DualEmbedding` per input text carrying
+        both vectors.
+
+        Why dual? The discovery pipeline does hybrid retrieval — the
+        small model (1536d) is fast enough to pre-filter the full
+        corpus to a candidate set, then the large model (3072d) gives
+        an accurate re-ranking score over the shortlist. Cheaper +
+        more accurate than running large over the whole corpus.
+
+        The two SDK calls run concurrently via `asyncio.gather`, so
+        the wall-clock cost is one round-trip rather than two."""
+        text_list = [t for t in texts]
+        if not text_list:
+            return []
+        large_vecs, small_vecs = await asyncio.gather(
+            self.embed_texts(text_list, model="large"),
+            self.embed_texts(text_list, model="small"),
+        )
+        return [
+            DualEmbedding(text=t, large=large, small=small)
+            for t, large, small in zip(text_list, large_vecs, small_vecs)
+        ]
+
+    async def embed_dual_one(self, text: str) -> DualEmbedding:
+        """Convenience: dual-embed a single string."""
+        results = await self.embed_dual([text])
+        return results[0] if results else DualEmbedding(text=text, large=[], small=[])
