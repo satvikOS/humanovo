@@ -1168,6 +1168,42 @@ export default function DataVisualization() {
     a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href)
   }, [])
 
+  // Copy a ready-to-paste LaTeX figure environment to the clipboard.
+  // The `\includegraphics` line points to a filename derived from the
+  // chart title — the user is expected to drop the corresponding PDF
+  // (from the Export → PDF action) into their TeX project alongside
+  // the .tex file. Caption + label fields are pre-filled from the
+  // chart's metadata so a paper author just pastes and edits.
+  //
+  // We don't embed the image data inline (LaTeX has no equivalent of
+  // data: URIs for graphics) — this is a wrapper-only export. The
+  // user runs Export → PDF first, then this, and ends up with both
+  // the figure file and the snippet that references it.
+  const exportLatex = useCallback(async (chart: ChartConfig) => {
+    const slug = chart.title.replace(/\s+/g, '-').replace(/[^\w-]/g, '').toLowerCase()
+    const caption = chart.caption || `${chart.title}.`
+    const source = chart.source ? ` Source: ${chart.source}.` : ''
+    const tex = [
+      '\\begin{figure}[t]',
+      '  \\centering',
+      `  \\includegraphics[width=\\columnwidth]{${slug}.pdf}`,
+      `  \\caption{${caption}${source}}`,
+      `  \\label{fig:${slug}}`,
+      '\\end{figure}',
+      '',
+    ].join('\n')
+    try {
+      await navigator.clipboard.writeText(tex)
+      toast(
+        'success',
+        'LaTeX figure block copied. Paste into your .tex file; the matching PDF goes alongside as ' +
+          `${slug}.pdf (use Export → PDF first).`,
+      )
+    } catch {
+      toast('error', 'Clipboard write failed. Run Export → PDF and reconstruct the figure block manually.')
+    }
+  }, [])
+
   const exportXlsx = useCallback((chart: ChartConfig) => {
     const hasCat = chart.data.some(d => d.category)
     const hasV2 = chart.data.some(d => d.value2 !== undefined)
@@ -3122,6 +3158,9 @@ export default function DataVisualization() {
                         </button>
                         <button onClick={() => exportPdf(chart)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
                           <span>PDF</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">w/ caption</span>
+                        </button>
+                        <button onClick={() => exportLatex(chart)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
+                          <span>LaTeX figure</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">snippet</span>
                         </button>
                         <div className="border-t" style={{ borderColor: 'var(--color-border)' }} />
                         <button onClick={() => exportCsv(chart)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
