@@ -192,7 +192,7 @@ jobs:
             echo ""
             echo "| File | Size |"
             echo "|---|---|"
-            find dist/assets -type f \( -name '*.js' -o -name '*.css' \) | sort | while read f; do
+            find dist/assets -type f \( -name '*.js' -o -name '*.css' \) | sort | while IFS= read -r f; do
               size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null || echo 0)
               kb=$(echo "scale=1; $size / 1024" | bc)
               echo "| \`$(basename "$f")\` | ${kb} KB |"
