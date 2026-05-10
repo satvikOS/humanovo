@@ -57,6 +57,7 @@ class ProbeResult:
 
 PROBE_PROMPT = "Reply with one word: hello"
 PROBE_TIMEOUT_S = 30.0
+EMBED_PROBE_TEXT = "humanovo embedding smoke probe"
 
 
 async def _probe_bedrock(model_ids: list[str], label: str, region: str, key_id: str | None, secret: str | None) -> ProbeResult:
@@ -105,6 +106,85 @@ async def _probe_bedrock(model_ids: list[str], label: str, region: str, key_id: 
         except Exception as e:
             last_error = f"{model_id}: {str(e)[:150]}"
     return ProbeResult(label=label, configured=True, reachable=False, latency_ms=None, error=last_error or "no model id worked")
+
+
+async def _probe_azure_foundry_embedding(
+    deployment_candidates: list[str],
+    label: str,
+    openai_endpoint: str,
+    project_endpoint: str,
+    key: str,
+) -> ProbeResult:
+    """Probe an Azure Foundry embedding deployment.
+
+    Embeddings on the Foundry v1 surface use the same `/openai/v1`
+    base as Responses API, but with `client.embeddings.create(...)`:
+
+      client = AsyncOpenAI(base_url=<base>/openai/v1, api_key=<key>)
+      resp = await client.embeddings.create(
+          model=<deployment>,
+          input=[<text>],
+      )
+      vector = resp.data[0].embedding  # list[float], len = model dims
+
+    Reports the dim count + truncated label of which surface answered
+    so the operator can pin model + dims in the RAG layer config."""
+    if not key:
+        return ProbeResult(label=label, configured=False, reachable=False, latency_ms=None, error="AZURE_AI_KEY not set")
+    if not (openai_endpoint or project_endpoint):
+        return ProbeResult(label=label, configured=False, reachable=False, latency_ms=None, error="Neither OPENAI_ENDPOINT nor PROJECT_ENDPOINT set")
+    try:
+        from openai import AsyncOpenAI  # type: ignore
+    except ImportError:
+        return ProbeResult(label=label, configured=True, reachable=False, latency_ms=None, error="openai SDK not installed")
+
+    def _ensure_v1(url: str) -> str:
+        u = url.rstrip("/")
+        if u.endswith("/openai/v1"):
+            return u
+        if u.endswith("/openai"):
+            return f"{u}/v1"
+        return f"{u}/openai/v1"
+
+    last_error: str | None = None
+    v1_bases: list[str] = []
+    if project_endpoint:
+        v1_bases.append(_ensure_v1(project_endpoint))
+    if openai_endpoint:
+        candidate = _ensure_v1(openai_endpoint)
+        if candidate not in v1_bases:
+            v1_bases.append(candidate)
+
+    for base_v1 in v1_bases:
+        client = AsyncOpenAI(base_url=base_v1, api_key=key)
+        for deployment in deployment_candidates:
+            t0 = time.monotonic()
+            try:
+                resp = await asyncio.wait_for(
+                    client.embeddings.create(
+                        model=deployment,
+                        input=[EMBED_PROBE_TEXT],
+                    ),
+                    timeout=PROBE_TIMEOUT_S,
+                )
+                latency = int((time.monotonic() - t0) * 1000)
+                vector = resp.data[0].embedding if resp.data else []
+                dims = len(vector)
+                tag = "foundry-v1" if "services.ai.azure.com" in base_v1 else "openai-v1"
+                return ProbeResult(
+                    label=f"{label} [{deployment} via {tag}/embeddings]",
+                    configured=True, reachable=True, latency_ms=latency,
+                    error=None, response_preview=f"{dims}-dim vector",
+                )
+            except asyncio.TimeoutError:
+                last_error = f"timeout {deployment}"
+            except Exception as e:
+                last_error = f"{deployment}: {str(e)[:200]}"
+
+    return ProbeResult(
+        label=label, configured=True, reachable=False, latency_ms=None,
+        error=last_error or "no embedding deployment responded",
+    )
 
 
 async def _probe_azure_foundry_deployment(
@@ -201,40 +281,7 @@ async def _probe_azure_foundry_deployment(
             api_version_candidates.append(v)
             seen.add(v)
 
-    # Endpoint pattern 1: AsyncAzureOpenAI (resource-style,
-    # https://<resource>.openai.azure.com). Cycle api-versions here
-    # — same Azure Foundry projects refuse certain preview versions.
-    # The SDK appends `/openai/deployments/<deployment>/chat/...`
-    # itself, so strip any baked-in `/openai/v1` suffix the operator
-    # may have included on the secret.
-    openai_resource_host = _strip_openai_path(openai_endpoint) if openai_endpoint else ""
-    if openai_resource_host:
-        for av in api_version_candidates:
-            client_a = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_resource_host, api_version=av)
-            for deployment in deployment_candidates:
-                t0 = time.monotonic()
-                try:
-                    resp = await asyncio.wait_for(
-                        client_a.chat.completions.create(
-                            model=deployment,
-                            messages=[{"role": "user", "content": PROBE_PROMPT}],
-                            max_tokens=10,
-                        ),
-                        timeout=PROBE_TIMEOUT_S,
-                    )
-                    latency = int((time.monotonic() - t0) * 1000)
-                    text = (resp.choices[0].message.content or "").strip()[:80]
-                    return ProbeResult(
-                        label=f"{label} [{deployment} via openai-endpoint @ {av}]",
-                        configured=True, reachable=True, latency_ms=latency,
-                        error=None, response_preview=text,
-                    )
-                except asyncio.TimeoutError:
-                    openai_endpoint_err = f"timeout {deployment} @ {av}"
-                except Exception as e:
-                    openai_endpoint_err = f"{deployment} @ {av}: {str(e)[:200]}"
-
-    # Endpoint pattern 2a: Foundry "v1 surface" Responses API —
+    # Endpoint pattern 1: Foundry "v1 surface" Responses API —
     # `<endpoint>/openai/v1` and call `client.responses.create(...)`.
     # This is the NEW deployment shape Azure Foundry creates for
     # gpt-4o / o4-mini / o3 / etc — Target URI in the portal ends
@@ -350,10 +397,43 @@ async def _probe_azure_foundry_deployment(
                 except Exception as e:
                     foundry_models_err = f"{deployment} @ {av}: {str(e)[:200]}"
 
-    # All three paths failed. Surface the last error from each path
-    # so the operator sees whether (a) the openai-endpoint path is
-    # blocked by RBAC, (b) /openai/v1 doesn't exist on this hub, or
-    # (c) /models rejects the deployment — different fixes.
+    # Endpoint pattern 3: AsyncAzureOpenAI (legacy resource-style,
+    # https://<resource>.openai.azure.com with chat/completions). Last-
+    # resort fallback if the v1/Responses surface didn't work — some
+    # legacy deployments still live behind this path. The SDK appends
+    # `/openai/deployments/<deployment>/chat/...` itself, so strip any
+    # baked-in `/openai/v1` suffix on the secret URL.
+    openai_resource_host = _strip_openai_path(openai_endpoint) if openai_endpoint else ""
+    if openai_resource_host:
+        for av in api_version_candidates:
+            client_a = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_resource_host, api_version=av)
+            for deployment in deployment_candidates:
+                t0 = time.monotonic()
+                try:
+                    resp = await asyncio.wait_for(
+                        client_a.chat.completions.create(
+                            model=deployment,
+                            messages=[{"role": "user", "content": PROBE_PROMPT}],
+                            max_tokens=10,
+                        ),
+                        timeout=PROBE_TIMEOUT_S,
+                    )
+                    latency = int((time.monotonic() - t0) * 1000)
+                    text = (resp.choices[0].message.content or "").strip()[:80]
+                    return ProbeResult(
+                        label=f"{label} [{deployment} via openai-endpoint/chat @ {av}]",
+                        configured=True, reachable=True, latency_ms=latency,
+                        error=None, response_preview=text,
+                    )
+                except asyncio.TimeoutError:
+                    openai_endpoint_err = f"timeout {deployment} @ {av}"
+                except Exception as e:
+                    openai_endpoint_err = f"{deployment} @ {av}: {str(e)[:200]}"
+
+    # All paths failed. Surface the last error from each path so the
+    # operator sees whether (a) /openai/v1 doesn't have the deployment,
+    # (b) /models rejects it, or (c) the legacy chat-completions resource
+    # path is blocked — different fixes.
     parts = []
     if openai_endpoint_err: parts.append(f"openai-endpoint: {openai_endpoint_err}")
     if foundry_v1_err: parts.append(f"foundry-v1: {foundry_v1_err}")
@@ -410,6 +490,21 @@ STAGE_ASSIGNMENTS: list[dict[str, object]] = [
         # o4-mini is an o-series reasoning model; needs max_output_tokens
         # headroom for reasoning chain.
         "deployments": ["o4-mini"],
+    },
+    {
+        "label": "rag-embedding-large — text-embedding-3-large",
+        "provider": "azure-embedding",
+        # Operator-confirmed deployment. 3072 dims; primary RAG vectorizer
+        # for the pgvector index. Higher quality than 3-small at modestly
+        # higher cost — used for ingest + production retrieval.
+        "deployments": ["text-embedding-3-large"],
+    },
+    {
+        "label": "rag-embedding-small — text-embedding-3-small",
+        "provider": "azure-embedding",
+        # Operator-confirmed deployment. 1536 dims; cheaper companion for
+        # incremental sync paths and lightweight similarity probes.
+        "deployments": ["text-embedding-3-small"],
     },
 ]
 
@@ -554,15 +649,17 @@ async def main() -> int:
                 azure_openai_endpoint, azure_project_endpoint, azure_key, azure_api_version,
             )
             if discovered_deployments:
-                print(f"\nDiscovered Azure deployments ({len(discovered_deployments)}):")
-                for d in discovered_deployments:
+                # Don't inject discovered names ahead of the operator-
+                # confirmed STAGE_ASSIGNMENTS — `/openai/v1/models`
+                # returns the full Foundry model CATALOG (305+ items)
+                # not the project's actual deployments, so a `gpt-4o`
+                # entry from the catalog could shadow the o4-mini
+                # stage's pinned deployment and silently misroute.
+                # Use the discovery output for diagnostics only.
+                preview_count = min(10, len(discovered_deployments))
+                print(f"\nDiscovered Azure model catalog entries ({len(discovered_deployments)} total, showing first {preview_count}):")
+                for d in discovered_deployments[:preview_count]:
                     print(f"  - {d}")
-                # Inject the discovered names ahead of every Azure stage's
-                # candidate list so the script tries the real names FIRST.
-                for entry in STAGE_ASSIGNMENTS:
-                    if entry.get("provider") == "azure":
-                        existing = list(entry.get("deployments", []))  # type: ignore[arg-type]
-                        entry["deployments"] = discovered_deployments + [d for d in existing if d not in discovered_deployments]
         except Exception as e:
             print(f"Deployment discovery failed (non-fatal): {e}")
 
@@ -578,6 +675,12 @@ async def main() -> int:
             tasks.append(_probe_azure_foundry_deployment(
                 deployments, label, azure_openai_endpoint, azure_project_endpoint,
                 azure_key or "", azure_api_version,
+            ))
+        elif provider == "azure-embedding":
+            deployments = list(entry.get("deployments", []))  # type: ignore[arg-type]
+            tasks.append(_probe_azure_foundry_embedding(
+                deployments, label, azure_openai_endpoint, azure_project_endpoint,
+                azure_key or "",
             ))
 
     results = await asyncio.gather(*tasks)
