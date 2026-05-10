@@ -275,14 +275,35 @@ class AzureOpenAIEmbedder(BaseEmbedder):
             return
         try:
             from openai import AsyncAzureOpenAI
-            # Priority: dedicated embedding endpoint → shared cognitiveservices → legacy OpenAI → GPT-4o
+            # Priority order (highest → lowest):
+            #   1. AZURE_AI_FOUNDRY_OPENAI_ENDPOINT — the new unified
+            #      Foundry resource endpoint, verified working by
+            #      `ai_integration_smoke.py`. Strip any /openai/v1
+            #      suffix the secret may have included since
+            #      AsyncAzureOpenAI appends `/openai/deployments/...`
+            #      itself.
+            #   2. AZURE_EMBEDDING_ENDPOINT — legacy dedicated.
+            #   3. AZURE_OPENAI_ENDPOINT — legacy shared.
+            #   4. AZURE_GPT4O_ENDPOINT — fallback to a known-good
+            #      cognitiveservices URL on the same account.
+            foundry_openai = getattr(settings, "AZURE_AI_FOUNDRY_OPENAI_ENDPOINT", "")
+            if foundry_openai:
+                # AsyncAzureOpenAI wants the bare resource host —
+                # strip any baked-in /openai or /openai/v1 path.
+                stripped = foundry_openai.rstrip("/")
+                for suffix in ("/openai/v1", "/openai"):
+                    if stripped.endswith(suffix):
+                        stripped = stripped[: -len(suffix)]
+                foundry_openai = stripped
             endpoint = (
-                settings.AZURE_EMBEDDING_ENDPOINT
+                foundry_openai
+                or settings.AZURE_EMBEDDING_ENDPOINT
                 or settings.AZURE_OPENAI_ENDPOINT
                 or getattr(settings, 'AZURE_GPT4O_ENDPOINT', '')
             )
             api_key = (
-                settings.azure_embedding_key_value
+                getattr(settings, "azure_ai_foundry_key_value", None)
+                or settings.azure_embedding_key_value
                 or settings.azure_openai_api_key_value
                 or getattr(settings, 'azure_gpt4o_key_value', None)
             )
@@ -322,10 +343,19 @@ class AzureOpenAIEmbedder(BaseEmbedder):
         return [e.embedding for e in embeddings]
 
     def _get_deployment(self) -> str:
+        # Foundry pinned names take priority — these match the
+        # operator-confirmed deployments on humanovo-pipeline,
+        # verified by the AI integration smoke (3072d / 1536d).
         if self.config.model == EmbeddingModel.AZURE_EMBEDDING_LARGE:
-            return getattr(settings, 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE', 'text-embedding-3-large')
+            return (
+                getattr(settings, "AZURE_FOUNDRY_DEPLOYMENT_EMBED_LARGE", "")
+                or getattr(settings, "AZURE_OPENAI_EMBEDDING_DEPLOYMENT_LARGE", "text-embedding-3-large")
+            )
         if self.config.model == EmbeddingModel.AZURE_EMBEDDING_SMALL:
-            return getattr(settings, 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT_SMALL', 'text-embedding-3-small')
+            return (
+                getattr(settings, "AZURE_FOUNDRY_DEPLOYMENT_EMBED_SMALL", "")
+                or getattr(settings, "AZURE_OPENAI_EMBEDDING_DEPLOYMENT_SMALL", "text-embedding-3-small")
+            )
         return settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT
 
     @property
