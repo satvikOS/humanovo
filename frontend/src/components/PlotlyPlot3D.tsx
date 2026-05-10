@@ -6,7 +6,7 @@
  */
 import { useMemo } from 'react'
 import createPlotlyComponent from 'react-plotly.js/factory'
-import Plotly from 'plotly.js-dist-min'
+import Plotly from '../lib/plotlyMin'
 import type { Data, Layout } from 'plotly.js'
 import { plotlyConfig } from '../utils/plotlyConfig'
 

@@ -17,7 +17,7 @@
  * Exposed as a small utility so MonteCarloPanel, EquationPlotter,
  * Workstation, etc. share one implementation.
  */
-import Plotly from 'plotly.js-dist-min'
+import Plotly from '../lib/plotlyMin'
 import type { Layout, ToImgopts } from 'plotly.js'
 
 type PlotFormat = 'png' | 'svg'

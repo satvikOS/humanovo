@@ -13,7 +13,7 @@ import {
   ReferenceLine,
 } from 'recharts'
 import createPlotlyComponent from 'react-plotly.js/factory'
-import Plotly from 'plotly.js-dist-min'
+import Plotly from '../../lib/plotlyMin'
 import type { Data, Layout } from 'plotly.js'
 
 const PlotlyChart = createPlotlyComponent(Plotly)
