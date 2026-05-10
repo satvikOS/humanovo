@@ -209,17 +209,18 @@ class FoundryResponsesAgent:
 
             steps.append(AgentStep(text=step_text, tool_calls=tool_calls_logged))
 
-        # If we exited via max_steps without a final-answer turn,
-        # downstream stages would receive empty `text` and the swarm
-        # would degrade. Two recovery layers:
+        # If the final turn produced no text (either max_steps fired
+        # or an o-series reasoning model emitted only function_call /
+        # reasoning items and stopped without a `message` content
+        # block), downstream stages would receive empty input and the
+        # swarm would degrade. Two recovery layers, applied to ANY
+        # empty-text exit regardless of stopped_reason:
         #   1. Use the last non-empty step's text if any step spoke.
-        #   2. Otherwise (e.g. an o-series reasoning loop that only
-        #      made tool calls and never emitted a message),
-        #      synthesize a placeholder from the last successful
-        #      tool result so the next stage has SOMETHING to reason
-        #      about. stopped_reason still flags max_steps so the
-        #      audit trail captures the cap firing.
-        if not final_text and stopped == "max_steps":
+        #   2. Otherwise synthesize a placeholder from the last
+        #      successful tool result so the next stage has SOMETHING
+        #      to reason about. stopped_reason still records the
+        #      original exit cause for the audit trail.
+        if not final_text:
             for step in reversed(steps):
                 if step.text and step.text.strip():
                     final_text = step.text
@@ -229,9 +230,9 @@ class FoundryResponsesAgent:
                     for tc in reversed(step.tool_calls):
                         if tc.error is None and tc.result is not None:
                             final_text = (
-                                f"(reached step limit before producing a "
-                                f"narrative answer; last tool result from "
-                                f"{tc.name}: {json.dumps(tc.result, default=str)[:300]})"
+                                f"(stage exited without a narrative answer; "
+                                f"last tool result from {tc.name}: "
+                                f"{json.dumps(tc.result, default=str)[:300]})"
                             )
                             break
                     if final_text:

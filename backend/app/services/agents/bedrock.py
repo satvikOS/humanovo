@@ -170,14 +170,27 @@ class BedrockClaudeAgent:
             steps.append(AgentStep(text=step_text, tool_calls=tool_calls_logged))
             messages.append({"role": "user", "content": tool_result_blocks})
 
-        # max_steps recovery — see foundry.py for rationale. Downstream
-        # stages need *some* text from this stage even if it didn't
-        # produce a final answer in the allotted steps.
-        if not final_text and stopped == "max_steps":
+        # Empty-text recovery — see foundry.py for full rationale.
+        # Apply to ANY empty-text exit (not just max_steps) so a model
+        # that decided to stop without speaking still hands the next
+        # stage SOMETHING.
+        if not final_text:
             for step in reversed(steps):
                 if step.text and step.text.strip():
                     final_text = step.text
                     break
+            if not final_text:
+                for step in reversed(steps):
+                    for tc in reversed(step.tool_calls):
+                        if tc.error is None and tc.result is not None:
+                            final_text = (
+                                f"(stage exited without a narrative answer; "
+                                f"last tool result from {tc.name}: "
+                                f"{json.dumps(tc.result, default=str)[:300]})"
+                            )
+                            break
+                    if final_text:
+                        break
 
         latency_ms = int((time.monotonic() - t0) * 1000)
         return AgentResult(
