@@ -51,6 +51,7 @@ from app.services.agents.embeddings import (
 )
 from app.services.agents.foundry import FoundryResponsesAgent
 from app.services.agents.pricing import ModelPricing, TokenUsage, cost_cents, lookup_pricing
+from app.services.agents.audit_writer import write_swarm_audit
 from app.services.agents.sub_swarm import (
     DEFAULT_PERSONAS,
     SubAgentRun,
@@ -90,4 +91,5 @@ __all__ = [
     "TokenUsage",
     "cost_cents",
     "lookup_pricing",
+    "write_swarm_audit",
 ]
