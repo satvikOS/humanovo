@@ -1351,6 +1351,38 @@ export default function ResearchImaging() {
     setAiLoading(false)
   }
 
+  // Hit one of the three MONAI endpoints (segment / classify / register)
+  // scaffolded in backend/imaging.py. The backend returns 501 with an
+  // install hint until `pip install monai[all]` lands; we surface that
+  // verbatim so users with a self-hosted backend know exactly what to do.
+  // Contract from imaging.py: { study_id, model? , method?, fixed_study_id?, moving_study_id? }
+  const runMonaiOp = async (op: 'segment' | 'classify') => {
+    if (!selected) return
+    setAiLoading(true)
+    setAiAnalysis(null)
+    try {
+      const { data } = await apiClient.post(`/imaging/monai/${op}`, {
+        study_id: selected.id,
+      })
+      // Stub returns 501 with install hint; on a real MONAI backend the
+      // payload will carry segmentation_url / label / probability.
+      // Render whatever's there as JSON for now — surface upgrade
+      // (mask overlay on the canvas, classification label badge) lands
+      // when the backend grows beyond stubs.
+      setAiAnalysis(JSON.stringify(data, null, 2))
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string }; status?: number }; message?: string }
+      const detail = e?.response?.data?.detail
+      const status = e?.response?.status
+      if (status === 501) {
+        setAiAnalysis(`MONAI ${op} not yet wired on this backend.\n\n${detail || ''}`)
+      } else {
+        setAiAnalysis(`MONAI ${op} failed: ${detail || e?.message || 'Unknown error'}`)
+      }
+    }
+    setAiLoading(false)
+  }
+
   // `key` surfaces the single-key shortcut in the button title so users
   // discover it without hunting through a help dialog.
   const tools: { id: Tool; icon: typeof FiSquare; label: string; key: string }[] = [
@@ -2061,6 +2093,42 @@ export default function ResearchImaging() {
                       <FiCpu className="text-xs" />
                       {aiLoading ? 'Analyzing with Constant AI…' : 'Run AI Analysis'}
                     </button>
+                    {/* MONAI ops surface here — the backend endpoints are
+                        scaffolded (return 501 with install hint until the
+                        backend image grows `pip install monai[all]`); this
+                        UI lets users discover the integration today and
+                        gives the right error message when MONAI isn't
+                        wired yet. */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => runMonaiOp('segment')}
+                        disabled={aiLoading}
+                        className="px-2 py-1.5 rounded text-[10px] font-medium transition-all"
+                        style={{
+                          background: 'transparent',
+                          color: 'var(--color-text-secondary)',
+                          border: '1px solid var(--glass-border)',
+                          opacity: aiLoading ? 0.6 : 1,
+                        }}
+                        title="MONAI segmentation — requires backend with monai installed"
+                      >
+                        MONAI Segment
+                      </button>
+                      <button
+                        onClick={() => runMonaiOp('classify')}
+                        disabled={aiLoading}
+                        className="px-2 py-1.5 rounded text-[10px] font-medium transition-all"
+                        style={{
+                          background: 'transparent',
+                          color: 'var(--color-text-secondary)',
+                          border: '1px solid var(--glass-border)',
+                          opacity: aiLoading ? 0.6 : 1,
+                        }}
+                        title="MONAI classification — requires backend with monai installed"
+                      >
+                        MONAI Classify
+                      </button>
+                    </div>
                     {aiAnalysis && (
                       <div className="p-2.5 rounded text-[10px] leading-relaxed whitespace-pre-wrap" style={{ background: 'var(--color-bg)', border: '1px solid var(--glass-border)', color: 'var(--color-text-secondary)' }}>
                         {aiAnalysis}
