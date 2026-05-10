@@ -24,23 +24,22 @@ name: Build Native Apps (Win/Mac/Linux)
 # locally before the first CI build, OR commit pre-built icons.
 
 on:
-  # Auto-build on every push to humanovo. Each push produces a
+  # Auto-build on EVERY push to humanovo. Each push produces a
   # published GitHub Release tagged `auto-{shortSHA}` carrying the 3
   # platform installers PLUS a `latest.json` manifest the Tauri
   # updater plugin (configured in tauri.conf.json) reads to auto-
   # upgrade installed apps in the field.
   #
-  # Path filter: skip pushes that don't touch native-buildable code.
-  # Backend-only / docs-only changes don't ship a new desktop build.
+  # Per user direction (2026-05-10): no path filter. The desktop app
+  # bundles the backend agent layer + config, so backend-only changes
+  # (new agent capabilities, new model assignments, pricing updates,
+  # source registry edits) DO need a fresh installer to reach the
+  # field. Trade-off: a ~30 min build on every push is the cost of
+  # auto-update-on-every-change. Worth it when the alternative is
+  # users running stale code against shifting backends.
   push:
     branches:
       - humanovo
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/build-native-apps.yml'
-      - 'scripts/configure_tauri_updater.py'
-      - 'scripts/set_tauri_version.py'
-      - 'scripts/generate_placeholder_icon.py'
     tags:
       - 'v*'
   # Manual override — release a specific tag without waiting for a
