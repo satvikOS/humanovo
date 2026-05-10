@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     ai_cost_estimate,
     ai_health,
     ai_runs,
+    auth_recovery,
     metrics,
     auth,
     billing,
@@ -72,6 +73,7 @@ router = APIRouter()
 
 # Include endpoint routers
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
+router.include_router(auth_recovery.router, prefix="/auth", tags=["auth", "recovery"])
 router.include_router(projects.router, prefix="/projects", tags=["projects"])
 router.include_router(hypotheses.router, prefix="/hypotheses", tags=["hypotheses"])
 # Hypothesis trace + Merkle-anchored audit log replay (the /provenance
