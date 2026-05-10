@@ -133,31 +133,34 @@ async def _probe_azure_foundry_deployment(
             api_version_candidates.append(v)
             seen.add(v)
 
-    # Endpoint pattern 1: AsyncAzureOpenAI (resource-style)
+    # Endpoint pattern 1: AsyncAzureOpenAI (resource-style). Cycle
+    # api-versions here too — same Azure Foundry projects refuse
+    # certain preview versions on the openai-endpoint path.
     if openai_endpoint:
-        client_a = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_endpoint, api_version=api_version)
-        for deployment in deployment_candidates:
-            t0 = time.monotonic()
-            try:
-                resp = await asyncio.wait_for(
-                    client_a.chat.completions.create(
-                        model=deployment,
-                        messages=[{"role": "user", "content": PROBE_PROMPT}],
-                        max_tokens=10,
-                    ),
-                    timeout=PROBE_TIMEOUT_S,
-                )
-                latency = int((time.monotonic() - t0) * 1000)
-                text = (resp.choices[0].message.content or "").strip()[:80]
-                return ProbeResult(
-                    label=f"{label} [{deployment} via openai-endpoint]",
-                    configured=True, reachable=True, latency_ms=latency,
-                    error=None, response_preview=text,
-                )
-            except asyncio.TimeoutError:
-                last_error = f"timeout {deployment}"
-            except Exception as e:
-                last_error = f"{deployment}: {str(e)[:300]}"
+        for av in api_version_candidates:
+            client_a = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_endpoint, api_version=av)
+            for deployment in deployment_candidates:
+                t0 = time.monotonic()
+                try:
+                    resp = await asyncio.wait_for(
+                        client_a.chat.completions.create(
+                            model=deployment,
+                            messages=[{"role": "user", "content": PROBE_PROMPT}],
+                            max_tokens=10,
+                        ),
+                        timeout=PROBE_TIMEOUT_S,
+                    )
+                    latency = int((time.monotonic() - t0) * 1000)
+                    text = (resp.choices[0].message.content or "").strip()[:80]
+                    return ProbeResult(
+                        label=f"{label} [{deployment} via openai-endpoint @ {av}]",
+                        configured=True, reachable=True, latency_ms=latency,
+                        error=None, response_preview=text,
+                    )
+                except asyncio.TimeoutError:
+                    last_error = f"timeout {deployment} @ {av}"
+                except Exception as e:
+                    last_error = f"{deployment} (openai-endpoint @ {av}): {str(e)[:300]}"
 
     # Endpoint pattern 2: Foundry shared (AsyncOpenAI base_url).
     # Foundry-shared endpoints REQUIRE `?api-version=...` on every
@@ -336,6 +339,25 @@ async def main() -> int:
     azure_api_version = os.environ.get("AZURE_AI_FOUNDRY_API_VERSION", "2024-12-01-preview")
 
     azure_project_endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
+
+    # Surface the endpoint configuration up front — if one of these is
+    # empty the operator needs to know before they read the per-stage
+    # FAILs and assume both endpoint patterns were tried. Print only
+    # the host portion so logs don't leak the full URL into the
+    # GHA log buffer (it's already redacted as `***` since it came
+    # from a secret, but defence in depth).
+    def _host(u: str) -> str:
+        if not u: return "(unset)"
+        try:
+            return u.split("//", 1)[1].split("/", 1)[0]
+        except Exception:
+            return "(parse-fail)"
+    print(f"\nEndpoints in env:")
+    print(f"  AZURE_AI_OPENAI_ENDPOINT  = {_host(azure_openai_endpoint)}")
+    print(f"  AZURE_AI_PROJECT_ENDPOINT = {_host(azure_project_endpoint)}")
+    print(f"  AZURE_AI_KEY              = {'set' if azure_key else 'unset'}")
+    print(f"  AWS_REGION                = {aws_region}")
+    print(f"  AWS_NEW_ACCESS_KEY_ID     = {'set' if aws_key else 'unset'}")
 
     # Discover real deployment names so the report tells the operator
     # what's actually available, not just what the candidate list
