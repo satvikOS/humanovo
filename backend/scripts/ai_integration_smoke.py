@@ -44,7 +44,14 @@ PROBE_PROMPT = "Reply with one word: hello"
 PROBE_TIMEOUT_S = 30.0
 
 
-async def _probe_bedrock(model_id: str, label: str, region: str, key_id: str | None, secret: str | None) -> ProbeResult:
+async def _probe_bedrock(model_ids: list[str], label: str, region: str, key_id: str | None, secret: str | None) -> ProbeResult:
+    """Try each Bedrock model_id in order, return on first success.
+    Multiple IDs supported because Anthropic publishes Claude under
+    several aliases (cross-region inference profiles `us.` /
+    `eu.`, region-pinned `anthropic.`, latest-version pointers).
+    The script doesn't know which the user's account is provisioned
+    against, so it tries the most likely candidates and reports
+    which one worked."""
     if not (key_id and secret):
         return ProbeResult(label=label, configured=False, reachable=False, latency_ms=None, error="AWS credentials not set")
     try:
@@ -58,69 +65,171 @@ async def _probe_bedrock(model_id: str, label: str, region: str, key_id: str | N
         "messages": [{"role": "user", "content": PROBE_PROMPT}],
     }
     loop = asyncio.get_event_loop()
-    t0 = time.monotonic()
-    try:
-        resp = await asyncio.wait_for(
-            loop.run_in_executor(
-                None,
-                lambda: client.invoke_model(
-                    modelId=model_id,
-                    contentType="application/json",
-                    accept="application/json",
-                    body=json.dumps(body),
+    last_error: str | None = None
+    for model_id in model_ids:
+        t0 = time.monotonic()
+        try:
+            resp = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda mid=model_id: client.invoke_model(
+                        modelId=mid,
+                        contentType="application/json",
+                        accept="application/json",
+                        body=json.dumps(body),
+                    ),
                 ),
-            ),
-            timeout=PROBE_TIMEOUT_S,
-        )
-        latency = int((time.monotonic() - t0) * 1000)
-        payload = json.loads(resp["body"].read())
-        # Anthropic Bedrock response shape: {"content": [{"text": "..."}], ...}
-        text = (payload.get("content") or [{}])[0].get("text", "").strip()[:80]
-        return ProbeResult(label=label, configured=True, reachable=True, latency_ms=latency, error=None, response_preview=text)
-    except asyncio.TimeoutError:
-        return ProbeResult(label=label, configured=True, reachable=False, latency_ms=None, error=f"timeout >{PROBE_TIMEOUT_S}s")
-    except Exception as e:
-        return ProbeResult(label=label, configured=True, reachable=False, latency_ms=None, error=str(e)[:200])
+                timeout=PROBE_TIMEOUT_S,
+            )
+            latency = int((time.monotonic() - t0) * 1000)
+            payload = json.loads(resp["body"].read())
+            text = (payload.get("content") or [{}])[0].get("text", "").strip()[:80]
+            return ProbeResult(label=f"{label} [{model_id}]", configured=True, reachable=True, latency_ms=latency, error=None, response_preview=text)
+        except asyncio.TimeoutError:
+            last_error = f"timeout >{PROBE_TIMEOUT_S}s ({model_id})"
+        except Exception as e:
+            last_error = f"{model_id}: {str(e)[:150]}"
+    return ProbeResult(label=label, configured=True, reachable=False, latency_ms=None, error=last_error or "no model id worked")
 
 
-async def _probe_azure_foundry_deployment(deployment: str, label: str, openai_endpoint: str, key: str, api_version: str) -> ProbeResult:
-    if not (openai_endpoint and key):
-        return ProbeResult(label=label, configured=False, reachable=False, latency_ms=None, error="AZURE_AI_OPENAI_ENDPOINT or AZURE_AI_KEY not set")
+async def _probe_azure_foundry_deployment(
+    deployment_candidates: list[str],
+    label: str,
+    openai_endpoint: str,
+    project_endpoint: str,
+    key: str,
+    api_version: str,
+) -> ProbeResult:
+    """Probe a deployment against the Azure AI Foundry project. The
+    user's deployment names aren't known to the script, so we try
+    several common aliases (gpt-4o, gpt-4o-mini, gpt4o, etc.) and
+    we try BOTH endpoint patterns:
+      1. AsyncAzureOpenAI against AZURE_AI_OPENAI_ENDPOINT (the
+         resource-style "https://<resource>.openai.azure.com").
+      2. AsyncOpenAI against AZURE_AI_PROJECT_ENDPOINT/models (the
+         Foundry shared-project style).
+    First success wins. Reports back which deployment + which endpoint
+    pattern actually worked, so the operator can pin that in the
+    real backend config."""
+    if not key:
+        return ProbeResult(label=label, configured=False, reachable=False, latency_ms=None, error="AZURE_AI_KEY not set")
+    if not (openai_endpoint or project_endpoint):
+        return ProbeResult(label=label, configured=False, reachable=False, latency_ms=None, error="Neither OPENAI_ENDPOINT nor PROJECT_ENDPOINT set")
     try:
-        from openai import AsyncAzureOpenAI  # type: ignore
+        from openai import AsyncAzureOpenAI, AsyncOpenAI  # type: ignore
     except ImportError:
         return ProbeResult(label=label, configured=True, reachable=False, latency_ms=None, error="openai SDK not installed")
-    client = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_endpoint, api_version=api_version)
-    t0 = time.monotonic()
-    try:
-        resp = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=deployment,
-                messages=[{"role": "user", "content": PROBE_PROMPT}],
-                max_tokens=10,
-            ),
-            timeout=PROBE_TIMEOUT_S,
-        )
-        latency = int((time.monotonic() - t0) * 1000)
-        text = (resp.choices[0].message.content or "").strip()[:80]
-        return ProbeResult(label=label, configured=True, reachable=True, latency_ms=latency, error=None, response_preview=text)
-    except asyncio.TimeoutError:
-        return ProbeResult(label=label, configured=True, reachable=False, latency_ms=None, error=f"timeout >{PROBE_TIMEOUT_S}s")
-    except Exception as e:
-        return ProbeResult(label=label, configured=True, reachable=False, latency_ms=None, error=str(e)[:200])
+
+    last_error: str | None = None
+
+    # Endpoint pattern 1: AsyncAzureOpenAI (resource-style)
+    if openai_endpoint:
+        client_a = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_endpoint, api_version=api_version)
+        for deployment in deployment_candidates:
+            t0 = time.monotonic()
+            try:
+                resp = await asyncio.wait_for(
+                    client_a.chat.completions.create(
+                        model=deployment,
+                        messages=[{"role": "user", "content": PROBE_PROMPT}],
+                        max_tokens=10,
+                    ),
+                    timeout=PROBE_TIMEOUT_S,
+                )
+                latency = int((time.monotonic() - t0) * 1000)
+                text = (resp.choices[0].message.content or "").strip()[:80]
+                return ProbeResult(
+                    label=f"{label} [{deployment} via openai-endpoint]",
+                    configured=True, reachable=True, latency_ms=latency,
+                    error=None, response_preview=text,
+                )
+            except asyncio.TimeoutError:
+                last_error = f"timeout {deployment}"
+            except Exception as e:
+                last_error = f"{deployment}: {str(e)[:120]}"
+
+    # Endpoint pattern 2: Foundry shared (AsyncOpenAI base_url)
+    if project_endpoint:
+        base_url = project_endpoint.rstrip("/")
+        if "services.ai.azure.com" in base_url and not base_url.endswith("/models"):
+            base_url = f"{base_url}/models"
+        client_b = AsyncOpenAI(base_url=base_url, api_key=key)
+        for deployment in deployment_candidates:
+            t0 = time.monotonic()
+            try:
+                resp = await asyncio.wait_for(
+                    client_b.chat.completions.create(
+                        model=deployment,
+                        messages=[{"role": "user", "content": PROBE_PROMPT}],
+                        max_tokens=10,
+                    ),
+                    timeout=PROBE_TIMEOUT_S,
+                )
+                latency = int((time.monotonic() - t0) * 1000)
+                text = (resp.choices[0].message.content or "").strip()[:80]
+                return ProbeResult(
+                    label=f"{label} [{deployment} via foundry-shared]",
+                    configured=True, reachable=True, latency_ms=latency,
+                    error=None, response_preview=text,
+                )
+            except asyncio.TimeoutError:
+                last_error = f"timeout {deployment} (foundry)"
+            except Exception as e:
+                last_error = f"{deployment} (foundry): {str(e)[:120]}"
+
+    return ProbeResult(
+        label=label, configured=True, reachable=False, latency_ms=None,
+        error=last_error or "no deployment candidate worked on either endpoint pattern",
+    )
 
 
 # Stage → model assignment, mirrored from the comments in
-# discovery_orchestrator.py. This is the contract the CI test
-# verifies: each pipeline stage has at least one reachable model.
-STAGE_ASSIGNMENTS: list[tuple[str, str, str, str]] = [
-    # (stage_label, provider, model_or_deployment, model_id_for_bedrock_or_dummy)
-    ("explorer (Stage 1)",      "bedrock", "claude-opus-4-6", "us.anthropic.claude-opus-4-6-v1:0"),
-    ("expand-validate (Stage 2-4)", "bedrock", "claude-sonnet-4", "us.anthropic.claude-sonnet-4-20250514-v1:0"),
-    ("critic (Stage 3)",        "azure",   "gpt-4o", ""),
-    ("reasoner (Stage 5)",      "azure",   "o3-mini", ""),
-    ("synthesizer (Stage 6)",   "azure",   "gpt-4o", ""),
-    ("rag-literature (Stage 0)", "azure",  "cohere-command-a", ""),
+# discovery_orchestrator.py. Each entry carries multiple candidate
+# model IDs / deployment names because Anthropic publishes Claude
+# under several Bedrock aliases (cross-region inference profiles
+# with `us.` / `eu.` prefixes, region-pinned `anthropic.` ids,
+# version-pinned suffixes) and Azure deployments are named freely
+# by whoever provisioned them. The script doesn't know which form
+# the user's account uses, so it tries each in order until one
+# answers — the report then shows which alias actually worked so
+# the operator can pin that in the real backend config.
+STAGE_ASSIGNMENTS: list[dict[str, object]] = [
+    {
+        "label": "explorer (Stage 1) — Claude Opus",
+        "provider": "bedrock",
+        "model_ids": [
+            "us.anthropic.claude-opus-4-6-v1:0",
+            "anthropic.claude-opus-4-6-v1:0",
+            "us.anthropic.claude-opus-4-1-20250805-v1:0",
+            "anthropic.claude-opus-4-1-20250805-v1:0",
+            "us.anthropic.claude-opus-4-20250514-v1:0",
+            "anthropic.claude-opus-4-20250514-v1:0",
+        ],
+    },
+    {
+        "label": "expand-validate (Stage 2-4) — Claude Sonnet",
+        "provider": "bedrock",
+        "model_ids": [
+            "us.anthropic.claude-sonnet-4-20250514-v1:0",
+            "anthropic.claude-sonnet-4-20250514-v1:0",
+            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        ],
+    },
+    {
+        "label": "critic / synthesizer — GPT-4o",
+        "provider": "azure",
+        "deployments": ["gpt-4o", "gpt4o", "gpt-4o-2024-11-20", "gpt-4o-mini"],
+    },
+    {
+        "label": "reasoner — o3-mini / o3",
+        "provider": "azure",
+        "deployments": ["o3-mini", "o3", "o3-2024-12-17", "o1-mini"],
+    },
+    {
+        "label": "rag-literature — Cohere",
+        "provider": "azure",
+        "deployments": ["cohere-command-a", "Cohere-command-a-08-2024", "command-a"],
+    },
 ]
 
 
@@ -156,12 +265,21 @@ async def main() -> int:
     azure_openai_endpoint = os.environ.get("AZURE_AI_OPENAI_ENDPOINT", "")
     azure_api_version = os.environ.get("AZURE_AI_FOUNDRY_API_VERSION", "2024-12-01-preview")
 
+    azure_project_endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
+
     tasks = []
-    for label, provider, deployment, model_id in STAGE_ASSIGNMENTS:
+    for entry in STAGE_ASSIGNMENTS:
+        label = str(entry["label"])
+        provider = str(entry["provider"])
         if provider == "bedrock":
-            tasks.append(_probe_bedrock(model_id, label, aws_region, aws_key, aws_secret))
+            model_ids = list(entry.get("model_ids", []))  # type: ignore[arg-type]
+            tasks.append(_probe_bedrock(model_ids, label, aws_region, aws_key, aws_secret))
         elif provider == "azure":
-            tasks.append(_probe_azure_foundry_deployment(deployment, label, azure_openai_endpoint, azure_key or "", azure_api_version))
+            deployments = list(entry.get("deployments", []))  # type: ignore[arg-type]
+            tasks.append(_probe_azure_foundry_deployment(
+                deployments, label, azure_openai_endpoint, azure_project_endpoint,
+                azure_key or "", azure_api_version,
+            ))
 
     results = await asyncio.gather(*tasks)
 
