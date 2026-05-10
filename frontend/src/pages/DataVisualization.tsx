@@ -1747,13 +1747,19 @@ export default function DataVisualization() {
                 {/* CI band — shaded high - low envelope rendered behind the main line. */}
                 <Area type={o.smooth ? 'monotone' : 'linear'} dataKey="ciHigh" stroke="none" fill={colors[0]} fillOpacity={0.15} name={`+${Math.round(o.ciLevel * 100)}% CI`} />
                 <Area type={o.smooth ? 'monotone' : 'linear'} dataKey="ciLow" stroke="none" fill={theme.bg === 'transparent' ? 'var(--color-bg)' : theme.bg} fillOpacity={1} legendType="none" />
-                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={animDur} hide={hidden.has('value')} />
+                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={animDur} hide={hidden.has('value')}>
+                  {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
+                  {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
+                </Line>
                 {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
               </ComposedChart>
             ) : (
               <LineChart data={finalData} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
-                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={animDur} hide={hidden.has('value')} />
+                <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={animDur} hide={hidden.has('value')}>
+                  {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
+                  {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
+                </Line>
                 {hasTrend && <Line type="monotone" dataKey="trend" name={o.trendLine === 'linear' ? 'Linear Trend' : 'Moving Avg'} stroke="#C4956A" strokeWidth={2} strokeDasharray="6 3" dot={false} />}
               </LineChart>
             )}
@@ -1950,11 +1956,13 @@ export default function DataVisualization() {
           <ResponsiveContainer width="100%" height={height}>
             <ScatterChart margin={chartMargin}>
               {gridEl}
-              <XAxis dataKey="value" name={o.xLabel || 'X'} tick={AXIS_TICK} type="number" />
-              <YAxis dataKey="value2" name={o.yLabel || 'Y'} tick={AXIS_TICK} type="number" />
+              <XAxis dataKey="value" name={o.xLabel || 'X'} tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" />
+              <YAxis dataKey="value2" name={o.yLabel || 'Y'} tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" />
               {tooltipEl}
               <Scatter data={data.map(d => ({ ...d, value2: d.value2 ?? d.value }))} fill={colors[0]}>
                 {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+                {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
+                {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
               </Scatter>
             </ScatterChart>
           </ResponsiveContainer>
@@ -1965,12 +1973,14 @@ export default function DataVisualization() {
           <ResponsiveContainer width="100%" height={height}>
             <ScatterChart margin={chartMargin}>
               {gridEl}
-              <XAxis dataKey="value" name="X" tick={AXIS_TICK} type="number" />
-              <YAxis dataKey="value2" name="Y" tick={AXIS_TICK} type="number" />
+              <XAxis dataKey="value" name="X" tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" />
+              <YAxis dataKey="value2" name="Y" tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" />
               <ZAxis dataKey="size" range={[40, 400]} name="Size" />
               {tooltipEl}
               <Scatter data={data.map(d => ({ ...d, value2: d.value2 ?? d.value, size: d.size ?? d.value }))} fill={colors[0]}>
                 {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} opacity={0.7} />)}
+                {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
+                {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
               </Scatter>
             </ScatterChart>
           </ResponsiveContainer>
