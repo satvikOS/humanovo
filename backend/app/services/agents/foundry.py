@@ -211,15 +211,31 @@ class FoundryResponsesAgent:
 
         # If we exited via max_steps without a final-answer turn,
         # downstream stages would receive empty `text` and the swarm
-        # would degrade. Recover the last non-empty step text so the
-        # next agent has *something* to reason about — better partial
-        # context than no context. The stopped_reason still flags
-        # max_steps for the audit trail.
+        # would degrade. Two recovery layers:
+        #   1. Use the last non-empty step's text if any step spoke.
+        #   2. Otherwise (e.g. an o-series reasoning loop that only
+        #      made tool calls and never emitted a message),
+        #      synthesize a placeholder from the last successful
+        #      tool result so the next stage has SOMETHING to reason
+        #      about. stopped_reason still flags max_steps so the
+        #      audit trail captures the cap firing.
         if not final_text and stopped == "max_steps":
             for step in reversed(steps):
                 if step.text and step.text.strip():
                     final_text = step.text
                     break
+            if not final_text:
+                for step in reversed(steps):
+                    for tc in reversed(step.tool_calls):
+                        if tc.error is None and tc.result is not None:
+                            final_text = (
+                                f"(reached step limit before producing a "
+                                f"narrative answer; last tool result from "
+                                f"{tc.name}: {json.dumps(tc.result, default=str)[:300]})"
+                            )
+                            break
+                    if final_text:
+                        break
 
         latency_ms = int((time.monotonic() - t0) * 1000)
         return AgentResult(
