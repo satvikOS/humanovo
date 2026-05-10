@@ -36,6 +36,15 @@ class DualEmbedding:
     small: list[float]   # 1536 dims (text-embedding-3-small)
 
 
+@dataclass
+class EmbeddingUsage:
+    """Token + cost report from an embedding call. Aggregated across
+    however many strings were embedded in one batch."""
+    deployment: str
+    prompt_tokens: int
+    cost_cents: float
+
+
 def _ensure_v1_path(url: str) -> str:
     u = url.rstrip("/")
     if u.endswith("/openai/v1"):
@@ -97,17 +106,35 @@ class FoundryEmbedder:
         """Embed a batch of strings, returning a list of float vectors
         in the same order. Raises if any vector's dimension doesn't
         match the expected value for the deployment — protects the
-        downstream pgvector index from silent corruption."""
+        downstream pgvector index from silent corruption.
+
+        Convenience wrapper around `embed_texts_with_usage` that
+        discards the usage report for callers that don't need it."""
+        vectors, _ = await self.embed_texts_with_usage(texts, model=model)
+        return vectors
+
+    async def embed_texts_with_usage(
+        self,
+        texts: Iterable[str],
+        *,
+        model: Literal["large", "small"] = "large",
+    ) -> tuple[list[list[float]], EmbeddingUsage]:
+        """Embed a batch + return (vectors, usage). Usage carries
+        `prompt_tokens` (input billed tokens) and computed `cost_cents`
+        from the pricing table. Used by the cost-tracking layer in
+        the swarm + production code that records embedding spend."""
         try:
             from openai import AsyncOpenAI  # type: ignore
         except ImportError as e:
             raise RuntimeError("openai SDK not installed") from e
 
+        from app.services.agents.pricing import TokenUsage, cost_cents
+
         deployment = self._deployment_for(model)
         client = AsyncOpenAI(base_url=self.base_url, api_key=self._api_key)
         text_list = [t for t in texts]
         if not text_list:
-            return []
+            return [], EmbeddingUsage(deployment=deployment, prompt_tokens=0, cost_cents=0.0)
         resp = await client.embeddings.create(model=deployment, input=text_list)
 
         expected = EXPECTED_DIMS.get(deployment)
@@ -119,7 +146,20 @@ class FoundryEmbedder:
                     f"Embedding dim mismatch for {deployment}: got {len(vec)}, expected {expected}"
                 )
             vectors.append(vec)
-        return vectors
+
+        # Embedding usage shape: resp.usage.prompt_tokens + total_tokens.
+        # Output tokens are 0 (embeddings have no generated output).
+        usage_obj = getattr(resp, "usage", None)
+        prompt_tokens = int(getattr(usage_obj, "prompt_tokens", 0) or 0) if usage_obj else 0
+        cost = cost_cents(
+            deployment,
+            TokenUsage(input_tokens=prompt_tokens, output_tokens=0),
+        )
+        return vectors, EmbeddingUsage(
+            deployment=deployment,
+            prompt_tokens=prompt_tokens,
+            cost_cents=cost,
+        )
 
     async def embed_one(
         self,

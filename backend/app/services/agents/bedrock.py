@@ -16,6 +16,7 @@ from app.services.agents._types import (
     Tool,
     ToolCall,
 )
+from app.services.agents.pricing import TokenUsage, cost_cents
 
 
 class BedrockClaudeAgent:
@@ -81,6 +82,11 @@ class BedrockClaudeAgent:
         t0 = time.monotonic()
         stopped = "max_steps"
         final_text = ""
+        # Aggregate usage across every invoke_model round trip in the
+        # loop. Bedrock returns `usage.input_tokens` + `usage.output_tokens`
+        # in every payload — sum them so the AgentResult has the run-
+        # wide total for cost computation.
+        usage_total = TokenUsage()
 
         for _ in range(max_steps):
             body: dict[str, Any] = {
@@ -103,6 +109,17 @@ class BedrockClaudeAgent:
             )
             payload = json.loads(resp["body"].read())
             content = payload.get("content") or []
+
+            # Bedrock Anthropic usage shape:
+            #   {"usage": {"input_tokens": N, "output_tokens": M,
+            #              "cache_creation_input_tokens": ...,
+            #              "cache_read_input_tokens": ...}}
+            usage_block = payload.get("usage") or {}
+            usage_total = usage_total.add(TokenUsage(
+                input_tokens=int(usage_block.get("input_tokens", 0)),
+                output_tokens=int(usage_block.get("output_tokens", 0)),
+                cached_tokens=int(usage_block.get("cache_read_input_tokens", 0)),
+            ))
 
             step_text_parts: list[str] = []
             tool_uses: list[dict[str, Any]] = []
@@ -199,4 +216,6 @@ class BedrockClaudeAgent:
             stopped_reason=stopped,
             model_label=self.label,
             latency_ms=latency_ms,
+            usage=usage_total,
+            cost_cents=cost_cents(self.label, usage_total),
         )

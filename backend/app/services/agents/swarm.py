@@ -43,6 +43,7 @@ from app.services.agents._types import (
     GroundedAgent,
     Tool,
 )
+from app.services.agents.pricing import TokenUsage
 
 
 @dataclass
@@ -71,6 +72,13 @@ class SwarmStageResult:
     latency_ms: int
     step_count: int
     tool_call_count: int
+    usage: TokenUsage = field(default_factory=TokenUsage)
+    """Token usage for this stage's run (input, output, reasoning,
+    cached). Aggregated across every loop iteration the agent did
+    inside its own .run()."""
+    cost_cents: float = 0.0
+    """Stage cost in cents, computed from `usage` against the model's
+    pricing entry."""
     triggered_loopback_to: str | None = None
     loopback_reason: str | None = None
     iteration: int = 1
@@ -97,6 +105,14 @@ class SwarmResult:
     """Every loopback transition that fired during this run."""
     full_traces: list[AgentResult] = field(default_factory=list)
     """Full per-agent traces (each AgentResult contains the step list)."""
+    total_usage: TokenUsage = field(default_factory=TokenUsage)
+    """Sum of every stage's usage, across all iterations including
+    loopback re-runs. The financial truth for this pipeline run."""
+    total_cost_cents: float = 0.0
+    """Sum of every stage's cost_cents."""
+    cost_by_model: dict[str, float] = field(default_factory=dict)
+    """Per-model cost roll-up (e.g. "bedrock/claude-opus-4-1" → 45.2¢)
+    so the operator can see which model is the spend center."""
 
 
 class Swarm:
@@ -223,6 +239,8 @@ class Swarm:
                         latency_ms=result.latency_ms,
                         step_count=len(result.steps),
                         tool_call_count=sum(len(s.tool_calls) for s in result.steps),
+                        usage=result.usage,
+                        cost_cents=result.cost_cents,
                         triggered_loopback_to=triggered_target,
                         loopback_reason=triggered_reason,
                         iteration=iteration_by_index[i],
@@ -243,6 +261,8 @@ class Swarm:
                 latency_ms=result.latency_ms,
                 step_count=len(result.steps),
                 tool_call_count=sum(len(s.tool_calls) for s in result.steps),
+                usage=result.usage,
+                cost_cents=result.cost_cents,
                 triggered_loopback_to=None,
                 loopback_reason=None,
                 iteration=iteration_by_index[i],
@@ -265,12 +285,28 @@ class Swarm:
             final_text = summaries[-1].text
 
         total_latency_ms = int((time.monotonic() - t0) * 1000)
+
+        # Aggregate financials. Sum every stage's usage + cost INCLUDING
+        # re-runs (loopback iterations are real spend, not free retries),
+        # and roll up by model so the operator can see which model is
+        # the spend center.
+        total_usage = TokenUsage()
+        total_cost = 0.0
+        cost_by_model: dict[str, float] = {}
+        for s in summaries:
+            total_usage = total_usage.add(s.usage)
+            total_cost += s.cost_cents
+            cost_by_model[s.model_label] = cost_by_model.get(s.model_label, 0.0) + s.cost_cents
+
         return SwarmResult(
             stages=summaries,
             final_text=final_text,
             total_latency_ms=total_latency_ms,
             loopbacks=loopbacks,
             full_traces=traces,
+            total_usage=total_usage,
+            total_cost_cents=total_cost,
+            cost_by_model=cost_by_model,
         )
 
     def _resolve_stage(self, target: str) -> int | None:

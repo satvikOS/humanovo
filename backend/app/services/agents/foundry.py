@@ -31,6 +31,7 @@ from app.services.agents._types import (
     Tool,
     ToolCall,
 )
+from app.services.agents.pricing import TokenUsage, cost_cents
 
 
 def _ensure_v1_path(url: str) -> str:
@@ -113,6 +114,12 @@ class FoundryResponsesAgent:
         t0 = time.monotonic()
         stopped = "max_steps"
         final_text = ""
+        # Aggregate usage across every Responses-API round trip in
+        # the loop. Foundry returns `response.usage` with
+        # `input_tokens`, `output_tokens`, and (for o-series)
+        # `output_tokens_details.reasoning_tokens` — which are billed
+        # as output but tracked separately for diagnostics.
+        usage_total = TokenUsage()
 
         for _ in range(max_steps):
             kwargs: dict[str, Any] = {
@@ -125,6 +132,31 @@ class FoundryResponsesAgent:
                 kwargs["tools"] = tool_specs
 
             resp = await client.responses.create(**kwargs)
+
+            # Capture usage. Foundry Responses-API exposes:
+            #   resp.usage.input_tokens (often via .input_tokens or
+            #   .input_tokens_details.cached_tokens for cached input)
+            #   resp.usage.output_tokens
+            #   resp.usage.output_tokens_details.reasoning_tokens
+            #     (o4-mini / o3-mini / o3 — the chain-of-thought tokens
+            #     billed at output rate but useful to track separately)
+            usage_obj = getattr(resp, "usage", None)
+            if usage_obj is not None:
+                in_tok = int(getattr(usage_obj, "input_tokens", 0) or 0)
+                out_tok = int(getattr(usage_obj, "output_tokens", 0) or 0)
+                in_details = getattr(usage_obj, "input_tokens_details", None)
+                out_details = getattr(usage_obj, "output_tokens_details", None)
+                cached = int(getattr(in_details, "cached_tokens", 0) or 0) if in_details else 0
+                reasoning = int(getattr(out_details, "reasoning_tokens", 0) or 0) if out_details else 0
+                # output_tokens already INCLUDES reasoning_tokens in the
+                # Foundry shape — subtract so we don't double-count.
+                visible_out = max(0, out_tok - reasoning)
+                usage_total = usage_total.add(TokenUsage(
+                    input_tokens=in_tok,
+                    output_tokens=visible_out,
+                    reasoning_tokens=reasoning,
+                    cached_tokens=cached,
+                ))
 
             # Extract text + function calls from the response.output
             # item array. Each item has a `type`; we care about
@@ -245,4 +277,6 @@ class FoundryResponsesAgent:
             stopped_reason=stopped,
             model_label=self.label,
             latency_ms=latency_ms,
+            usage=usage_total,
+            cost_cents=cost_cents(self.label, usage_total),
         )

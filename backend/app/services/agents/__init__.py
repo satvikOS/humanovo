@@ -44,8 +44,13 @@ from app.services.agents._types import (
     ToolCall,
 )
 from app.services.agents.bedrock import BedrockClaudeAgent
-from app.services.agents.embeddings import DualEmbedding, FoundryEmbedder
+from app.services.agents.embeddings import (
+    DualEmbedding,
+    EmbeddingUsage,
+    FoundryEmbedder,
+)
 from app.services.agents.foundry import FoundryResponsesAgent
+from app.services.agents.pricing import ModelPricing, TokenUsage, cost_cents, lookup_pricing
 from app.services.agents.swarm import (
     LoopbackEvent,
     Swarm,
@@ -60,14 +65,19 @@ __all__ = [
     "BedrockClaudeAgent",
     "DEFAULT_GROUNDING_PROMPT",
     "DualEmbedding",
+    "EmbeddingUsage",
     "FoundryEmbedder",
     "FoundryResponsesAgent",
     "GroundedAgent",
     "LoopbackEvent",
+    "ModelPricing",
     "Swarm",
     "SwarmResult",
     "SwarmStage",
     "SwarmStageResult",
     "Tool",
     "ToolCall",
+    "TokenUsage",
+    "cost_cents",
+    "lookup_pricing",
 ]

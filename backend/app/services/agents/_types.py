@@ -7,6 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
 
+from app.services.agents.pricing import TokenUsage
+
 
 # Default system prompt every grounded agent receives unless the caller
 # overrides. Encodes the project rule: model output must be sourced
@@ -72,6 +74,16 @@ class AgentResult:
     stopped_reason: str
     model_label: str
     latency_ms: int
+    usage: TokenUsage = field(default_factory=TokenUsage)
+    """Aggregate token usage across every round-trip in the run loop.
+    Bedrock + Foundry both return `usage` blocks per call; the agent
+    sums them across iterations so cost computation has the full
+    picture for the whole run, not just the final turn."""
+    cost_cents: float = 0.0
+    """USD cost in cents for this run, computed from `usage` and the
+    pricing table in `pricing.py`. 0 if no pricing entry exists for
+    the model — surfaced as a diagnostic in production logs but
+    doesn't fail the run."""
 
 
 class GroundedAgent(Protocol):

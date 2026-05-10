@@ -102,16 +102,32 @@ async def _pick_bedrock_alias(
     return candidates[0]
 
 
+# ─── CI-ONLY SYNTHETIC TOOL ────────────────────────────────────────────
+# The lookup function below is a CI placeholder for verifying that the
+# 12-stage swarm + grounded-agent layer + critic loopback all wire up
+# correctly end-to-end. It returns a single canned fact and a fake
+# source ID so the swarm assertions can prove grounding carried
+# through every hop.
+#
+# IT IS NOT A PRODUCTION TOOL. Per memory `feedback_only_real_sources`,
+# every production agent tool must retrieve from the 62 active
+# biomedical sources (PubMed, ClinicalTrials.gov, openFDA, UniProt,
+# Reactome, KEGG, Ensembl, HMDB, Elsevier/Scopus, Springer Nature,
+# ChEBI, HCA, Cell Ontology, FMA, NCBI Gene, ClinVar, Semantic Scholar,
+# OpenAlex, ChEMBL, DrugBank, DisGeNET, STRING, PDB, AlphaFold,
+# WikiPathways, …). Production tools live in
+# `app/services/grounding_service.py` + `app/services/data_sources.py`
+# and return source-record dicts with verifiable identifiers (PMID,
+# NCT ID, DOI, UniProt accession, etc.). Discovery orchestrator
+# migration (task #74) will swap this synthetic for the real set.
 async def _lookup_biomedical_fact(args: dict) -> dict:
-    """Synthetic tool returning a canned PARP1/BRCA1 fact whenever the
-    query touches BRCA, PARP, ovarian cancer, or synthetic lethality.
-    The pipeline's final answer must reflect the citation, proving
-    grounding carried through every hop."""
+    """CI-only canned PARP1/BRCA1 lookup. Production replaces this with
+    `grounding_service.lookup` against the 62-source registry."""
     query = (args.get("query") or "").lower()
     if any(k in query for k in ("synthetic lethal", "ovarian", "brca", "parp")):
         return {
             "fact": "PARP1 inhibition is synthetic-lethal with BRCA1-deficient cancer cells",
-            "source": "synthetic-lethal-tool/2026-05",
+            "source": "ci-placeholder://synthetic-lethal-tool/2026-05",
             "evidence_strength": "high",
         }
     return {"fact": None, "source": None, "evidence_strength": "no-match"}
@@ -408,6 +424,26 @@ async def main() -> int:
         print("[FAIL] dual-embedding dim mismatch", flush=True)
         return 1
 
+    # Capture embedding cost so the financial report includes the
+    # vectorizer spend, not just the LLM stage spend. We re-run the
+    # embed with usage capture (cheap — the previous embed_dual_one
+    # used the no-usage shortcut for the dim check).
+    _, large_usage = await embedder.embed_texts_with_usage(
+        ["PARP1 inhibition synthetic lethality with BRCA1-deficient cancer cells"],
+        model="large",
+    )
+    _, small_usage = await embedder.embed_texts_with_usage(
+        ["PARP1 inhibition synthetic lethality with BRCA1-deficient cancer cells"],
+        model="small",
+    )
+    embed_cost_cents = large_usage.cost_cents + small_usage.cost_cents
+    embed_tokens = large_usage.prompt_tokens + small_usage.prompt_tokens
+    print(
+        f"[dual-embed]   tokens={embed_tokens} (large={large_usage.prompt_tokens} "
+        f"+ small={small_usage.prompt_tokens})  cost=¢{embed_cost_cents:.4f}",
+        flush=True,
+    )
+
     print("\n=== 12-stage discovery swarm smoke ===", flush=True)
     print(f"Query: {initial_query}", flush=True)
     print(f"Stages: {len(PIPELINE_SPEC)} (critic stages: {sum(1 for s in PIPELINE_SPEC if s.is_critic)})\n", flush=True)
@@ -424,8 +460,8 @@ async def main() -> int:
         return 1
 
     md_lines = ["## 12-stage discovery swarm", "",
-                "| # | Stage | Iter | Model | Steps | Tool calls | Latency | Loopback | Output (preview) |",
-                "|---|---|---|---|---|---|---|---|---|"]
+                "| # | Stage | Iter | Model | Steps | Tools | Latency | In tok | Out tok | Reason tok | Cost (¢) | Loopback | Output (preview) |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
 
     for stage in result.stages:
         preview = (stage.text or "").replace("\n", " ").replace("|", "\\|")[:160]
@@ -435,7 +471,10 @@ async def main() -> int:
         line = (
             f"  [{stage.name:<14}] iter={stage.iteration} {stage.model_label:<32} "
             f"steps={stage.step_count} tools={stage.tool_call_count} "
-            f"latency={stage.latency_ms}ms{loopback_tag}"
+            f"latency={stage.latency_ms}ms "
+            f"in={stage.usage.input_tokens} out={stage.usage.output_tokens}"
+            + (f" reason={stage.usage.reasoning_tokens}" if stage.usage.reasoning_tokens else "")
+            + f" cost=¢{stage.cost_cents:.4f}{loopback_tag}"
         )
         print(line, flush=True)
         print(f"     → {(stage.text or '').strip()[:240]}\n", flush=True)
@@ -443,6 +482,8 @@ async def main() -> int:
             f"| {stage.name.split('-')[0]} | {stage.name.split('-', 1)[1]} | "
             f"{stage.iteration} | `{stage.model_label}` | {stage.step_count} | "
             f"{stage.tool_call_count} | {stage.latency_ms} ms | "
+            f"{stage.usage.input_tokens} | {stage.usage.output_tokens} | "
+            f"{stage.usage.reasoning_tokens or ''} | {stage.cost_cents:.4f} | "
             f"{stage.triggered_loopback_to or ''} | {preview} |"
         )
 
@@ -451,12 +492,59 @@ async def main() -> int:
         for ev in result.loopbacks:
             print(f"  • {ev.from_stage} → {ev.to_stage} (iter {ev.iteration_after}): {ev.reason}", flush=True)
 
+    # Financial report. Embedding cost added to the LLM cost from the
+    # swarm to give a single all-in number for this pipeline run.
+    total_run_cents = result.total_cost_cents + embed_cost_cents
+    print("\n=== Financial report ===", flush=True)
+    print(f"  LLM tokens:     in={result.total_usage.input_tokens}  "
+          f"out={result.total_usage.output_tokens}  "
+          f"reasoning={result.total_usage.reasoning_tokens}  "
+          f"cached={result.total_usage.cached_tokens}", flush=True)
+    print(f"  LLM cost:       ¢{result.total_cost_cents:.4f}  (${result.total_cost_cents/100:.4f})", flush=True)
+    print(f"  Embed tokens:   {embed_tokens}", flush=True)
+    print(f"  Embed cost:     ¢{embed_cost_cents:.4f}  (${embed_cost_cents/100:.4f})", flush=True)
+    print(f"  TOTAL:          ¢{total_run_cents:.4f}  (${total_run_cents/100:.4f})", flush=True)
+    print("\n  Cost by model:", flush=True)
+    for model, cents in sorted(result.cost_by_model.items(), key=lambda kv: -kv[1]):
+        share = (cents / result.total_cost_cents * 100) if result.total_cost_cents else 0
+        print(f"    {model:<36} ¢{cents:>9.4f}  ({share:>5.1f}%)", flush=True)
+
     print(f"\nTotal swarm latency: {result.total_latency_ms}ms ({result.total_latency_ms/1000:.1f}s)", flush=True)
     print(f"Final answer: {result.final_text}", flush=True)
 
     md_lines.append("")
     md_lines.append(f"**Total latency:** {result.total_latency_ms} ms ({result.total_latency_ms/1000:.1f}s)")
     md_lines.append(f"**Loopbacks fired:** {len(result.loopbacks)} (budget: 3)")
+    md_lines.append("")
+    md_lines.append("### Financial report")
+    md_lines.append("")
+    md_lines.append(
+        f"- **LLM tokens:** in={result.total_usage.input_tokens}, "
+        f"out={result.total_usage.output_tokens}, "
+        f"reasoning={result.total_usage.reasoning_tokens}, "
+        f"cached={result.total_usage.cached_tokens}"
+    )
+    md_lines.append(
+        f"- **LLM cost:** ¢{result.total_cost_cents:.4f} "
+        f"(${result.total_cost_cents/100:.4f})"
+    )
+    md_lines.append(f"- **Embedding tokens:** {embed_tokens}")
+    md_lines.append(
+        f"- **Embedding cost:** ¢{embed_cost_cents:.4f} "
+        f"(${embed_cost_cents/100:.4f})"
+    )
+    md_lines.append(
+        f"- **TOTAL run cost:** ¢{total_run_cents:.4f} "
+        f"(${total_run_cents/100:.4f})"
+    )
+    md_lines.append("")
+    md_lines.append("**Cost by model:**")
+    md_lines.append("")
+    md_lines.append("| Model | Cost (¢) | % of LLM spend |")
+    md_lines.append("|---|---|---|")
+    for model, cents in sorted(result.cost_by_model.items(), key=lambda kv: -kv[1]):
+        share = (cents / result.total_cost_cents * 100) if result.total_cost_cents else 0
+        md_lines.append(f"| `{model}` | {cents:.4f} | {share:.1f}% |")
     md_lines.append("")
     md_lines.append(f"**Final answer:** {result.final_text}")
 
