@@ -272,6 +272,20 @@ class Settings(BaseSettings):
     AZURE_AI_FOUNDRY_PROJECT_ENDPOINT: str = ""   # Project-level endpoint (e.g. https://<project>.services.ai.azure.com)
     AZURE_AI_FOUNDRY_API_VERSION: str = "2024-12-01-preview"
 
+    # Foundry deployments — verified reachable via the Responses API
+    # (`<base>/openai/v1/responses`) on 2026-05-10 by the AI integration
+    # smoke. Pinned here so application code (agent orchestrator,
+    # embeddings client) doesn't have to re-discover names at runtime.
+    # These are deployment NAMES, not model IDs — Foundry routes by
+    # the deployment-name segment in the Target URI.
+    AZURE_FOUNDRY_DEPLOYMENT_GPT4O: str = "gpt-4o"
+    AZURE_FOUNDRY_DEPLOYMENT_O4_MINI: str = "o4-mini"
+    AZURE_FOUNDRY_DEPLOYMENT_EMBED_LARGE: str = "text-embedding-3-large"  # 3072 dims
+    AZURE_FOUNDRY_DEPLOYMENT_EMBED_SMALL: str = "text-embedding-3-small"  # 1536 dims
+    # Image-gen — different surface (no /openai/v1/responses), reserved
+    # for the figure-generation pipeline; not invoked by the agent layer.
+    AZURE_FOUNDRY_DEPLOYMENT_FLUX: str = "FLUX.2-pro"
+
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
