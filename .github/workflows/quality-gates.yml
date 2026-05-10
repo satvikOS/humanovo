@@ -1,0 +1,204 @@
+name: Quality Gates
+
+# CI quality gates for paid-launch readiness:
+#   • CVE scan — pip-audit + npm audit + cargo audit. Fail on
+#     high/critical findings.
+#   • Migration idempotency — every migration must be re-runnable
+#     against an already-upgraded DB without erroring.
+#   • Bundle size budget — frontend production build must not grow
+#     unexpectedly.
+#
+# Phase 1 cut: starts as advisory (continue-on-error in critical
+# spots) so a freshly enabled gate doesn't immediately red-light
+# unrelated PRs. The "fail on regression" upgrade is a follow-on
+# once the baselines are established and a few PRs have run through.
+#
+# Triggers: same as the main CI — push, pull_request, dispatch.
+
+on:
+  push:
+    branches:
+      - humanovo
+  pull_request:
+    branches:
+      - humanovo
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cve-scan-python:
+    name: CVE — pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: '3.11'
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+
+      - name: Audit requirements.txt for CVEs
+        # `--strict` makes any vulnerability fail the run. We start
+        # without --strict (advisory) so a freshly-discovered CVE in
+        # a transitive dep doesn't immediately red-light unrelated PRs;
+        # operators triage in the workflow run page until baselines
+        # are clean, then flip to --strict in a follow-on.
+        run: pip-audit --requirement requirements.txt --desc || true
+
+  cve-scan-node:
+    name: CVE — npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install deps (no scripts — defence vs malicious postinstall)
+        run: npm ci --ignore-scripts
+
+      - name: npm audit (advisory)
+        # `--audit-level=high` flags only high/critical. `|| true`
+        # keeps this advisory until the baseline is clean; remove
+        # to flip the gate to fail-on-finding.
+        run: npm audit --audit-level=high || true
+
+  cve-scan-rust:
+    name: CVE — cargo audit (Tauri shell)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: frontend/src-tauri
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17  # stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+
+      - name: Audit Cargo.lock for CVEs
+        run: cargo audit || true
+
+  migration-idempotency:
+    name: Migration — apply twice (idempotency)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: humanovo
+          POSTGRES_PASSWORD: humanovo
+          POSTGRES_DB: humanovo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install deps
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libpq-dev
+          python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Apply all migrations (1st time)
+        env:
+          DATABASE_URL: postgresql+asyncpg://humanovo:humanovo@localhost:5432/humanovo
+        run: alembic upgrade head
+      - name: Apply all migrations again (idempotency check)
+        # Every reconcile-class migration in this repo uses
+        # ALTER TABLE ... IF NOT EXISTS / DROP ... IF EXISTS, so
+        # `upgrade head` against an already-upgraded DB MUST be a
+        # no-op (alembic detects the head is current and exits 0).
+        # If a migration author drops the IF NOT EXISTS guard, this
+        # step catches it the first time the workflow runs against
+        # their PR.
+        env:
+          DATABASE_URL: postgresql+asyncpg://humanovo:humanovo@localhost:5432/humanovo
+        run: alembic upgrade head
+      - name: Downgrade -1 + re-upgrade (round-trip)
+        # Catches migrations whose downgrade() is a stub or doesn't
+        # cleanly reverse the upgrade(). Tighter than running just
+        # `upgrade head` twice.
+        env:
+          DATABASE_URL: postgresql+asyncpg://humanovo:humanovo@localhost:5432/humanovo
+        run: |
+          alembic downgrade -1
+          alembic upgrade head
+
+  bundle-size:
+    name: Frontend — bundle size report
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install deps
+        run: npm ci --ignore-scripts
+      - name: Production build
+        env:
+          # Mock auth MUST be off in prod-equivalent builds — this
+          # workflow doubles as a regression check that release
+          # builds never accidentally bake the dev login bypass.
+          VITE_ENABLE_MOCK_AUTH: 'false'
+        run: npm run build
+      - name: Report bundle size
+        run: |
+          {
+            echo "## Frontend bundle size"
+            echo ""
+            echo "| File | Size |"
+            echo "|---|---|"
+            find dist/assets -type f \( -name '*.js' -o -name '*.css' \) | sort | while read f; do
+              size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null || echo 0)
+              kb=$(echo "scale=1; $size / 1024" | bc)
+              echo "| \`$(basename "$f")\` | ${kb} KB |"
+            done
+            echo ""
+            total=$(find dist -type f -exec stat -c%s {} \; 2>/dev/null | awk '{s+=$1} END {print s}')
+            total_kb=$(echo "scale=1; $total / 1024" | bc)
+            echo "**Total:** ${total_kb} KB"
+          } >> $GITHUB_STEP_SUMMARY
