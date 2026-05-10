@@ -1,17 +1,32 @@
 #!/usr/bin/env python3
 """
 AI integration smoke — probe each Bedrock model + each Azure AI
-Foundry deployment + run a tiny multi-model "swarm" round trip with
-real credentials, then report per-stage status.
+Foundry Responses-API deployment, then report per-stage status.
 
-Designed to run from a GitHub Actions workflow with the new secrets
+Designed to run from a GitHub Actions workflow with the secrets
 piped in as env vars:
 
   AWS_NEW_ACCESS_KEY_ID         → AWS access key for Bedrock
   AWS_NEW_SECRET_ACCESS_KEY     → AWS secret key
   AZURE_AI_KEY                  → Azure AI Foundry single key
-  AZURE_AI_OPENAI_ENDPOINT      → OpenAI-style chat endpoint
+  AZURE_AI_OPENAI_ENDPOINT      → OpenAI-style endpoint (host or with /openai/v1)
   AZURE_AI_PROJECT_ENDPOINT     → Foundry project endpoint
+                                  (e.g. https://<hub>.services.ai.azure.com
+                                  /api/projects/<proj>)
+
+Bedrock side: Claude Opus + Sonnet via boto3 invoke_model.
+
+Azure side: Foundry deployments expose the new `/openai/v1/responses`
+surface, NOT chat-completions. We call `AsyncOpenAI(base_url=<base>/
+openai/v1).responses.create(model=<deployment>, input=<prompt>,
+max_output_tokens=N)`. The v1 surface rejects the api-version query
+parameter, so it's omitted. Per `feedback_grounded_agents`, these
+deployments are smoke-tested for reachability only — application
+code wraps them as tool-calling agents reasoning over our retrieved
+data, never invoked as raw chat-with-trained-knowledge.
+
+FLUX.2-pro (image gen) is intentionally NOT probed here — different
+endpoint shape (no chat/responses path).
 
 The script exits with status 0 if all configured providers respond,
 and status 1 if any *configured* provider fails. Providers without
@@ -100,17 +115,26 @@ async def _probe_azure_foundry_deployment(
     key: str,
     api_version: str,
 ) -> ProbeResult:
-    """Probe a deployment against the Azure AI Foundry project. The
-    user's deployment names aren't known to the script, so we try
-    several common aliases (gpt-4o, gpt-4o-mini, gpt4o, etc.) and
-    we try BOTH endpoint patterns:
-      1. AsyncAzureOpenAI against AZURE_AI_OPENAI_ENDPOINT (the
-         resource-style "https://<resource>.openai.azure.com").
-      2. AsyncOpenAI against AZURE_AI_PROJECT_ENDPOINT/models (the
-         Foundry shared-project style).
-    First success wins. Reports back which deployment + which endpoint
-    pattern actually worked, so the operator can pin that in the
-    real backend config."""
+    """Probe a deployment against the Azure AI Foundry project.
+
+    The Foundry project deployments expose the new `/openai/v1`
+    "Responses API" surface (not chat-completions). Target URI from
+    the portal looks like:
+      https://<hub>.services.ai.azure.com/api/projects/<proj>/openai/v1/responses
+
+    Call shape (OpenAI Python SDK ≥1.50):
+      client = AsyncOpenAI(base_url=<base>/openai/v1, api_key=<key>)
+      resp = await client.responses.create(
+          model=<deployment>,
+          input=<prompt>,
+          max_output_tokens=10,
+      )
+      text = resp.output_text
+
+    We also keep a chat-completions fallback for any deployment that
+    might still be wired to the legacy endpoint, but Foundry's new
+    deployment shape is Responses-API-only. First success wins; the
+    label tags which surface answered so the operator can pin it."""
     if not key:
         return ProbeResult(label=label, configured=False, reachable=False, latency_ms=None, error="AZURE_AI_KEY not set")
     if not (openai_endpoint or project_endpoint):
@@ -210,13 +234,13 @@ async def _probe_azure_foundry_deployment(
                 except Exception as e:
                     openai_endpoint_err = f"{deployment} @ {av}: {str(e)[:200]}"
 
-    # Endpoint pattern 2a: Foundry "v1 surface" — `<endpoint>/openai/v1`.
-    # GPT-4o / o-series / o3 deployments live here on a Foundry hub
-    # (services.ai.azure.com). The v1 surface REJECTS the api-version
-    # query parameter ("api-version query parameter is not allowed
-    # when using /v1 path"), so we omit `default_query` here. Try
-    # the project endpoint AND the openai endpoint as v1 surfaces —
-    # different Foundry provisions expose v1 on either.
+    # Endpoint pattern 2a: Foundry "v1 surface" Responses API —
+    # `<endpoint>/openai/v1` and call `client.responses.create(...)`.
+    # This is the NEW deployment shape Azure Foundry creates for
+    # gpt-4o / o4-mini / o3 / etc — Target URI in the portal ends
+    # with `/openai/v1/responses`. The v1 surface REJECTS the
+    # api-version query parameter, so we omit default_query. Try the
+    # project endpoint AND the openai endpoint as v1 surfaces.
     v1_bases: list[str] = []
     if project_endpoint:
         v1_bases.append(_ensure_v1_path(project_endpoint))
@@ -229,28 +253,66 @@ async def _probe_azure_foundry_deployment(
         for deployment in deployment_candidates:
             t0 = time.monotonic()
             try:
+                # Responses API. Some Foundry deployments (o-series)
+                # don't accept max_output_tokens=tiny — they need a
+                # generous floor for reasoning tokens. 256 is enough
+                # for "Reply: hello" with reasoning headroom.
                 resp = await asyncio.wait_for(
-                    client_v1.chat.completions.create(
+                    client_v1.responses.create(
                         model=deployment,
-                        messages=[{"role": "user", "content": PROBE_PROMPT}],
-                        max_tokens=10,
+                        input=PROBE_PROMPT,
+                        max_output_tokens=256,
                     ),
                     timeout=PROBE_TIMEOUT_S,
                 )
                 latency = int((time.monotonic() - t0) * 1000)
-                text = (resp.choices[0].message.content or "").strip()[:80]
-                # Tag with which host responded so the operator can
-                # disambiguate openai-resource-v1 vs project-v1.
+                # Newer SDKs expose .output_text; fall back to walking
+                # the output array if not present (older SDKs).
+                text = getattr(resp, "output_text", None)
+                if not text and hasattr(resp, "output") and resp.output:
+                    chunks: list[str] = []
+                    for item in resp.output:
+                        for c in getattr(item, "content", []) or []:
+                            t = getattr(c, "text", None)
+                            if t:
+                                chunks.append(t)
+                    text = "".join(chunks)
+                text = (text or "").strip()[:80]
                 tag = "foundry-v1" if "services.ai.azure.com" in base_v1 else "openai-v1"
                 return ProbeResult(
-                    label=f"{label} [{deployment} via {tag}]",
+                    label=f"{label} [{deployment} via {tag}/responses]",
                     configured=True, reachable=True, latency_ms=latency,
                     error=None, response_preview=text,
                 )
             except asyncio.TimeoutError:
-                foundry_v1_err = f"timeout {deployment}"
+                foundry_v1_err = f"timeout {deployment} (responses)"
             except Exception as e:
-                foundry_v1_err = f"{deployment}: {str(e)[:200]}"
+                # If this deployment's surface is chat-completions
+                # rather than responses, fall back to chat — error
+                # message will mention "responses" or 404 the path.
+                err_str = str(e)
+                if "responses" in err_str.lower() or "404" in err_str or "not found" in err_str.lower():
+                    try:
+                        resp = await asyncio.wait_for(
+                            client_v1.chat.completions.create(
+                                model=deployment,
+                                messages=[{"role": "user", "content": PROBE_PROMPT}],
+                                max_tokens=10,
+                            ),
+                            timeout=PROBE_TIMEOUT_S,
+                        )
+                        latency = int((time.monotonic() - t0) * 1000)
+                        text = (resp.choices[0].message.content or "").strip()[:80]
+                        tag = "foundry-v1" if "services.ai.azure.com" in base_v1 else "openai-v1"
+                        return ProbeResult(
+                            label=f"{label} [{deployment} via {tag}/chat]",
+                            configured=True, reachable=True, latency_ms=latency,
+                            error=None, response_preview=text,
+                        )
+                    except Exception as e2:
+                        foundry_v1_err = f"{deployment}: responses={err_str[:90]} | chat={str(e2)[:90]}"
+                else:
+                    foundry_v1_err = f"{deployment}: {err_str[:200]}"
 
     # Endpoint pattern 2b: Foundry /models path — Azure AI inference
     # API. OpenAI SDK is request-shape-compatible enough for chat
@@ -335,34 +397,19 @@ STAGE_ASSIGNMENTS: list[dict[str, object]] = [
         ],
     },
     {
-        "label": "critic / synthesizer — GPT-4o",
+        "label": "critic / synthesizer — GPT-4o (Responses API)",
         "provider": "azure",
-        # Foundry hubs commonly auto-create deployments named after the
-        # model id (lowercase, no dashes mangled). Cycle through every
-        # plausible casing/version flavour the operator might have
-        # picked from the Azure portal model catalog.
-        "deployments": [
-            "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
-            "gpt-4o-2024-11-20", "gpt-4o-2024-08-06",
-            "gpt-4o-2024-05-13", "gpt4o", "GPT-4o",
-        ],
+        # Operator-confirmed deployment from humanovo-pipeline Foundry
+        # project (Target URI: .../api/projects/humanovo-pipeline/openai/v1/responses).
+        "deployments": ["gpt-4o"],
     },
     {
-        "label": "reasoner — o3-mini / o3",
+        "label": "reasoner — o4-mini (Responses API)",
         "provider": "azure",
-        "deployments": [
-            "o3-mini", "o3", "o3-2024-12-17", "o3-mini-2025-01-31",
-            "o1", "o1-mini", "o1-preview", "o4-mini",
-        ],
-    },
-    {
-        "label": "rag-literature — Cohere",
-        "provider": "azure",
-        "deployments": [
-            "Cohere-command-a", "cohere-command-a", "command-a",
-            "Cohere-command-r-plus", "command-r-plus",
-            "Cohere-embed-v3-english",
-        ],
+        # Operator-confirmed deployment, model_version 2025-04-16.
+        # o4-mini is an o-series reasoning model; needs max_output_tokens
+        # headroom for reasoning chain.
+        "deployments": ["o4-mini"],
     },
 ]
 
