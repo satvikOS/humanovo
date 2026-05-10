@@ -8429,16 +8429,47 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
     let traces: Array<Record<string, unknown>> = []
     const mode = plot.mode3d
     if (mode === 'surface' || mode === 'wireframe' || mode === 'contour') {
+      // MATLAB-grade 3D surface — same conventions as
+      // PlotlyPlot3D's surface_3d: gradient color + black mesh
+      // wireframe overlay (x/y contour lines on the surface) +
+      // floor projection at z=zmin. Floor projection uses
+      // usecolormap so the projected lines pick up the
+      // surface's mapping (matches the matplotlib reference
+      // figure the user shared).
       const base: Record<string, unknown> = {
         type: 'surface', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ,
-        colorscale: cs, opacity: mode === 'wireframe' ? 0.4 : 0.92,
+        colorscale: cs,
+        opacity: mode === 'wireframe' ? 0 : 0.95,
+        lighting: { ambient: 0.55, diffuse: 0.85, specular: 0.2, fresnel: 0.1, roughness: 0.5 },
+        lightposition: { x: 100, y: 200, z: 100 },
       }
       if (mode === 'wireframe') {
+        // Hide the filled surface, keep wire-only render for the
+        // matlab `mesh()` look. Muted ocean-blue wires on the
+        // platform's default palette match the rest of humanovo's
+        // tonal register.
         base.hidesurface = true
-        base.contours = { x: { show: true, color: '#888', width: 1 }, y: { show: true, color: '#888', width: 1 }, z: { show: false } }
-      }
-      if (mode === 'contour') {
-        base.contours = { z: { show: true, usecolormap: true, highlightcolor: '#fff', project: { z: true } } }
+        base.contours = {
+          x: { show: true, color: '#3D5A80', width: 2 },
+          y: { show: true, color: '#3D5A80', width: 2 },
+          z: { show: false },
+        }
+        base.showscale = false
+        base.lighting = { ambient: 1, diffuse: 0, specular: 0 }
+      } else if (mode === 'contour') {
+        base.contours = {
+          z: { show: true, usecolormap: true, highlight: true, project: { z: true } },
+          x: { show: true, color: 'rgba(0,0,0,0.5)', width: 1 },
+          y: { show: true, color: 'rgba(0,0,0,0.5)', width: 1 },
+        }
+      } else {
+        // Plain `surface` mode: x/y wire overlay + z-floor
+        // projection (the MATLAB `surf` default in one trace).
+        base.contours = {
+          x: { show: true, color: 'rgba(0,0,0,0.6)', width: 1 },
+          y: { show: true, color: 'rgba(0,0,0,0.6)', width: 1 },
+          z: { show: true, usecolormap: true, highlight: false, project: { z: true } },
+        }
       }
       traces = [base]
     } else if (mode === 'scatter3d') {
