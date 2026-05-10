@@ -232,6 +232,110 @@ getNotificationPermission, getAutostartEnabled, setAutostartEnabled),
 `disabled` prop), `App.tsx` (CloseGuardManager mount), `src-tauri/`
 (tray plugin + 3 new plugins + capabilities).
 
+### Visualization + compute + close-on-X overhaul — DONE (2026-05-09/10 session, commits `b1b84ab`–`e38aeb9`)
+~30 commits, all CI-green. Highlights organized by domain:
+
+**2D viz, publication-grade defaults applied uniformly:**
+* Per-theme typography baselines — Nature 7pt tick / 8pt axis label,
+  Science 8/9, IEEE 8/9 serif, Paper 9/10, Screen 10/11. Per-theme
+  font weights (axis 500, body 400, title 600, IEEE 700).
+* Okabe-Ito CB-safe palette auto-applied when journal theme picked
+  (`paper` / `nature` / `science` / `ieee`) and user is on the
+  generic default. Muted-only palette policy enforced — diverging
+  palette retuned from saturated red↔green to muted earth↔sage.
+* Uniform `chartMargin` threaded to every recharts wrapper (was
+  default {5,5,5,5}, too tight for label + legend); X-label /
+  bottom-legend collision fixed by forcing legend to top when both
+  set; tick formatter drops trailing `.00` on integer values; pie
+  + donut drop labels on slices <4 % + kill leader lines + shrink
+  outerRadius for label clearance; heatmap muted-policy compliant
+  (was rgba(59,130,246) blue / rgba(239,68,68) red — broke policy);
+  box_plot + violin theme-aware (axis tick fontSize / fill, grid
+  stroke); animation suppressed on journal themes regardless of
+  user toggle (paper figures don't animate); white-bg-on-hover
+  flash killed (recharts default cursor was rgba(204,204,204,0.1));
+  chart card chrome decluttered from 13 buttons to 5 + an Export
+  dropdown (PNG / PNG @ 4× / SVG / PDF / CSV / XLSX / Copy);
+  chartBgTheme removed (was the cause of white-on-white invisibility);
+  screen theme uses concrete hex (no CSS vars in SVG fills).
+
+**3D viz, MATLAB-grade (PlotlyPlot3D + Workstation):**
+* surface_3d / contour_3d / slice_3d — gradient color + black
+  mesh wireframe overlay (x/y contour lines on the surface) +
+  floor contour projection at z=zmin (z-level curves projected
+  onto the bounding-box floor with usecolormap so they pick up
+  the surface mapping). Lighting model with defined
+  lightposition. Matches MATLAB `surf` default look.
+* wireframe_3d — surface fully transparent + hidesurface, only
+  muted ocean-blue (#3D5A80) wires visible. MATLAB `mesh()`.
+* scatter_3d / bubble_3d / line_3d / bar_3d — markers get a
+  0.5 px dark stroke for publication readability; bar_3d
+  intensity-per-bar against the chart colorscale (was
+  per-bar from CATEGORY_COLORS ignoring data).
+* trisurf_3d / quiver_3d / isosurface_3d / pie_3d — overlay
+  markers and edge stroke updated to muted-policy values; the
+  earlier '#c8c8cc' / '#f0c674' / CATEGORY_COLORS choices broke
+  the muted-only palette + were invisible on white bg.
+* Scene config: `aspectmode: 'data'` (preserves data ranges),
+  30°/45° isometric camera with `up: Z`, gridline contrast
+  bumped from 0.06 to 0.12 alpha so bounding-box edges read
+  against the surface.
+
+**Compute Lab + Workstation:**
+* Workstation 3D plots picked up the same matlab-grade
+  treatment as PlotlyPlot3D — a chart from compute and one
+  from the data-viz page now look identical.
+* New `e2e/compute-lab-smoke.spec.ts` — 4 tests covering
+  Monte Carlo (Run produces numeric Mean/μ/Median/Std),
+  Equation Plotter (Run produces a chart), Workstation panel
+  mount, **Workstation interpreter end-to-end (type `1+1`,
+  click Run, open Results overlay, assert `ans = 2`)**. The
+  user's "compute engine doesn't work for some computations"
+  concern now has a regression net at the e2e level.
+
+**Desktop:**
+* CRITICAL — humanovo not closing on X (Task Manager required).
+  Three-layer fix: CloseGuardManager calls
+  `tauri-plugin-process exit(0)` directly (renderer-side primary),
+  Rust `RunEvent::WindowEvent::Destroyed` handler calls
+  `app.exit(0)` (Rust-side fallback). Single-instance plugin
+  was holding the runtime alive past window destroy.
+* Settings → Check now is now a **live update flow** — check +
+  ask + download with live percentage in the button label
+  (`Downloading 42%` / `Installing…`) + relaunch. Confirmation
+  step prevents silent installs mid-discovery.
+* Toggle component bounds fixed (dot was bleeding past pill
+  on stacked toggles). w-11/h-6 now, explicit left positioning.
+* `/imaging` route un-hidden in V1; backend MONAI endpoints
+  scaffolded (`POST /imaging/monai/{segment,classify,register}`,
+  `GET /imaging/monai/health`) — runtime returns 501 with
+  install hint until `pip install monai[all]` lands.
+* CI fix: cancel-in-progress flipped from `true` back to
+  `false` so every commit gets a complete native build (was
+  killing each in-flight build the moment the next push
+  landed). actionlint workflow fixed (`SHELLCHECK_OPTS` env
+  var instead of `-shellcheck=...` flag which expects a binary
+  path, not command-with-args).
+
+**Crash fixes:**
+* Four route-load crashes from `Cannot read properties of
+  undefined (reading map/find/flatMap/length)` on
+  /agents-chat-mode, /literature-review, /citation-manager,
+  /knowledge-graph. Root cause: backend returns non-array body,
+  code assumes array. Defensive `Array.isArray(x) ? x : []` at
+  every setState boundary. New regression spec
+  `e2e/route-load-no-crash.spec.ts` — 19/19 routes pass.
+* Toggle bounds, Rust `..` rest pattern (Tauri 2 non-exhaustive
+  WindowEvent), tray menu_on_left_click deprecation, route53
+  workflow if-fi syntax error.
+
+**Test coverage delta:**
+  + e2e/route-load-no-crash.spec.ts (19 tests)
+  + e2e/viz-all-types.spec.ts (1 test, 49 chart types)
+  + e2e/compute-lab-smoke.spec.ts (4 tests)
+  + e2e/desktop-walker.mjs (CDP-attach to running humanovo.exe)
+  + e2e/desktop-walker-dev.mjs (own browser against dev server)
+
 ### Stage 5 admin rate limit — DONE (commit `4a4d7f6`)
 * New `app/core/rate_limit.py` — in-process per-IP token bucket
   + FastAPI dependency. Wired to /admin/* router as defence-in-depth
