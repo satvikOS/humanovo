@@ -8485,11 +8485,26 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
       title: plot.title ? { text: plot.title, font: { color: '#e5e5e5', size: 13 } } : undefined,
     }
     if (!is2D) {
+      // MATLAB-grade scene: aspectmode 'data' (preserves natural
+      // data ranges instead of stretching to a cube), 30°/45°
+      // isometric camera (the standard MATLAB `surf` default
+      // view), bumped gridline contrast so the bounding-box
+      // edges are visible enough to read tick labels against.
+      const axisStyle = {
+        color: '#a1a1aa',
+        gridcolor: 'rgba(255,255,255,0.12)',
+        zerolinecolor: 'rgba(255,255,255,0.18)',
+        backgroundcolor: 'rgba(0,0,0,0)',
+        showbackground: true,
+        showspikes: false,
+      }
       layout.scene = {
-        xaxis: { title: plot.xLabel || 'x', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', backgroundcolor: 'rgba(0,0,0,0)' },
-        yaxis: { title: plot.yLabel || 'y', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', backgroundcolor: 'rgba(0,0,0,0)' },
-        zaxis: { title: plot.zLabel || 'z', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)', backgroundcolor: 'rgba(0,0,0,0)' },
-        bgcolor: 'rgba(0,0,0,0)', camera: { eye: { x: 1.5, y: 1.5, z: 1.2 } },
+        xaxis: { ...axisStyle, title: plot.xLabel || 'x' },
+        yaxis: { ...axisStyle, title: plot.yLabel || 'y' },
+        zaxis: { ...axisStyle, title: plot.zLabel || 'z' },
+        bgcolor: 'rgba(0,0,0,0)',
+        aspectmode: 'data' as const,
+        camera: { eye: { x: 1.4, y: -1.6, z: 1.1 }, center: { x: 0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } },
       }
     } else {
       layout.xaxis = { title: plot.xLabel || 'x', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' }
