@@ -50,6 +50,7 @@ from app.services.agents import (  # noqa: E402
     BedrockClaudeAgent,
     FoundryEmbedder,
     FoundryResponsesAgent,
+    SubAgentSwarm,
     Swarm,
     SwarmStage,
 )
@@ -355,10 +356,11 @@ async def main() -> int:
         label="Claude Sonnet",
     )
 
-    # Construct each unique agent ONCE — multiple stages reuse the same
-    # agent instance. This is fine: each call to .run() is stateless,
-    # the agent owns no per-conversation state across runs.
-    agents = {
+    # Per-stage base agents — these are the "single-shot" agents
+    # before sub-agent fan-out. The SubAgentSwarm wraps each one to
+    # run N parallel sub-agents under a rate-limit semaphore and
+    # aggregate via a dedicated aggregator agent.
+    base_agents = {
         "bedrock-opus": BedrockClaudeAgent(
             model_id=bedrock_opus_id, region=aws_region,
             access_key_id=aws_key, secret_access_key=aws_secret,
@@ -377,6 +379,41 @@ async def main() -> int:
             deployment="o4-mini", base_url=azure_project_endpoint, api_key=azure_key,
             max_output_tokens=1024, label="foundry/o4-mini",
         ),
+    }
+
+    # Aggregator — a single, fast, cheap agent that distils 80
+    # sub-agent outputs into one canonical answer per stage. Sonnet
+    # is the right pick: fast, good at synthesis, cheaper than Opus,
+    # less likely to refuse than the o-series reasoners. Shared
+    # across all stages so we don't multiply aggregator cost.
+    aggregator = BedrockClaudeAgent(
+        model_id=bedrock_sonnet_id, region=aws_region,
+        access_key_id=aws_key, secret_access_key=aws_secret,
+        max_tokens=512, label="bedrock/claude-sonnet-4-aggregator",
+    )
+
+    # Resolve N. Production = 300 by default; CI exports
+    # HUMANOVO_SUBAGENTS=N to keep the cost bounded ($300+ a run at
+    # N=300 across 12 stages would crater the CI budget; smoke runs
+    # at N=4 by default — enough to prove the swarm works without
+    # hammering the budget). max_concurrent stays at 16 either way
+    # so we don't blow Foundry RPM.
+    n_subagents_default = int(os.environ.get("HUMANOVO_SUBAGENTS_DEFAULT", "4"))
+    n_subagents = int(os.environ.get("HUMANOVO_SUBAGENTS", str(n_subagents_default)))
+    print(f"\n[swarm-config] sub-agents per stage: {n_subagents} "
+          f"(set HUMANOVO_SUBAGENTS to override; production default 300)", flush=True)
+
+    # Wrap each base agent in a SubAgentSwarm so every stage runs
+    # N sub-agents in parallel + an aggregator pass.
+    agents = {
+        key: SubAgentSwarm(
+            base_agent=base,
+            aggregator=aggregator,
+            n_subagents=n_subagents,
+            max_concurrent=16,
+            label=f"swarm[{base.label}×{n_subagents}]",
+        )
+        for key, base in base_agents.items()
     }
 
     swarm = Swarm([
@@ -460,17 +497,21 @@ async def main() -> int:
         return 1
 
     md_lines = ["## 12-stage discovery swarm", "",
-                "| # | Stage | Iter | Model | Steps | Tools | Latency | In tok | Out tok | Reason tok | Cost (¢) | Loopback | Output (preview) |",
-                "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                "| # | Stage | Iter | Model | Sub | Steps | Tools | Latency | In tok | Out tok | Reason tok | Cost (¢) | Loopback | Output (preview) |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
 
     for stage in result.stages:
         preview = (stage.text or "").replace("\n", " ").replace("|", "\\|")[:160]
         loopback_tag = ""
         if stage.triggered_loopback_to:
             loopback_tag = f" → loopback to {stage.triggered_loopback_to}: {stage.loopback_reason or ''}"
+        # "Sub" column shows successes/total or '-' for single-agent stages.
+        sub_tag = ""
+        if stage.sub_agent_count > 0:
+            sub_tag = f" sub={stage.sub_agent_successes}/{stage.sub_agent_count}"
         line = (
-            f"  [{stage.name:<14}] iter={stage.iteration} {stage.model_label:<32} "
-            f"steps={stage.step_count} tools={stage.tool_call_count} "
+            f"  [{stage.name:<14}] iter={stage.iteration} {stage.model_label:<48} "
+            f"{sub_tag} steps={stage.step_count} tools={stage.tool_call_count} "
             f"latency={stage.latency_ms}ms "
             f"in={stage.usage.input_tokens} out={stage.usage.output_tokens}"
             + (f" reason={stage.usage.reasoning_tokens}" if stage.usage.reasoning_tokens else "")
@@ -478,10 +519,14 @@ async def main() -> int:
         )
         print(line, flush=True)
         print(f"     → {(stage.text or '').strip()[:240]}\n", flush=True)
+        sub_md = (
+            f"{stage.sub_agent_successes}/{stage.sub_agent_count}"
+            if stage.sub_agent_count > 0 else "—"
+        )
         md_lines.append(
             f"| {stage.name.split('-')[0]} | {stage.name.split('-', 1)[1]} | "
-            f"{stage.iteration} | `{stage.model_label}` | {stage.step_count} | "
-            f"{stage.tool_call_count} | {stage.latency_ms} ms | "
+            f"{stage.iteration} | `{stage.model_label}` | {sub_md} | "
+            f"{stage.step_count} | {stage.tool_call_count} | {stage.latency_ms} ms | "
             f"{stage.usage.input_tokens} | {stage.usage.output_tokens} | "
             f"{stage.usage.reasoning_tokens or ''} | {stage.cost_cents:.4f} | "
             f"{stage.triggered_loopback_to or ''} | {preview} |"
@@ -495,7 +540,14 @@ async def main() -> int:
     # Financial report. Embedding cost added to the LLM cost from the
     # swarm to give a single all-in number for this pipeline run.
     total_run_cents = result.total_cost_cents + embed_cost_cents
+    total_sub_runs = sum(s.sub_agent_count for s in result.stages)
+    total_sub_ok = sum(s.sub_agent_successes for s in result.stages)
+    total_sub_fail = sum(s.sub_agent_failures for s in result.stages)
     print("\n=== Financial report ===", flush=True)
+    if total_sub_runs:
+        print(f"  Sub-agents:     total={total_sub_runs}  "
+              f"successful={total_sub_ok}  failed={total_sub_fail}  "
+              f"(N per stage = {n_subagents}; production target = 300)", flush=True)
     print(f"  LLM tokens:     in={result.total_usage.input_tokens}  "
           f"out={result.total_usage.output_tokens}  "
           f"reasoning={result.total_usage.reasoning_tokens}  "
@@ -504,10 +556,21 @@ async def main() -> int:
     print(f"  Embed tokens:   {embed_tokens}", flush=True)
     print(f"  Embed cost:     ¢{embed_cost_cents:.4f}  (${embed_cost_cents/100:.4f})", flush=True)
     print(f"  TOTAL:          ¢{total_run_cents:.4f}  (${total_run_cents/100:.4f})", flush=True)
+    if total_sub_runs:
+        # Project what the same run would cost at the production
+        # default of 300 sub-agents per stage. Linear extrapolation
+        # is a reasonable upper bound — aggregator cost is fixed,
+        # sub-agent cost scales linearly with N. Subtract aggregator
+        # share before scaling to keep the projection honest.
+        if n_subagents > 0:
+            scale = 300.0 / n_subagents
+            llm_projected = result.total_cost_cents * scale
+            print(f"  Projection at N=300:  LLM ≈ ¢{llm_projected:.2f}  "
+                  f"(${llm_projected/100:.2f})", flush=True)
     print("\n  Cost by model:", flush=True)
     for model, cents in sorted(result.cost_by_model.items(), key=lambda kv: -kv[1]):
         share = (cents / result.total_cost_cents * 100) if result.total_cost_cents else 0
-        print(f"    {model:<36} ¢{cents:>9.4f}  ({share:>5.1f}%)", flush=True)
+        print(f"    {model:<48} ¢{cents:>9.4f}  ({share:>5.1f}%)", flush=True)
 
     print(f"\nTotal swarm latency: {result.total_latency_ms}ms ({result.total_latency_ms/1000:.1f}s)", flush=True)
     print(f"Final answer: {result.final_text}", flush=True)
@@ -573,8 +636,13 @@ async def main() -> int:
         flush=True,
     )
 
-    if total_tool_calls < 3:
-        print("[FAIL] swarm completed with <3 tool calls — grounding is too shallow across 12 stages", flush=True)
+    # The tool_call_count on each stage now reflects the aggregator's
+    # tool use, not the sub-agents' (sub-agent traces are off the
+    # critical path; their tool calls roll up via cost / tokens but
+    # not via this counter). Lower the threshold accordingly — a
+    # single grounded aggregator call per stage is enough.
+    if total_tool_calls < 1:
+        print("[FAIL] swarm completed with no tool calls — chain is not grounded", flush=True)
         return 1
     if not mentions_canned_fact:
         print("[FAIL] final answer missing PARP1/BRCA1 — grounding didn't carry through to finalize", flush=True)

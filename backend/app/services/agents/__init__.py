@@ -51,6 +51,12 @@ from app.services.agents.embeddings import (
 )
 from app.services.agents.foundry import FoundryResponsesAgent
 from app.services.agents.pricing import ModelPricing, TokenUsage, cost_cents, lookup_pricing
+from app.services.agents.sub_swarm import (
+    DEFAULT_PERSONAS,
+    SubAgentRun,
+    SubAgentSwarm,
+    SubSwarmResult,
+)
 from app.services.agents.swarm import (
     LoopbackEvent,
     Swarm,
@@ -71,6 +77,10 @@ __all__ = [
     "GroundedAgent",
     "LoopbackEvent",
     "ModelPricing",
+    "DEFAULT_PERSONAS",
+    "SubAgentRun",
+    "SubAgentSwarm",
+    "SubSwarmResult",
     "Swarm",
     "SwarmResult",
     "SwarmStage",

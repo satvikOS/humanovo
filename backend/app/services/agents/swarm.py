@@ -84,6 +84,12 @@ class SwarmStageResult:
     iteration: int = 1
     """Counts re-runs. iteration=1 is the first pass, 2+ is a re-run
     triggered by a downstream critic loopback."""
+    sub_agent_count: int = 0
+    """How many sub-agents fanned out for this stage. 0 means a
+    single-agent stage; >0 means the stage was a SubAgentSwarm with
+    that many parallel sub-agents (+ 1 aggregator)."""
+    sub_agent_successes: int = 0
+    sub_agent_failures: int = 0
 
 
 @dataclass
@@ -211,6 +217,12 @@ class Swarm:
                 max_steps=stage.max_steps,
             )
             traces.append(result)
+            # Capture sub-swarm detail RIGHT NOW — if the same agent
+            # instance is shared across stages (common pattern when one
+            # SubAgentSwarm wraps the same model), the next stage's
+            # call overwrites .last_detail. Snapshot it here before
+            # any further .run() invocations.
+            sa_snapshot = _read_sub_swarm_detail(stage.agent)
 
             triggered_target: str | None = None
             triggered_reason: str | None = None
@@ -232,6 +244,7 @@ class Swarm:
                         reason=triggered_reason,
                         iteration_after=next_iteration,
                     ))
+                    sa_count, sa_ok, sa_fail = sa_snapshot
                     summaries.append(SwarmStageResult(
                         name=stage.name,
                         model_label=result.model_label,
@@ -244,6 +257,9 @@ class Swarm:
                         triggered_loopback_to=triggered_target,
                         loopback_reason=triggered_reason,
                         iteration=iteration_by_index[i],
+                        sub_agent_count=sa_count,
+                        sub_agent_successes=sa_ok,
+                        sub_agent_failures=sa_fail,
                     ))
                     # Inject the critic's loopback note into the next
                     # stage's input so it can see what to fix.
@@ -254,6 +270,7 @@ class Swarm:
                     i = target_idx
                     continue
 
+            sa_count, sa_ok, sa_fail = sa_snapshot
             summaries.append(SwarmStageResult(
                 name=stage.name,
                 model_label=result.model_label,
@@ -266,6 +283,9 @@ class Swarm:
                 triggered_loopback_to=None,
                 loopback_reason=None,
                 iteration=iteration_by_index[i],
+                sub_agent_count=sa_count,
+                sub_agent_successes=sa_ok,
+                sub_agent_failures=sa_fail,
             ))
 
             if result.text.strip():
@@ -331,3 +351,27 @@ class Swarm:
             if norm in s.name.lower():
                 return i
         return None
+
+
+def _read_sub_swarm_detail(agent: GroundedAgent) -> tuple[int, int, int]:
+    """If `agent` is a SubAgentSwarm, return (n_total, n_success,
+    n_failure) from its `last_detail` snapshot. Otherwise return
+    (0, 0, 0) — single agents don't have sub-agent breakdown.
+
+    Imported lazily to keep the swarm.py → sub_swarm.py edge soft —
+    sub_swarm imports `Tool` / `AgentResult` from this package, so
+    a top-level import here would create a cycle."""
+    try:
+        from app.services.agents.sub_swarm import SubAgentSwarm
+    except ImportError:
+        return (0, 0, 0)
+    if not isinstance(agent, SubAgentSwarm):
+        return (0, 0, 0)
+    detail = agent.last_detail
+    if detail is None:
+        return (0, 0, 0)
+    return (
+        len(detail.sub_runs),
+        detail.successful_runs,
+        detail.failed_runs,
+    )

@@ -315,6 +315,19 @@ class Settings(BaseSettings):
     TOKEN_POOL_RETRY_MAX_ATTEMPTS: int = 5
     TOKEN_POOL_AGENT_BATCH_SIZE: int = 50  # agents per dispatch batch
 
+    # Sub-agent swarm — every one of the 12 discovery-pipeline stages
+    # fans out to this many parallel sub-agents (each with a different
+    # persona suffix on the system prompt) before aggregating into one
+    # answer. Per-stage cost scales linearly with N.
+    #   • Production target: 300 (per user direction 2026-05-10)
+    #   • CI smoke: low single digits (HUMANOVO_SUBAGENTS env override)
+    # The agent layer reads HUMANOVO_SUBAGENTS env first, then this
+    # setting, then defaults to 300. max_concurrent caps RPM —
+    # Foundry o4-mini = 500 RPM = ~8 concurrent comfortably; the 16
+    # default leaves headroom for other concurrent stages.
+    SUB_AGENTS_PER_STAGE: int = 300
+    SUB_AGENTS_MAX_CONCURRENT: int = 16
+
     # Parallel MCP (Model Context Protocol) Configuration
     # Distributes context windows across models to overcome per-model token limits
     MCP_ENABLED: bool = True

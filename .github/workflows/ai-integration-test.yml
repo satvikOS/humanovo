@@ -93,5 +93,12 @@ jobs:
           AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
           AZURE_AI_OPENAI_ENDPOINT: ${{ secrets.AZURE_AI_OPENAI_ENDPOINT }}
           AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
+          # Sub-agent fan-out per stage. Production default is 300
+          # (settings.SUB_AGENTS_PER_STAGE) but at 12 stages × 300 ×
+          # ~$0.01 per sub-agent the CI smoke would cost ~$36/run.
+          # Cap to 4 in CI — enough to prove the swarm fans out, runs
+          # parallel, aggregates, and tracks costs without burning
+          # the budget on every push.
+          HUMANOVO_SUBAGENTS: "4"
         run: |
           python backend/scripts/swarm_smoke.py
