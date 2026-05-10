@@ -2104,13 +2104,19 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                 if grounding_context and stage_num > 1:
                     user_prompt += f"\n\n{grounding_context}"
 
-                # Call the model with cost tracking context
+                # Call the model with cost tracking context. Includes
+                # the per-run budget enforcer (private key prefixed
+                # with `_`) so the agent-layer shim can call
+                # enforcer.charge() after each call — keeping run
+                # caps + monthly user spend accurate when stages are
+                # routed through the new agent layer (task #74).
                 cost_ctx = {
                     "discovery_run_id": self._discovery_run_id,
                     "stage_number": stage_num,
                     "stage_name": stage_name,
                     "hypothesis_id": hypothesis_id,
                     "round_number": round_number,
+                    "_budget_enforcer": self._budget,
                 }
 
                 # PHI/PII guardrail: scrub user prompt + system prompt before

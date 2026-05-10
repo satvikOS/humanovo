@@ -169,10 +169,14 @@ async def generate_via_agent_layer(
         max_steps=2,  # generation + optional aggregator pass
     )
 
-    # Record cost back into the existing tracking system so the
-    # billing dashboard sees per-stage agent-layer spend the same as
-    # legacy LLM spend.
+    # Record cost back into the two production tracking systems so
+    # the billing dashboard sees per-stage agent-layer spend the same
+    # as legacy LLM spend, AND the per-run budget enforcer trips its
+    # cap mid-pipeline if the agent layer overspends.
     if cost_ctx and result.cost_cents > 0:
+        # 1. cost_tracking_service.record_llm_call — feeds the
+        #    per-call usage_events table (billing dashboard,
+        #    /admin/ai/cost-history).
         try:
             from app.services.cost_tracking_service import get_cost_tracker
             tracker = get_cost_tracker()
@@ -189,12 +193,49 @@ async def generate_via_agent_layer(
                 round_number=cost_ctx.get("round_number"),
             )
         except Exception as e:
-            # Cost recording is best-effort — never let a billing
-            # write failure block the discovery run.
+            # Best-effort: never let a billing write failure block
+            # the discovery run.
             logger.warning(
                 "Agent-layer cost recording failed (stage=%s): %s",
                 stage_name, e,
             )
+
+        # 2. RunBudgetEnforcer.charge — feeds the per-run cap that
+        #    the orchestrator opened with `start_run`. Without this
+        #    call, the enforcer would underestimate agent-layer spend
+        #    and `finalize_run` would push too little to the user's
+        #    monthly counter. When the cap is hit mid-run, charge()
+        #    raises BudgetExceeded which the orchestrator catches +
+        #    aborts cleanly.
+        enforcer = cost_ctx.get("_budget_enforcer") if cost_ctx else None
+        if enforcer is not None:
+            try:
+                provider = "bedrock" if "bedrock" in agent.label.lower() else "azure"
+                # Strip the swarm wrapper from the label so charge()'s
+                # pricing lookup works against the underlying model.
+                model_for_pricing = (
+                    agent.label.replace("swarm[", "").replace("]", "")
+                    .split("×")[0].split("/")[-1]
+                )
+                enforcer.charge(
+                    provider=provider,
+                    model=model_for_pricing,
+                    input_tokens=result.usage.input_tokens,
+                    output_tokens=result.usage.output_tokens + result.usage.reasoning_tokens,
+                    cached_tokens=result.usage.cached_tokens,
+                    stage_name=stage_name,
+                )
+            except Exception as e:
+                # Re-raise BudgetExceeded so the orchestrator can
+                # abort the run; swallow other exceptions (the
+                # enforcer is best-effort, not load-bearing).
+                from app.services.budget_enforcer_service import BudgetExceeded
+                if isinstance(e, BudgetExceeded):
+                    raise
+                logger.warning(
+                    "Agent-layer enforcer.charge failed (stage=%s): %s",
+                    stage_name, e,
+                )
 
     return result.text or ""
 
