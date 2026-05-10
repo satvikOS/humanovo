@@ -213,7 +213,7 @@ Per-page sequencing (priority by daily-active surface):
 
 | Item | Effort | Notes |
 |---|---|---|
-| Bundle audit beyond compute-lab | 1-2d | lazy-load Workbench (153 KB), ResearchImaging (210 KB), ProjectKnowledgeGraph (543 KB), DataVisualization (183 KB). Identify the unnamed `extends-*.js` 721 KB chunk. |
+| Bundle audit beyond compute-lab | 1-2d | **plotExport DONE** (commit `980a7e3` — 5,293 → 2,381 kB / -55 %, installer 5,266 → 4,595 kB / -12.7 %). Custom plotly bundle in lib/plotlyMin.ts registers only the 9 trace types the app uses (scatter/scatter3d/surface/mesh3d/cone/isosurface/heatmap/pie/sankey) instead of the full ~30-trace dist-min. Remaining: lazy-load Workbench (153 KB), ResearchImaging (210 KB), ProjectKnowledgeGraph (543 KB), DataVisualization (183 KB) — all ship eagerly today. The unnamed `extends-*.js` 721 KB chunk is still unidentified; suspect Tauri+react-plotly factory boilerplate. |
 | Per-user cost-cap circuit breakers | 1d | Every LLM-cost endpoint refuses with 429 when daily user cap hit. NEXT_SESSION mentions this; needs a sweep across orchestrator endpoints. |
 | Sentry coverage | ½d | Every unhandled exception path has a Sentry breadcrumb. Frontend + backend. |
 | WebSocket back-pressure | 1d | `/ws/discovery` reconnects on drop, queues backed-up events instead of dropping. |
