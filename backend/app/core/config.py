@@ -257,6 +257,21 @@ class Settings(BaseSettings):
     AZURE_GROK_KEY: SecretStr | None = None
     AZURE_GROK_MODEL: str = "grok-4-1-fast-reasoning"
 
+    # Azure AI Foundry — unified single-project pattern (May 2026 onwards).
+    # All deployments live under a single Foundry project; one key auths
+    # all of them; deployment routing happens by deployment name. The
+    # GitHub-secret names map directly to these envs:
+    #   AZURE_AI_KEY               → AZURE_AI_FOUNDRY_KEY
+    #   AZURE_AI_OPENAI_ENDPOINT   → AZURE_AI_FOUNDRY_OPENAI_ENDPOINT
+    #   AZURE_AI_PROJECT_ENDPOINT  → AZURE_AI_FOUNDRY_PROJECT_ENDPOINT
+    # When the Foundry project is configured, the per-deployment fields
+    # above (AZURE_GPT4O_*, AZURE_O3MINI_*, etc.) are used as fallbacks
+    # only — the orchestrator prefers the Foundry endpoint.
+    AZURE_AI_FOUNDRY_KEY: SecretStr | None = None
+    AZURE_AI_FOUNDRY_OPENAI_ENDPOINT: str = ""    # OpenAI-style chat/completions endpoint (e.g. https://<resource>.openai.azure.com)
+    AZURE_AI_FOUNDRY_PROJECT_ENDPOINT: str = ""   # Project-level endpoint (e.g. https://<project>.services.ai.azure.com)
+    AZURE_AI_FOUNDRY_API_VERSION: str = "2024-12-01-preview"
+
     # AWS Bedrock (IAM user: humanovo-admin)
     AWS_ACCESS_KEY_ID: SecretStr | None = None
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
@@ -460,6 +475,11 @@ class Settings(BaseSettings):
     def azure_grok_key_value(self) -> str | None:
         """Azure Grok API key."""
         return self.AZURE_GROK_KEY.get_secret_value() if self.AZURE_GROK_KEY else None
+
+    @property
+    def azure_ai_foundry_key_value(self) -> str | None:
+        """Azure AI Foundry unified-project key (replaces per-deployment keys)."""
+        return self.AZURE_AI_FOUNDRY_KEY.get_secret_value() if self.AZURE_AI_FOUNDRY_KEY else None
 
     @property
     def azure_embedding_key_value(self) -> str | None:
