@@ -46,7 +46,10 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 5 min was tight for 4-stage swarm; 12-stage version commonly
+    # runs 60–180s plus per-model smoke (~10s) plus pip install (~30s).
+    # 10 min leaves comfortable headroom without inviting hung CI.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
