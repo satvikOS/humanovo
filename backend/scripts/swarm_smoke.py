@@ -301,6 +301,7 @@ async def main() -> int:
     aws_region = os.environ.get("AWS_REGION", "us-east-1")
     azure_key = os.environ.get("AZURE_AI_KEY")
     azure_project_endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
+    azure_openai_endpoint = os.environ.get("AZURE_AI_OPENAI_ENDPOINT", "")
 
     if not (aws_key and aws_secret):
         return _missing("AWS credentials missing — swarm smoke requires both Bedrock + Foundry")
@@ -383,8 +384,16 @@ async def main() -> int:
     # returns matched DualEmbedding records with the right dim assertion.
     # The discovery pipeline relies on this for hybrid retrieval (small
     # for pre-filter, large for re-rank).
+    #
+    # Embeddings on the Foundry hub are exposed on the OPENAI resource
+    # endpoint (humanovo-foundry-hub.openai.azure.com/openai/v1), not
+    # on the project endpoint — the latter 404s on /embeddings. Use
+    # the openai endpoint when it's set; fall back to project_endpoint
+    # otherwise so the embedder still has a hope on hubs that route
+    # embeddings differently.
+    embedder_base = azure_openai_endpoint or azure_project_endpoint
     embedder = FoundryEmbedder(
-        base_url=azure_project_endpoint,
+        base_url=embedder_base,
         api_key=azure_key,
         large_deployment="text-embedding-3-large",
         small_deployment="text-embedding-3-small",

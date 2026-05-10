@@ -79,19 +79,19 @@ jobs:
         run: |
           python backend/scripts/ai_integration_smoke.py
 
-      - name: Run swarm smoke (end-to-end 4-agent grounded pipeline)
-        # Only runs if the per-stage smoke succeeded — if a single
-        # provider can't even answer "hello", the swarm is guaranteed
-        # to fail and the diagnostic value lives in the per-stage
-        # report above. When this runs, it proves Bedrock + Foundry
-        # cooperate through tool-calling, and that grounding actually
-        # carries from agent to agent (assertion: synthesizer's final
-        # answer must mention the canned tool fact).
+      - name: Run swarm smoke (end-to-end 12-stage grounded pipeline)
+        # Runs after the per-stage smoke. Exercises the full 12-stage
+        # discovery pipeline through Bedrock + Foundry with tool-calling
+        # grounding, dual-embedding (large+small in parallel), and
+        # critic-driven loopback (validate/ground/score can re-route
+        # back to earlier stages). Asserts grounding carried end-to-end
+        # (final answer mentions the canned tool fact).
         env:
           AWS_NEW_ACCESS_KEY_ID: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
           AWS_NEW_SECRET_ACCESS_KEY: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
           AWS_REGION: us-east-1
           AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
+          AZURE_AI_OPENAI_ENDPOINT: ${{ secrets.AZURE_AI_OPENAI_ENDPOINT }}
           AZURE_AI_PROJECT_ENDPOINT: ${{ secrets.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
           python backend/scripts/swarm_smoke.py
