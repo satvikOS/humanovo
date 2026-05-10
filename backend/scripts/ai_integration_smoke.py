@@ -130,6 +130,42 @@ async def _probe_azure_foundry_deployment(
     foundry_v1_err: str | None = None
     foundry_models_err: str | None = None
 
+    # Endpoints supplied by Azure Foundry's "v1 surface" arrive with
+    # path suffixes already baked in (e.g.
+    # `https://<resource>.openai.azure.com/openai/v1/` or
+    # `https://<hub>.services.ai.azure.com/api/projects/<name>`).
+    # Each client below expects a different prefix shape, so we
+    # normalize:
+    #   • AsyncAzureOpenAI takes JUST the resource host — it appends
+    #     `/openai/deployments/<deployment>/chat/completions` itself.
+    #   • AsyncOpenAI on the v1 surface takes the FULL base ending in
+    #     `/openai/v1` and appends `/chat/completions`.
+    #   • AsyncOpenAI on /models takes `<base>/models` and appends
+    #     `/chat/completions?api-version=...`.
+    def _strip_openai_path(url: str) -> str:
+        u = url.rstrip("/")
+        for suffix in ("/openai/v1", "/openai"):
+            if u.endswith(suffix):
+                u = u[: -len(suffix)]
+        return u
+
+    def _ensure_v1_path(url: str) -> str:
+        u = url.rstrip("/")
+        if u.endswith("/openai/v1"):
+            return u
+        if u.endswith("/openai"):
+            return f"{u}/v1"
+        return f"{u}/openai/v1"
+
+    def _ensure_models_path(url: str) -> str:
+        u = url.rstrip("/")
+        for suffix in ("/openai/v1", "/openai"):
+            if u.endswith(suffix):
+                u = u[: -len(suffix)]
+        if u.endswith("/models"):
+            return u
+        return f"{u}/models"
+
     # Foundry projects don't always accept the latest preview api-
     # version — older provisions may pin to 2024-08-01 / 2024-10-21
     # / 2025-01-01-preview etc. Cycle through known-good versions
@@ -144,9 +180,13 @@ async def _probe_azure_foundry_deployment(
     # Endpoint pattern 1: AsyncAzureOpenAI (resource-style,
     # https://<resource>.openai.azure.com). Cycle api-versions here
     # — same Azure Foundry projects refuse certain preview versions.
-    if openai_endpoint:
+    # The SDK appends `/openai/deployments/<deployment>/chat/...`
+    # itself, so strip any baked-in `/openai/v1` suffix the operator
+    # may have included on the secret.
+    openai_resource_host = _strip_openai_path(openai_endpoint) if openai_endpoint else ""
+    if openai_resource_host:
         for av in api_version_candidates:
-            client_a = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_endpoint, api_version=av)
+            client_a = AsyncAzureOpenAI(api_key=key, azure_endpoint=openai_resource_host, api_version=av)
             for deployment in deployment_candidates:
                 t0 = time.monotonic()
                 try:
@@ -170,50 +210,55 @@ async def _probe_azure_foundry_deployment(
                 except Exception as e:
                     openai_endpoint_err = f"{deployment} @ {av}: {str(e)[:200]}"
 
-    # Endpoint pattern 2a: Foundry hub /openai/v1 path — this is what
-    # GPT-4o / o-series / o3 deployments live behind on a Foundry hub
-    # (services.ai.azure.com). The /models path (pattern 2b) is for
-    # the Azure-AI-inference SDK (Cohere, Llama, Mistral, Phi).
+    # Endpoint pattern 2a: Foundry "v1 surface" — `<endpoint>/openai/v1`.
+    # GPT-4o / o-series / o3 deployments live here on a Foundry hub
+    # (services.ai.azure.com). The v1 surface REJECTS the api-version
+    # query parameter ("api-version query parameter is not allowed
+    # when using /v1 path"), so we omit `default_query` here. Try
+    # the project endpoint AND the openai endpoint as v1 surfaces —
+    # different Foundry provisions expose v1 on either.
+    v1_bases: list[str] = []
     if project_endpoint:
-        base_v1 = project_endpoint.rstrip("/")
-        if "services.ai.azure.com" in base_v1 and "/openai" not in base_v1:
-            base_v1 = f"{base_v1}/openai/v1"
-        for av in api_version_candidates:
-            client_v1 = AsyncOpenAI(
-                base_url=base_v1,
-                api_key=key,
-                default_query={"api-version": av},
-            )
-            for deployment in deployment_candidates:
-                t0 = time.monotonic()
-                try:
-                    resp = await asyncio.wait_for(
-                        client_v1.chat.completions.create(
-                            model=deployment,
-                            messages=[{"role": "user", "content": PROBE_PROMPT}],
-                            max_tokens=10,
-                        ),
-                        timeout=PROBE_TIMEOUT_S,
-                    )
-                    latency = int((time.monotonic() - t0) * 1000)
-                    text = (resp.choices[0].message.content or "").strip()[:80]
-                    return ProbeResult(
-                        label=f"{label} [{deployment} via foundry-v1 @ {av}]",
-                        configured=True, reachable=True, latency_ms=latency,
-                        error=None, response_preview=text,
-                    )
-                except asyncio.TimeoutError:
-                    foundry_v1_err = f"timeout {deployment} @ {av}"
-                except Exception as e:
-                    foundry_v1_err = f"{deployment} @ {av}: {str(e)[:200]}"
+        v1_bases.append(_ensure_v1_path(project_endpoint))
+    if openai_endpoint:
+        candidate = _ensure_v1_path(openai_endpoint)
+        if candidate not in v1_bases:
+            v1_bases.append(candidate)
+    for base_v1 in v1_bases:
+        client_v1 = AsyncOpenAI(base_url=base_v1, api_key=key)
+        for deployment in deployment_candidates:
+            t0 = time.monotonic()
+            try:
+                resp = await asyncio.wait_for(
+                    client_v1.chat.completions.create(
+                        model=deployment,
+                        messages=[{"role": "user", "content": PROBE_PROMPT}],
+                        max_tokens=10,
+                    ),
+                    timeout=PROBE_TIMEOUT_S,
+                )
+                latency = int((time.monotonic() - t0) * 1000)
+                text = (resp.choices[0].message.content or "").strip()[:80]
+                # Tag with which host responded so the operator can
+                # disambiguate openai-resource-v1 vs project-v1.
+                tag = "foundry-v1" if "services.ai.azure.com" in base_v1 else "openai-v1"
+                return ProbeResult(
+                    label=f"{label} [{deployment} via {tag}]",
+                    configured=True, reachable=True, latency_ms=latency,
+                    error=None, response_preview=text,
+                )
+            except asyncio.TimeoutError:
+                foundry_v1_err = f"timeout {deployment}"
+            except Exception as e:
+                foundry_v1_err = f"{deployment}: {str(e)[:200]}"
 
     # Endpoint pattern 2b: Foundry /models path — Azure AI inference
     # API. OpenAI SDK is request-shape-compatible enough for chat
     # completions if api-version is supplied as a query param.
+    # Normalize the path so we don't end up with /openai/v1/models on
+    # an endpoint that already had /openai/v1 baked in.
     if project_endpoint:
-        base_models = project_endpoint.rstrip("/")
-        if "services.ai.azure.com" in base_models and not base_models.endswith("/models"):
-            base_models = f"{base_models}/models"
+        base_models = _ensure_models_path(project_endpoint)
         for av in api_version_candidates:
             client_m = AsyncOpenAI(
                 base_url=base_models,
@@ -292,17 +337,32 @@ STAGE_ASSIGNMENTS: list[dict[str, object]] = [
     {
         "label": "critic / synthesizer — GPT-4o",
         "provider": "azure",
-        "deployments": ["gpt-4o", "gpt4o", "gpt-4o-2024-11-20", "gpt-4o-mini"],
+        # Foundry hubs commonly auto-create deployments named after the
+        # model id (lowercase, no dashes mangled). Cycle through every
+        # plausible casing/version flavour the operator might have
+        # picked from the Azure portal model catalog.
+        "deployments": [
+            "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
+            "gpt-4o-2024-11-20", "gpt-4o-2024-08-06",
+            "gpt-4o-2024-05-13", "gpt4o", "GPT-4o",
+        ],
     },
     {
         "label": "reasoner — o3-mini / o3",
         "provider": "azure",
-        "deployments": ["o3-mini", "o3", "o3-2024-12-17", "o1-mini"],
+        "deployments": [
+            "o3-mini", "o3", "o3-2024-12-17", "o3-mini-2025-01-31",
+            "o1", "o1-mini", "o1-preview", "o4-mini",
+        ],
     },
     {
         "label": "rag-literature — Cohere",
         "provider": "azure",
-        "deployments": ["cohere-command-a", "Cohere-command-a-08-2024", "command-a"],
+        "deployments": [
+            "Cohere-command-a", "cohere-command-a", "command-a",
+            "Cohere-command-r-plus", "command-r-plus",
+            "Cohere-embed-v3-english",
+        ],
     },
 ]
 
@@ -354,18 +414,26 @@ async def _list_azure_deployments(openai_endpoint: str, project_endpoint: str, k
     # data-plane (use api-key), some control-plane (use Authorization
     # bearer). Try both auth headers per URL — the wrong header just
     # 401s, no harm.
+    #
+    # Endpoints supplied by the Foundry "v1 surface" arrive with paths
+    # like `/openai/v1/` already baked in, so we strip those before
+    # building list-deployment URLs to avoid `/openai/v1/openai/v1/...`.
+    def _strip_path(url: str) -> str:
+        u = url.rstrip("/")
+        for suffix in ("/openai/v1", "/openai"):
+            if u.endswith(suffix):
+                u = u[: -len(suffix)]
+        return u
     urls: list[str] = []
     if openai_endpoint:
-        base = openai_endpoint.rstrip("/")
+        base = _strip_path(openai_endpoint)
         urls.append(f"{base}/openai/deployments?api-version={api_version}")
         urls.append(f"{base}/openai/v1/models")
-        urls.append(f"{base}/openai/models?api-version={api_version}")
     if project_endpoint:
-        base = project_endpoint.rstrip("/")
-        urls.append(f"{base}/openai/deployments?api-version={api_version}")
+        base = _strip_path(project_endpoint)
         urls.append(f"{base}/openai/v1/models")
+        urls.append(f"{base}/models?api-version=2024-05-01-preview")
         urls.append(f"{base}/models?api-version={api_version}")
-        urls.append(f"{base}/api/deployments?api-version={api_version}")
 
     deployments: list[str] = []
     print("\nDeployment discovery probes:")
