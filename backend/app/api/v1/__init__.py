@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     agent_chat_stream,
     agents,
     account,
+    admin_users,
     ai_cost_estimate,
     ai_health,
     ai_runs,
@@ -170,6 +171,7 @@ router.include_router(ai_health.router, tags=["admin", "ai"])
 router.include_router(ai_cost_estimate.router, tags=["admin", "ai"])
 router.include_router(ai_runs.router, tags=["admin", "ai"])
 router.include_router(account.router, tags=["account", "gdpr"])
+router.include_router(admin_users.router, tags=["admin", "users"])
 
 # Citation verification — CrossRef + NCBI round-trip for single citations.
 router.include_router(citation_verify.router, prefix="/citation", tags=["citation"])
