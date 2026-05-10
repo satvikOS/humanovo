@@ -2162,14 +2162,37 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                 if blacklist:
                     user_prompt = f"{blacklist}\n\n{user_prompt}"
 
-                response = await self._llm.generate(
-                    model_type=actual_model_type,
-                    prompt=user_prompt,
-                    system_prompt=system_prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    _cost_ctx=cost_ctx,
+                # Phase 1 task-#74 migration: route opted-in stages
+                # through the grounded-agent layer; legacy LLM path
+                # for everything else. Defaults to legacy for every
+                # stage (USE_AGENT_LAYER_FOR_STAGES=[] in config).
+                from app.agents.agent_layer_shim import (
+                    generate_via_agent_layer,
+                    should_route_through_agent_layer,
                 )
+                if should_route_through_agent_layer(stage_num):
+                    logger.info(
+                        f"  Stage {stage_num} ({stage_name}): routing via agent layer"
+                    )
+                    response = await generate_via_agent_layer(
+                        model_type=actual_model_type,
+                        prompt=user_prompt,
+                        system_prompt=system_prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        stage_num=stage_num,
+                        stage_name=stage_name,
+                        cost_ctx=cost_ctx,
+                    )
+                else:
+                    response = await self._llm.generate(
+                        model_type=actual_model_type,
+                        prompt=user_prompt,
+                        system_prompt=system_prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        _cost_ctx=cost_ctx,
+                    )
 
                 # Parse the response
                 parsed = self._parse_stage_output(response, stage_num)

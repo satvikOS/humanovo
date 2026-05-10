@@ -343,6 +343,24 @@ class Settings(BaseSettings):
     # exceeds this fraction of the cap. Doesn't abort.
     BUDGET_WARN_AT: float = 0.8
 
+    # Phase 1 of the discovery_orchestrator → grounded-agent-layer
+    # migration (task #74). Stages whose number is in this list route
+    # through `app/agents/agent_layer_shim.py` instead of
+    # MultiModelLLM.generate(). Empty default = legacy path for every
+    # stage, so this commit is a pure no-op until an operator opts in
+    # by setting USE_AGENT_LAYER_FOR_STAGES=12 (or equivalent JSON).
+    # Recommended phasing:
+    #   Phase 1: [12]            (FINALIZE only — synthesis is least
+    #                              risky to run through the new path,
+    #                              already grounded by stages 1-11)
+    #   Phase 2: [9, 10, 11, 12] (post-grounding stages)
+    #   Phase 3: [1-12]          (full migration once Phase 1+2 are
+    #                              validated)
+    USE_AGENT_LAYER_FOR_STAGES: list[int] = []
+    # Sub-agent fan-out used only by routed stages. 1 = single-shot
+    # (cheapest); raise to 4–8 for diversity, 25+ for production.
+    AGENT_LAYER_SUB_AGENTS_PER_STAGE: int = 1
+
     # Parallel MCP (Model Context Protocol) Configuration
     # Distributes context windows across models to overcome per-model token limits
     MCP_ENABLED: bool = True
