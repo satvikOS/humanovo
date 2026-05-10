@@ -71,6 +71,15 @@ class User(BaseModel):
     is_verified = Column(Boolean, default=False, nullable=False)
     email_verified_at = Column(DateTime(timezone=True), nullable=True)
 
+    # GDPR Art. 17 (right to erasure). When the user clicks
+    # "Delete my account" we populate delete_requested_at + flip
+    # is_active=False. A daily cron picks up rows where
+    # delete_requested_at < now() - 30 days and hard-deletes
+    # cascading user data; deleted_at then records when the
+    # hard-delete actually fired. See migration 024_user_soft_delete.
+    delete_requested_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
     # First-run onboarding wizard gate. New signups land at FALSE so
     # the wizard fires once; the wizard's "skip" / "finish" handlers
     # PATCH this to TRUE. See migration 022 for the column-level
