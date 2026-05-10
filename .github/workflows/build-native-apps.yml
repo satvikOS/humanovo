@@ -297,7 +297,26 @@ jobs:
       - name: Build native app
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5  # action-v0.6.2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Token resolution prefers a user-supplied PAT (RELEASE_PAT)
+          # over the workflow-issued GITHUB_TOKEN. Why: when the repo's
+          # "Settings → Actions → General → Workflow permissions" is
+          # set to "Read repository contents and packages" (the default
+          # for some org / Pro setups), GITHUB_TOKEN gets a 403
+          # "Resource not accessible by integration" at the
+          # create-release step even when the workflow declares
+          # `permissions: contents: write`. A classic PAT with
+          # `repo` scope bypasses that org-level toggle.
+          #
+          # Operator action when the build fails on create-release:
+          #   1. Open https://github.com/satvikOS/humanovo/settings/actions
+          #      and switch Workflow permissions to "Read and write".
+          #   2. OR create a fine-grained PAT (Settings → Developer
+          #      settings → Personal access tokens) with `Contents:
+          #      Read and write` scope on the humanovo repo, store as
+          #      repo secret RELEASE_PAT.
+          # Either fix unblocks the build; the PAT path is preferable
+          # because it survives org-level Workflow-permission resets.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           # Code-signing + Tauri-updater secrets are forwarded to env
           # by the previous step ONLY when the corresponding repo secret
           # is non-empty. Empty-secret repos produce unsigned installers

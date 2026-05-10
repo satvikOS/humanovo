@@ -114,7 +114,11 @@ jobs:
         working-directory: backend
     services:
       postgres:
-        image: postgres:16
+        # pgvector/pgvector:pg16 ships pgvector pre-installed. Stock
+        # postgres:16 lacks it and our migrations CREATE EXTENSION
+        # IF NOT EXISTS "vector" in env.py preflight — would fail
+        # with `extension "vector" is not available` on every PR.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: humanovo
           POSTGRES_PASSWORD: humanovo
