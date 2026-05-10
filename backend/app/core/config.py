@@ -291,9 +291,16 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: SecretStr | None = None
     AWS_REGION: str = "us-east-1"
 
-    # Bedrock Model IDs — Claude Opus 4.6 serves as Explorer + Synthesizer
-    BEDROCK_MODEL_CLAUDE_OPUS: str = "us.anthropic.claude-opus-4-6-v1:0"
-    BEDROCK_MODEL_CLAUDE_SONNET: str = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    # Bedrock Model IDs — pinned to the highest version verified
+    # working against the humanovo AWS account by the AI integration
+    # smoke (see swarm_smoke._pick_bedrock_alias and ai_integration_smoke.py).
+    # Auto-cycler in the smoke tries 4.6 first; if Bedrock account
+    # access for 4.6 is enabled later, swap these to the 4.6 IDs.
+    # As of 2026-05-10:
+    #   • Opus: 4.6 not enabled on this account → 4.1 stays
+    #   • Sonnet: 4.5 verified working (upgrade from 4.0)
+    BEDROCK_MODEL_CLAUDE_OPUS: str = "us.anthropic.claude-opus-4-1-20250805-v1:0"
+    BEDROCK_MODEL_CLAUDE_SONNET: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
     # Discovery Service Configuration
     DISCOVERY_LLM_PROVIDER: str = "azure_ai"  # azure_ai (primary), bedrock, azure (legacy)
