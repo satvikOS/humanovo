@@ -58,7 +58,7 @@ jobs:
           # Only the SDKs the smoke needs — avoids pulling the full
           # backend requirements.txt (which has 80+ packages and
           # would dominate the run time).
-          pip install boto3 openai
+          pip install boto3 openai httpx
 
       - name: Run AI integration smoke
         env:

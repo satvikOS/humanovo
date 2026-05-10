@@ -146,7 +146,7 @@ async def _probe_azure_foundry_deployment(
             except asyncio.TimeoutError:
                 last_error = f"timeout {deployment}"
             except Exception as e:
-                last_error = f"{deployment}: {str(e)[:120]}"
+                last_error = f"{deployment}: {str(e)[:300]}"
 
     # Endpoint pattern 2: Foundry shared (AsyncOpenAI base_url)
     if project_endpoint:
@@ -175,7 +175,7 @@ async def _probe_azure_foundry_deployment(
             except asyncio.TimeoutError:
                 last_error = f"timeout {deployment} (foundry)"
             except Exception as e:
-                last_error = f"{deployment} (foundry): {str(e)[:120]}"
+                last_error = f"{deployment} (foundry): {str(e)[:300]}"
 
     return ProbeResult(
         label=label, configured=True, reachable=False, latency_ms=None,
@@ -257,6 +257,53 @@ def _emit_summary(results: list[ProbeResult]) -> str:
     return "\n".join(lines)
 
 
+async def _list_azure_deployments(openai_endpoint: str, project_endpoint: str, key: str, api_version: str) -> list[str]:
+    """Best-effort discovery: hit the Azure deployments-list APIs so the
+    smoke report can surface the deployment names the project actually
+    has, regardless of whether our STAGE_ASSIGNMENTS aliases match.
+    Tries both endpoint patterns; returns whatever responds."""
+    if not key:
+        return []
+    import httpx
+    candidates: list[tuple[str, dict[str, str]]] = []
+    if openai_endpoint:
+        # Azure OpenAI control-plane list-deployments — only works on
+        # resource-style endpoints with the right RBAC; harmless if it
+        # 404s.
+        candidates.append((
+            f"{openai_endpoint.rstrip('/')}/openai/deployments?api-version={api_version}",
+            {"api-key": key},
+        ))
+    if project_endpoint:
+        base = project_endpoint.rstrip("/")
+        if "services.ai.azure.com" in base and not base.endswith("/models"):
+            base = f"{base}/models"
+        # Foundry shared endpoint — `?api-version=...&list=true` on
+        # /models lists deployments accessible to the project key.
+        candidates.append((f"{base}?api-version={api_version}", {"Authorization": f"Bearer {key}"}))
+        candidates.append((f"{base}?api-version={api_version}", {"api-key": key}))
+    deployments: list[str] = []
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        for url, headers in candidates:
+            try:
+                resp = await http.get(url, headers=headers)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                # Both endpoint shapes: {"data": [{"id": "..."}]} or
+                # {"value": [{"name": "..."}]}.
+                items = data.get("data") or data.get("value") or []
+                for item in items:
+                    name = item.get("id") or item.get("name") or item.get("model")
+                    if name and name not in deployments:
+                        deployments.append(name)
+                if deployments:
+                    return deployments
+            except Exception:
+                continue
+    return deployments
+
+
 async def main() -> int:
     aws_key = os.environ.get("AWS_NEW_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
     aws_secret = os.environ.get("AWS_NEW_SECRET_ACCESS_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY")
@@ -266,6 +313,29 @@ async def main() -> int:
     azure_api_version = os.environ.get("AZURE_AI_FOUNDRY_API_VERSION", "2024-12-01-preview")
 
     azure_project_endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
+
+    # Discover real deployment names so the report tells the operator
+    # what's actually available, not just what the candidate list
+    # *guessed*. Best-effort — empty list is fine; the per-stage
+    # candidate probes still run.
+    discovered_deployments: list[str] = []
+    if azure_key:
+        try:
+            discovered_deployments = await _list_azure_deployments(
+                azure_openai_endpoint, azure_project_endpoint, azure_key, azure_api_version,
+            )
+            if discovered_deployments:
+                print(f"\nDiscovered Azure deployments ({len(discovered_deployments)}):")
+                for d in discovered_deployments:
+                    print(f"  - {d}")
+                # Inject the discovered names ahead of every Azure stage's
+                # candidate list so the script tries the real names FIRST.
+                for entry in STAGE_ASSIGNMENTS:
+                    if entry.get("provider") == "azure":
+                        existing = list(entry.get("deployments", []))  # type: ignore[arg-type]
+                        entry["deployments"] = discovered_deployments + [d for d in existing if d not in discovered_deployments]
+        except Exception as e:
+            print(f"Deployment discovery failed (non-fatal): {e}")
 
     tasks = []
     for entry in STAGE_ASSIGNMENTS:
