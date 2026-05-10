@@ -119,6 +119,12 @@ class SwarmResult:
     cost_by_model: dict[str, float] = field(default_factory=dict)
     """Per-model cost roll-up (e.g. "bedrock/claude-opus-4-1" → 45.2¢)
     so the operator can see which model is the spend center."""
+    budget_aborted: bool = False
+    """True when the run hit `Swarm.budget_cents` and stopped early.
+    The final_text in this case will be the last stage's output — the
+    pipeline returns whatever it has rather than empty."""
+    budget_abort_message: str | None = None
+    """Human-readable explanation of when/why the abort fired."""
 
 
 class Swarm:
@@ -129,11 +135,19 @@ class Swarm:
         stages: list[SwarmStage],
         *,
         loopback_budget: int = 3,
+        budget_cents: float | None = None,
     ) -> None:
         if not stages:
             raise ValueError("Swarm requires at least one stage")
         self.stages = stages
         self.loopback_budget = loopback_budget
+        # Hard cost cap. When running cost (sum of stage costs across
+        # iterations including loopback re-runs) exceeds this, the
+        # swarm aborts cleanly between stages — finishes the current
+        # stage's already-dispatched calls, returns a SwarmResult
+        # with a `budget_aborted=True` flag, doesn't kick off any
+        # more stages. None = unlimited (for tests / development).
+        self.budget_cents = budget_cents
         self._stage_index_by_name: dict[str, int] = {s.name: i for i, s in enumerate(stages)}
 
     async def run(
@@ -197,7 +211,27 @@ class Swarm:
         )
 
         i = 0
+        running_cost_cents = 0.0
+        budget_aborted = False
+        budget_abort_message: str | None = None
         while i < len(self.stages):
+            # Budget circuit breaker — checked BEFORE dispatching the
+            # next stage so we never spend more than we said we would.
+            # The current stage's cost isn't known until it runs, so
+            # the cap is enforced on cumulative spend from prior stages.
+            if (
+                self.budget_cents is not None
+                and self.budget_cents > 0
+                and running_cost_cents >= self.budget_cents
+            ):
+                budget_aborted = True
+                budget_abort_message = (
+                    f"Hit budget cap before stage '{self.stages[i].name}': "
+                    f"running cost ¢{running_cost_cents:.2f} ≥ cap "
+                    f"¢{self.budget_cents:.2f}. Stages {i}/{len(self.stages)} "
+                    f"completed; remaining {len(self.stages) - i} skipped."
+                )
+                break
             stage = self.stages[i]
             iteration_by_index[i] = iteration_by_index.get(i, 0) + 1
 
@@ -267,6 +301,11 @@ class Swarm:
                         f"[Loopback note from {stage.name}: {triggered_reason}]\n\n"
                         + (result.text.strip() or running_input)
                     )
+                    # Loopback paths still spend money — count this
+                    # critic stage's cost toward the running cap so
+                    # a noisy critic that re-triggers many times can't
+                    # bypass the budget circuit breaker.
+                    running_cost_cents += result.cost_cents
                     i = target_idx
                     continue
 
@@ -290,6 +329,7 @@ class Swarm:
 
             if result.text.strip():
                 running_input = result.text
+            running_cost_cents += result.cost_cents
             i += 1
 
         # Surface the most recent non-loopback stage's text as the
@@ -327,6 +367,8 @@ class Swarm:
             total_usage=total_usage,
             total_cost_cents=total_cost,
             cost_by_model=cost_by_model,
+            budget_aborted=budget_aborted,
+            budget_abort_message=budget_abort_message,
         )
 
     def _resolve_stage(self, target: str) -> int | None:

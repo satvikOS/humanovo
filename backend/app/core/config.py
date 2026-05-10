@@ -319,14 +319,29 @@ class Settings(BaseSettings):
     # fans out to this many parallel sub-agents (each with a different
     # persona suffix on the system prompt) before aggregating into one
     # answer. Per-stage cost scales linearly with N.
-    #   • Production target: 300 (per user direction 2026-05-10)
-    #   • CI smoke: low single digits (HUMANOVO_SUBAGENTS env override)
-    # The agent layer reads HUMANOVO_SUBAGENTS env first, then this
-    # setting, then defaults to 300. max_concurrent caps RPM —
-    # Foundry o4-mini = 500 RPM = ~8 concurrent comfortably; the 16
-    # default leaves headroom for other concurrent stages.
-    SUB_AGENTS_PER_STAGE: int = 300
+    #
+    # Default 25: empirically gives strong persona diversification at
+    # ~1/12th the cost of N=300. Operators can raise to the
+    # user-directed target of 300 by setting SUB_AGENTS_PER_STAGE in
+    # the running env once budget gates + cost estimator are in place
+    # and a few real runs at 25 have validated quality.
+    #   • CI smoke: HUMANOVO_SUBAGENTS=4 in workflow env
+    #   • Operator override: SUB_AGENTS_PER_STAGE=N or HUMANOVO_SUBAGENTS=N
+    # max_concurrent caps RPM — Foundry o4-mini = 500 RPM = ~8 concurrent
+    # comfortably; the 16 default leaves headroom for other concurrent
+    # stages.
+    SUB_AGENTS_PER_STAGE: int = 25
     SUB_AGENTS_MAX_CONCURRENT: int = 16
+
+    # Per-run budget cap — the swarm checks this between stages and
+    # aborts cleanly if the running cost would exceed the cap. Default
+    # 200 cents ($2.00) per hypothesis is well above a measured N=25
+    # run and well below a runaway N=300 run, so it acts as a circuit
+    # breaker without choking normal traffic. Set to 0 to disable.
+    BUDGET_PER_RUN_CENTS: int = 200
+    # Soft warning threshold — log a warning when a running cost
+    # exceeds this fraction of the cap. Doesn't abort.
+    BUDGET_WARN_AT: float = 0.8
 
     # Parallel MCP (Model Context Protocol) Configuration
     # Distributes context windows across models to overcome per-model token limits

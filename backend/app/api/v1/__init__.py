@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     admin,
     agent_chat_stream,
     agents,
+    ai_cost_estimate,
     ai_health,
     auth,
     billing,
@@ -164,6 +165,7 @@ router.include_router(admin.router, prefix="/admin", tags=["admin"])
 # Probes each Bedrock model + Azure deployment with a 1-token call
 # and reports per-model latency_ms / reachable / error. Cached 30 s.
 router.include_router(ai_health.router, tags=["admin", "ai"])
+router.include_router(ai_cost_estimate.router, tags=["admin", "ai"])
 
 # Citation verification — CrossRef + NCBI round-trip for single citations.
 router.include_router(citation_verify.router, prefix="/citation", tags=["citation"])
