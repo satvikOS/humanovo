@@ -27,6 +27,7 @@ const ROUTES = [
   '/data-visualization',
   '/data-manager',
   '/genomics',
+  '/imaging',
   '/knowledge-graph',
   '/knowledge-graph/viewer',
   '/dev/pgvector',
