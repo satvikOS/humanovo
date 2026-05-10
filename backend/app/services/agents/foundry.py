@@ -209,6 +209,18 @@ class FoundryResponsesAgent:
 
             steps.append(AgentStep(text=step_text, tool_calls=tool_calls_logged))
 
+        # If we exited via max_steps without a final-answer turn,
+        # downstream stages would receive empty `text` and the swarm
+        # would degrade. Recover the last non-empty step text so the
+        # next agent has *something* to reason about — better partial
+        # context than no context. The stopped_reason still flags
+        # max_steps for the audit trail.
+        if not final_text and stopped == "max_steps":
+            for step in reversed(steps):
+                if step.text and step.text.strip():
+                    final_text = step.text
+                    break
+
         latency_ms = int((time.monotonic() - t0) * 1000)
         return AgentResult(
             text=final_text,

@@ -170,6 +170,15 @@ class BedrockClaudeAgent:
             steps.append(AgentStep(text=step_text, tool_calls=tool_calls_logged))
             messages.append({"role": "user", "content": tool_result_blocks})
 
+        # max_steps recovery — see foundry.py for rationale. Downstream
+        # stages need *some* text from this stage even if it didn't
+        # produce a final answer in the allotted steps.
+        if not final_text and stopped == "max_steps":
+            for step in reversed(steps):
+                if step.text and step.text.strip():
+                    final_text = step.text
+                    break
+
         latency_ms = int((time.monotonic() - t0) * 1000)
         return AgentResult(
             text=final_text,

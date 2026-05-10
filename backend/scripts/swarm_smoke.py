@@ -140,12 +140,18 @@ PIPELINE_SPEC: list[StageSpec] = [
     StageSpec(
         num=4, name="counter", target_role="Mistral-Large-3 (Foundry — substituted with o4-mini)",
         agent_key="foundry-o4mini",
+        # Counter needs an explicit termination clause: o4-mini's
+        # reasoning loop will otherwise keep calling the tool from
+        # different angles trying to build the strongest counter,
+        # eating max_steps without emitting a final message. Force
+        # AT MOST one tool call before the message.
         instruction=(
-            "You are Stage 4 (COUNTER). Generate one counter-argument that "
-            "challenges the hypothesis. If you need to verify a specific claim "
-            "to construct the counter, call `lookup_biomedical_fact`. "
-            "Output 1–2 sentences."
+            "You are Stage 4 (COUNTER). Make at most ONE call to "
+            "`lookup_biomedical_fact` if needed to verify a claim, then "
+            "IMMEDIATELY output your counter-argument as a 1–2 sentence "
+            "message. Do not call the tool more than once."
         ),
+        max_steps=3,
     ),
     StageSpec(
         num=5, name="revise", target_role="o3-mini (Foundry — substituted with o4-mini)",
