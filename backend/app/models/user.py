@@ -106,6 +106,12 @@ class User(BaseModel):
     stripe_customer_id = Column(String(64), nullable=True, unique=True)
     stripe_subscription_id = Column(String(64), nullable=True, index=True)
     stripe_subscription_status = Column(String(32), nullable=True)
+    # Per-user opt-in for overage billing (Stripe Meter Events,
+    # ~$1.20/run beyond tier cap). Default FALSE — the budget cap is
+    # a hard wall for everyone until they explicitly opt in via
+    # Settings or an admin endpoint. See migration 026 +
+    # app/services/stripe_overage.py.
+    overage_enabled = Column(Boolean, default=False, nullable=False)
 
     # Relationships
     projects = relationship("Project", back_populates="owner", lazy="dynamic")
