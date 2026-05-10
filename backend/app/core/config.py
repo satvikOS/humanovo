@@ -360,6 +360,14 @@ class Settings(BaseSettings):
     # Sub-agent fan-out used only by routed stages. 1 = single-shot
     # (cheapest); raise to 4–8 for diversity, 25+ for production.
     AGENT_LAYER_SUB_AGENTS_PER_STAGE: int = 1
+    # Per-stage opt-in for runtime grounding tools (lookup_evidence,
+    # pubmed_search). Stages 1–9 already receive grounding evidence
+    # pre-call from the orchestrator's source-API sweep, so adding
+    # tools to those stages risks double-fetching. Stages 10–12 do
+    # less pre-fetched grounding work and benefit most from in-loop
+    # tool calls. Empty default = no tools for any routed stage
+    # (matches Phase 1 contract: legacy pre-call grounding only).
+    AGENT_LAYER_TOOLS_FOR_STAGES: list[int] = []
 
     # Parallel MCP (Model Context Protocol) Configuration
     # Distributes context windows across models to overcome per-model token limits

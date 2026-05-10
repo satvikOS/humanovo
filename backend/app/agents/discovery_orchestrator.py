@@ -2116,6 +2116,7 @@ Your goal is to STRENGTHEN this hypothesis — address its weaknesses, find stro
                     "stage_name": stage_name,
                     "hypothesis_id": hypothesis_id,
                     "round_number": round_number,
+                    "disease": disease,
                     "_budget_enforcer": self._budget,
                 }
 

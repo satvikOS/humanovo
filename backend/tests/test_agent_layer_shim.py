@@ -91,6 +91,64 @@ async def test_generate_returns_plain_string():
 
 
 @pytest.mark.asyncio
+async def test_tools_passed_when_stage_opts_in():
+    """When stage_num is in AGENT_LAYER_TOOLS_FOR_STAGES, the shim
+    must build evidence_lookup + pubmed_search tools and pass them
+    to agent.run()."""
+    from app.agents.discovery_orchestrator import ModelType
+    from app.services.agents._types import AgentResult, AgentStep
+    from app.services.agents.pricing import TokenUsage
+
+    fake_result = AgentResult(
+        text="answer", steps=[AgentStep(text="answer")],
+        stopped_reason="final_answer", model_label="bedrock/test",
+        latency_ms=10, usage=TokenUsage(input_tokens=100, output_tokens=20),
+        cost_cents=0.5,
+    )
+    captured_tools = []
+    captured_max_steps = []
+
+    async def fake_run(self, query, tools, system, max_steps):
+        captured_tools.append([t.name for t in tools])
+        captured_max_steps.append(max_steps)
+        return fake_result
+
+    with patch("app.agents.agent_layer_shim.settings") as mock_settings, \
+         patch("app.services.agents.bedrock.BedrockClaudeAgent.run", new=fake_run):
+        mock_settings.aws_access_key_id_value = "test"
+        mock_settings.aws_secret_access_key_value = "test"
+        mock_settings.AWS_REGION = "us-east-1"
+        mock_settings.BEDROCK_MODEL_CLAUDE_OPUS = "test-opus"
+        mock_settings.BEDROCK_MODEL_CLAUDE_SONNET = "test-sonnet"
+        mock_settings.AGENT_LAYER_SUB_AGENTS_PER_STAGE = 1
+        # Opt stage 9 (SCORE) into runtime tools.
+        mock_settings.AGENT_LAYER_TOOLS_FOR_STAGES = [9]
+
+        # Stage 9 → tools fire.
+        await generate_via_agent_layer(
+            model_type=ModelType.CLAUDE_OPUS,
+            prompt="q", system_prompt="s",
+            max_tokens=100, temperature=0.3,
+            stage_num=9, stage_name="score",
+            cost_ctx={"disease": "ovarian cancer"},
+        )
+        assert "lookup_evidence" in captured_tools[0]
+        assert "pubmed_search" in captured_tools[0]
+        assert captured_max_steps[0] == 4  # tool-enabled stage
+
+        # Stage 12 → not in opt-in list, no tools, lower max_steps.
+        await generate_via_agent_layer(
+            model_type=ModelType.CLAUDE_OPUS,
+            prompt="q", system_prompt="s",
+            max_tokens=100, temperature=0.3,
+            stage_num=12, stage_name="finalize",
+            cost_ctx={"disease": "ovarian cancer"},
+        )
+        assert captured_tools[1] == []
+        assert captured_max_steps[1] == 2  # no-tool stage
+
+
+@pytest.mark.asyncio
 async def test_enforcer_charge_called_with_agent_layer_usage():
     """When cost_ctx carries a _budget_enforcer, the shim must call
     enforcer.charge() so the per-run cap tracks agent-layer spend.

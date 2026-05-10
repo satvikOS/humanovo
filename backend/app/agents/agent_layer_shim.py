@@ -157,16 +157,52 @@ async def generate_via_agent_layer(
     #   - `prompt` (already includes the stage prompt + grounding +
     #     evidence text from the orchestrator's pre-call assembly)
     #     → user query.
-    # Tools: empty for Phase 1 — the orchestrator already does its
-    # source-API grounding + dual-embedding gating BEFORE the call,
-    # so the agent doesn't need tool-calling at this stage. Phase 2
-    # will swap to a tool-calling shape that exposes
-    # `grounding_service.lookup` to the model directly.
+    #
+    # Tool opt-in: stages listed in
+    # settings.AGENT_LAYER_TOOLS_FOR_STAGES get the production
+    # grounding tools (lookup_evidence + pubmed_search) so the model
+    # can fetch additional evidence inside its reasoning loop. Stages
+    # not listed run with empty tools — relying on the orchestrator's
+    # pre-call source-API sweep + dual-embedding gating. Phase 1
+    # default = empty list (no stage gets tools), preserving the
+    # legacy contract; Phase 2/3 enables per-stage as quality is
+    # validated.
+    tools_for_stages = (
+        getattr(settings, "AGENT_LAYER_TOOLS_FOR_STAGES", None) or []
+    )
+    tools = []
+    if stage_num in tools_for_stages:
+        try:
+            from app.services.agents.grounding_tools import (
+                build_evidence_lookup_tool,
+                build_pubmed_search_tool,
+            )
+            disease = (cost_ctx or {}).get("disease") or "unspecified disease"
+            tools = [
+                build_evidence_lookup_tool(disease=disease),
+                build_pubmed_search_tool(),
+            ]
+        except Exception as e:
+            # Tool construction is best-effort. If grounding_tools or
+            # its deps fail to import, fall through to empty tools
+            # rather than aborting the stage — the orchestrator's
+            # pre-call grounding still gives the agent what it needs.
+            logger.warning(
+                "Agent-layer tool construction failed (stage=%s): %s",
+                stage_name, e,
+            )
+            tools = []
+
+    # max_steps scales with whether tools are available — a tool-less
+    # stage finishes in one model call; a tool-enabled stage may need
+    # 3–4 (call → tool → call → final). Cap at 6 either way.
+    max_steps = 4 if tools else 2
+
     result = await agent.run(
         query=prompt,
-        tools=[],
+        tools=tools,
         system=system_prompt or "You are a careful biomedical research assistant.",
-        max_steps=2,  # generation + optional aggregator pass
+        max_steps=max_steps,
     )
 
     # Record cost back into the two production tracking systems so
