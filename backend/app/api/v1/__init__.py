@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     ai_runs,
     auth_recovery,
     metrics,
+    pricing_catalog,
     promo_codes,
     telemetry,
     auth,
@@ -187,6 +188,7 @@ router.include_router(promo_codes.user_router, tags=["account", "promo"])
 router.include_router(promo_codes.admin_router, tags=["admin", "promo"])
 router.include_router(admin_users.router, tags=["admin", "users"])
 router.include_router(metrics.router, tags=["metrics"])
+router.include_router(pricing_catalog.router, tags=["pricing"])
 
 # Citation verification — CrossRef + NCBI round-trip for single citations.
 router.include_router(citation_verify.router, prefix="/citation", tags=["citation"])

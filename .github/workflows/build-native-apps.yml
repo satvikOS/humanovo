@@ -131,31 +131,84 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-      - name: Verify cargo is the real cargo (not rustup-init stub)
-        # Intermittent on macOS-latest runners: `cargo` ends up resolving
-        # to the rustup-init stub before the toolchain finishes
-        # registering. The stub doesn't have `metadata` so tauri-action
-        # bails with: `error: unexpected argument 'metadata' found`
-        # followed by `Usage: rustup-init[EXE] [OPTIONS]`.
+      - name: Force ~/.cargo/bin to front of PATH + remove rustup stubs
+        # Root cause of the persistent macOS "cargo metadata"
+        # failure: on macOS-latest runners, the pre-installed
+        # rustup-init lives at /usr/local/bin/cargo (and similarly
+        # for rustup, rustc). When dtolnay/rust-toolchain installs
+        # the REAL toolchain at ~/.cargo/bin/, PATH lookup still
+        # hits the stub first because /usr/local/bin precedes
+        # ~/.cargo/bin on the macos-latest default $PATH.
         #
-        # Forcing `rustup default stable` + `cargo --version` here:
-        #   1. Commits the toolchain selection regardless of any prior
-        #      partial install state.
-        #   2. Surfaces the stub-vs-real issue WITH a clean error in
-        #      this step (early-fail) rather than 30 seconds into the
-        #      tauri-action's bundle build.
+        # The stub binary doesn't have `cargo metadata`, so any
+        # subsequent step that shells out to `cargo` (including
+        # tauri-action's child_process.spawn) bails with:
+        #   error: unexpected argument 'metadata' found
+        #   Usage: rustup-init[EXE] [OPTIONS]
         #
-        # Bash for all 3 OSes — `rustup` ships as a CLI on each, and
-        # actions/setup-* puts ~/.cargo/bin first on PATH.
+        # Fix (defense in depth):
+        #   1. Write ~/.cargo/bin to $GITHUB_PATH so it lands FIRST
+        #      on PATH for every subsequent step in this job.
+        #   2. Delete the stub binaries at /usr/local/bin/ so PATH
+        #      lookup can't find them even if ordering shifts.
+        #   3. Run `rustup default stable` to commit the toolchain
+        #      selection regardless of prior install state.
+        #   4. Run `cargo metadata` against src-tauri's Cargo.toml
+        #      so this step fails LOUD AND EARLY if the issue
+        #      persists — easier to diagnose than a 30-min build
+        #      that bails at the bundling stage.
         shell: bash
         run: |
           set -euo pipefail
+
+          # 1. Put real cargo first on PATH for every subsequent step.
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+          # 2. Remove the runner-preinstalled rustup stubs (macOS + Linux).
+          #    Windows uses a different stub path (D:\a\_temp\...);
+          #    we don't touch it because the failure has only been
+          #    observed on macOS so far.
+          if [[ "${{ matrix.platform }}" != windows-* ]]; then
+            for stub in cargo rustup rustc rustdoc; do
+              if [[ -f "/usr/local/bin/$stub" ]]; then
+                file_kind="$(file "/usr/local/bin/$stub" || true)"
+                # Only remove if it's plausibly the rustup-init stub
+                # (small Mach-O / ELF that resolves to rustup-init).
+                # Keep the check loose — false positives here just mean
+                # we miss the removal; the GITHUB_PATH change still
+                # protects us.
+                if echo "$file_kind" | grep -qiE "executable|symbolic link"; then
+                  echo "Removing potential rustup stub: /usr/local/bin/$stub ($file_kind)"
+                  rm -f "/usr/local/bin/$stub" || true
+                fi
+              fi
+            done
+          fi
+
+          # 3. Commit toolchain selection.
           rustup default stable
           rustup show
-          cargo --version
-          # If `cargo metadata` works here, the bundle step's invocation
-          # will work too. Catch the rustup-init-stub case explicitly.
-          cargo metadata --no-deps --format-version 1 --manifest-path frontend/src-tauri/Cargo.toml >/dev/null
+
+          # 4. Loud-and-early verification using EXPLICIT path so
+          #    this step doesn't depend on PATH ordering itself.
+          REAL_CARGO="$HOME/.cargo/bin/cargo"
+          if [[ ! -x "$REAL_CARGO" ]]; then
+            echo "::error::Real cargo not found at $REAL_CARGO after rustup install"
+            exit 1
+          fi
+          "$REAL_CARGO" --version
+          "$REAL_CARGO" metadata --no-deps --format-version 1 \
+            --manifest-path frontend/src-tauri/Cargo.toml > /dev/null
+          echo "[ok] cargo verification passed: $REAL_CARGO"
+
+      - name: Export CARGO env var for tauri-action
+        # Belt-and-suspenders: even with PATH fixed, set CARGO
+        # explicitly so any child process tauri-action spawns uses
+        # the absolute path. @tauri-apps/cli reads $CARGO when set.
+        shell: bash
+        run: |
+          echo "CARGO=$HOME/.cargo/bin/cargo" >> "$GITHUB_ENV"
+          echo "RUSTC=$HOME/.cargo/bin/rustc" >> "$GITHUB_ENV"
 
       - name: Cache Rust deps
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
