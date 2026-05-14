@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -222,5 +223,45 @@ async def get_cost_preview(
             else "Runs above your tier cap will abort with a budget-exceeded "
                  "error. Enable overage billing in Settings to allow "
                  "automatic continuation."
+        ),
+    }
+
+
+class BillingIntervalRequest(BaseModel):
+    """Settings → Billing → "switch to annual" toggle. The actual
+    Stripe-side price swap happens in the Customer Portal; this
+    endpoint mirrors the user's preference locally so the
+    cost-preview UI knows which cadence to project."""
+    billing_interval: str  # 'monthly' | 'annual'
+
+
+@router.put(
+    "/account/billing-interval",
+    dependencies=[Depends(rate_limit("user"))],
+)
+async def set_billing_interval(
+    body: BillingIntervalRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    from fastapi import HTTPException, status
+
+    if body.billing_interval not in ("monthly", "annual"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="billing_interval must be 'monthly' or 'annual'.",
+        )
+    await db.execute(
+        text("UPDATE users SET billing_interval = :i WHERE id = :uid"),
+        {"i": body.billing_interval, "uid": str(current_user.id)},
+    )
+    await db.commit()
+    return {
+        "status": "updated",
+        "billing_interval": body.billing_interval,
+        "note": (
+            "Local preference saved. To actually switch your subscription "
+            "to annual billing (with 17% discount), open the Stripe Customer "
+            "Portal from Settings → Billing → Manage Subscription."
         ),
     }

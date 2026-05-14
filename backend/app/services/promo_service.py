@@ -186,10 +186,34 @@ async def redeem(
             {"end": new_end, "uid": str(user_id)},
         )
         result.new_trial_ends_at = new_end
-    # percent_off + fixed_cents_off: the Stripe Coupon integration
-    # is Phase 3.4 follow-on. For now the redemption is recorded
-    # and the UI tells the user "apply at next checkout" — the
-    # admin dashboard can manually issue the coupon out-of-band.
+    elif kind in ("percent_off", "fixed_cents_off"):
+        # Mint a single-use Stripe Coupon scoped to the customer.
+        # The desktop UI passes coupon_id into the next
+        # checkout.session.create(discounts=[…]) call. Best-effort:
+        # a Stripe outage / missing API key leaves coupon_id=None,
+        # and the redemption is still recorded so an admin can
+        # manually issue the discount out-of-band.
+        try:
+            from app.services.stripe_coupon import create_stripe_coupon_for_promo
+            # Need the user's Stripe customer ID for the scoped
+            # PromotionCode. Fetch it; tolerate NULL (unpaid users).
+            cust_row = (await db.execute(
+                text("SELECT stripe_customer_id FROM users WHERE id = :uid"),
+                {"uid": str(user_id)},
+            )).first()
+            customer_id = cust_row[0] if cust_row else None
+            coupon_id = await create_stripe_coupon_for_promo(
+                promo_code=code_canonical,
+                kind=kind,
+                value=value,
+                stripe_customer_id=customer_id,
+            )
+            result.stripe_coupon_id = coupon_id
+        except Exception as e:
+            logger.warning(
+                "stripe coupon mint failed promo=%s user_id=%s: %s",
+                code_canonical, user_id, e,
+            )
 
     await db.commit()
     logger.info(

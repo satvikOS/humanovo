@@ -125,6 +125,12 @@ class User(BaseModel):
     # downgrade emails. See migration 032 +
     # app/services/trial_expiry_service.py.
     trial_ends_at = Column(DateTime(timezone=True), nullable=True)
+    # Billing cadence — 'monthly' (default) or 'annual'. Annual
+    # billers get a 17% discount via the Stripe price catalog. The
+    # Customer Portal handles the swap UI; this column mirrors
+    # Stripe's truth for the local pre-flight cost preview. See
+    # migration 034.
+    billing_interval = Column(String(16), default="monthly", nullable=False)
 
     # Relationships
     projects = relationship("Project", back_populates="owner", lazy="dynamic")
