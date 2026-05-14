@@ -112,6 +112,12 @@ class User(BaseModel):
     # Settings or an admin endpoint. See migration 026 +
     # app/services/stripe_overage.py.
     overage_enabled = Column(Boolean, default=False, nullable=False)
+    # Per-user opt-in for anonymous-usage telemetry. Default FALSE
+    # (privacy policy commitment: no telemetry without explicit
+    # opt-in). Crash reports are sent ALWAYS regardless of this
+    # flag — a crash is a bug we need to fix, not a usage stat.
+    # See migration 029 + app/api/v1/endpoints/telemetry.py.
+    telemetry_opt_in = Column(Boolean, default=False, nullable=False)
 
     # Relationships
     projects = relationship("Project", back_populates="owner", lazy="dynamic")
