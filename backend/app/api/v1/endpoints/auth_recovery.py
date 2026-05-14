@@ -224,7 +224,10 @@ async def reset_password(
 
     new_hash = hash_password(body.new_password)
     await db.execute(
-        text("UPDATE users SET password_hash = :h WHERE id = :uid"),
+        # Column is `hashed_password` (see app/models/user.py), not
+        # `password_hash`. Earlier draft used the wrong name and would
+        # fail at runtime when reset-password was actually invoked.
+        text("UPDATE users SET hashed_password = :h WHERE id = :uid"),
         {"h": new_hash, "uid": str(user_id)},
     )
     await db.commit()

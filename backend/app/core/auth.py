@@ -348,8 +348,22 @@ async def create_user(
     user_data: UserCreate,
     db: AsyncSession,
     role: UserRole = UserRole.RESEARCHER,
+    *,
+    trial_days: int = 14,
 ) -> User:
-    """Create a new user."""
+    """Create a new user.
+
+    Starts a `trial_days` free trial by default (14 days). The
+    trial-expiry cron (Phase 2.7) fires day-3 warning + day-of
+    downgrade emails from this timestamp. A successful Stripe
+    checkout clears trial_ends_at (Phase 2.8) so the user drops
+    out of the cron's queue immediately on conversion.
+
+    Pass `trial_days=0` for admin-created accounts that shouldn't
+    start a trial (e.g. comp'd institutional accounts).
+    """
+    from datetime import UTC, datetime, timedelta
+
     # Check if user exists
     result = await db.execute(select(User).where(User.email == user_data.email))
     existing = result.scalar_one_or_none()
@@ -363,6 +377,11 @@ async def create_user(
     # Create user
     hashed_password = get_password_hash(user_data.password)
 
+    trial_ends_at = (
+        datetime.now(UTC) + timedelta(days=trial_days)
+        if trial_days > 0 else None
+    )
+
     user = User(
         email=user_data.email,
         hashed_password=hashed_password,
@@ -370,11 +389,15 @@ async def create_user(
         role=role,
         is_active=True,
         is_verified=False,
+        trial_ends_at=trial_ends_at,
     )
 
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
-    logger.info("User created", user_id=str(user.id), email=user.email)
+    logger.info(
+        "User created", user_id=str(user.id), email=user.email,
+        trial_ends_at=trial_ends_at.isoformat() if trial_ends_at else None,
+    )
     return user
