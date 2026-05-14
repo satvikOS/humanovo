@@ -20,6 +20,7 @@ from app.api.v1.endpoints import (
     ai_runs,
     auth_recovery,
     metrics,
+    promo_codes,
     telemetry,
     auth,
     billing,
@@ -180,6 +181,8 @@ router.include_router(account.router, tags=["account", "gdpr"])
 router.include_router(account_usage.router, tags=["account", "usage"])
 router.include_router(account_api_keys.router, tags=["account", "api-keys"])
 router.include_router(telemetry.router, tags=["telemetry"])
+router.include_router(promo_codes.user_router, tags=["account", "promo"])
+router.include_router(promo_codes.admin_router, tags=["admin", "promo"])
 router.include_router(admin_users.router, tags=["admin", "users"])
 router.include_router(metrics.router, tags=["metrics"])
 
