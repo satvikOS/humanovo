@@ -167,23 +167,31 @@ jobs:
           # 2. Remove the runner-preinstalled rustup stubs (macOS + Linux).
           #    Windows uses a different stub path (D:\a\_temp\...);
           #    we don't touch it because the failure has only been
-          #    observed on macOS so far.
-          if [[ "${{ matrix.platform }}" != windows-* ]]; then
-            for stub in cargo rustup rustc rustdoc; do
-              if [[ -f "/usr/local/bin/$stub" ]]; then
-                file_kind="$(file "/usr/local/bin/$stub" || true)"
-                # Only remove if it's plausibly the rustup-init stub
-                # (small Mach-O / ELF that resolves to rustup-init).
-                # Keep the check loose — false positives here just mean
-                # we miss the removal; the GITHUB_PATH change still
-                # protects us.
-                if echo "$file_kind" | grep -qiE "executable|symbolic link"; then
-                  echo "Removing potential rustup stub: /usr/local/bin/$stub ($file_kind)"
-                  rm -f "/usr/local/bin/$stub" || true
+          #    observed on macOS so far. `case` (not `[[ ... != *-foo ]]`)
+          #    keeps shellcheck happy — SC2193 fires on literal-glob
+          #    comparisons inside double-bracket tests.
+          PLATFORM="${{ matrix.platform }}"
+          case "$PLATFORM" in
+            windows-*)
+              echo "Skipping stub removal on Windows runner."
+              ;;
+            *)
+              for stub in cargo rustup rustc rustdoc; do
+                if [[ -f "/usr/local/bin/$stub" ]]; then
+                  file_kind="$(file "/usr/local/bin/$stub" || true)"
+                  # Only remove if it's plausibly the rustup-init stub
+                  # (small Mach-O / ELF that resolves to rustup-init).
+                  # Keep the check loose — false positives here just mean
+                  # we miss the removal; the GITHUB_PATH change still
+                  # protects us.
+                  if echo "$file_kind" | grep -qiE "executable|symbolic link"; then
+                    echo "Removing potential rustup stub: /usr/local/bin/$stub ($file_kind)"
+                    rm -f "/usr/local/bin/$stub" || true
+                  fi
                 fi
-              fi
-            done
-          fi
+              done
+              ;;
+          esac
 
           # 3. Commit toolchain selection.
           rustup default stable
@@ -201,10 +209,18 @@ jobs:
             --manifest-path frontend/src-tauri/Cargo.toml > /dev/null
           echo "[ok] cargo verification passed: $REAL_CARGO"
 
-      - name: Export CARGO env var for tauri-action
-        # Belt-and-suspenders: even with PATH fixed, set CARGO
-        # explicitly so any child process tauri-action spawns uses
-        # the absolute path. @tauri-apps/cli reads $CARGO when set.
+      - name: Export CARGO env var for tauri-action (non-Windows)
+        # Belt-and-suspenders for the macOS PATH-stub issue: set
+        # CARGO + RUSTC explicitly so any child process tauri-action
+        # spawns uses the absolute path. @tauri-apps/cli reads $CARGO
+        # when set.
+        #
+        # SKIP on Windows: the bash $HOME path (`/c/Users/...`) gets
+        # interpreted by Cargo as Windows-relative, composing a bogus
+        # `D:/c/Users/...` that doesn't exist. Windows doesn't have
+        # the macOS PATH-stub issue (different stub location), so the
+        # env var isn't needed there.
+        if: matrix.platform != 'windows-2025'
         shell: bash
         run: |
           echo "CARGO=$HOME/.cargo/bin/cargo" >> "$GITHUB_ENV"
