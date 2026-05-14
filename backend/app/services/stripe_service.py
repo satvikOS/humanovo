@@ -283,6 +283,14 @@ async def apply_subscription_event(
     sub_id = subscription.get("id")
     sub_status = subscription.get("status")
 
+    # Capture the BEFORE state — Stripe subscription event applies
+    # mutate user.tier + user.stripe_subscription_status in-place;
+    # we want the state-machine audit to see the transition, so snap
+    # the previous values now.
+    old_tier = user.tier
+    old_tier_value = old_tier.value if hasattr(old_tier, "value") else str(old_tier or "")
+    old_status = user.stripe_subscription_status
+
     if event_type == "customer.subscription.deleted":
         new_tier = UserTier.TRIAL
         new_sub_id = None
@@ -296,28 +304,65 @@ async def apply_subscription_event(
         new_tier = UserTier.TRIAL
         new_sub_id = None
 
-    old_tier = user.tier
     user.tier = new_tier
     user.stripe_subscription_id = new_sub_id
     user.stripe_subscription_status = sub_status
     await db.flush()
+
+    # State-machine audit. Best-effort: a transition-write failure
+    # logs but doesn't roll back the tier change itself (the customer
+    # already paid; we MUST honour that even if our audit row fails).
+    transition_classified: dict[str, Any] | None = None
+    try:
+        from app.services.subscription_state import record_transition
+
+        t = await record_transition(
+            db,
+            user_id=user.id,
+            from_status=old_status,
+            to_status=sub_status or "unknown",
+            from_tier=old_tier_value,
+            to_tier=new_tier.value,
+            stripe_subscription_id=sub_id,
+            stripe_event_id=event_type,  # the webhook handler has the real evt_; this is the event TYPE
+            metadata={
+                "cancel_at_period_end": subscription.get("cancel_at_period_end"),
+                "current_period_end": subscription.get("current_period_end"),
+                "trial_end": subscription.get("trial_end"),
+            },
+        )
+        if t is not None:
+            transition_classified = {
+                "is_upgrade": t.is_upgrade,
+                "is_downgrade": t.is_downgrade,
+                "is_lapse": t.is_lapse,
+                "is_recovery": t.is_recovery,
+                "is_cancel": t.is_cancel,
+            }
+    except Exception as e:
+        logger.warning(
+            "subscription_state audit failed user_id=%s: %s",
+            user.id, e,
+        )
 
     logger.info(
         "stripe webhook applied",
         extra={
             "user_id": str(user.id),
             "event_type": event_type,
-            "old_tier": old_tier.value if hasattr(old_tier, "value") else str(old_tier),
+            "old_tier": old_tier_value,
             "new_tier": new_tier.value,
             "subscription_id": sub_id,
             "subscription_status": sub_status,
+            "old_status": old_status,
         },
     )
     return {
         "status": "applied",
         "user_id": str(user.id),
-        "old_tier": old_tier.value if hasattr(old_tier, "value") else str(old_tier),
+        "old_tier": old_tier_value,
         "new_tier": new_tier.value,
+        "transition": transition_classified,
     }
 
 
