@@ -1,0 +1,150 @@
+name: Scheduled Crons
+
+# Daily backend maintenance jobs:
+#   • Dunning — past_due subscriber email cadence (day 3/7/14)
+#   • Trial expiry — day-3 warning + day-of downgrade + email
+#   • GDPR hard-delete — users past their 30-day soft-delete grace
+#
+# All three run as separate jobs so a failure in one (e.g. SMTP
+# outage breaks dunning) doesn't block the others (GDPR hard-delete
+# still fires). Each cron script exits 0 on partial failure — they
+# log per-user errors and the daily summary line surfaces in CloudWatch
+# / journald.
+#
+# Schedule: 06:00 UTC daily — late evening US Pacific, early
+# morning Europe. The 3-7 minute window is the email-send burst
+# for the day; users get the message during their morning routine.
+#
+# workflow_dispatch lets operators manually trigger any of the three
+# without waiting for the daily window.
+#
+# Each job needs the same backend env (DATABASE_URL, EMAIL_DRIVER,
+# Stripe keys for the dunning script's customer lookups). All
+# sourced from AWS Secrets Manager via the secrets bootstrap workflow.
+
+on:
+  schedule:
+    # 06:00 UTC. Picked so the cron lands after most overnight
+    # batch processing (e.g. nightly DB backup at 02:00 UTC) and
+    # before EU business hours.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Which cron to run (all / dunning / trial / gdpr)'
+        type: choice
+        required: false
+        default: 'all'
+        options:
+          - all
+          - dunning
+          - trial
+          - gdpr
+
+permissions:
+  contents: read
+
+concurrency:
+  # cancel-in-progress: false — a daily cron that takes 30 minutes
+  # mustn't get killed mid-flight by a manual workflow_dispatch.
+  group: scheduled-crons
+  cancel-in-progress: false
+
+
+jobs:
+  dunning:
+    name: Dunning — past_due email cadence
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.job == 'all' ||
+      github.event.inputs.job == 'dunning'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run dunning cycle
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          EMAIL_DRIVER: ${{ secrets.EMAIL_DRIVER }}
+          EMAIL_FROM_ADDRESS: ${{ secrets.EMAIL_FROM_ADDRESS }}
+          FRONTEND_BASE_URL: ${{ secrets.FRONTEND_BASE_URL }}
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: python scripts/run_dunning_cycle.py
+
+  trial-expiry:
+    name: Trial expiry — 14-day cadence
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.job == 'all' ||
+      github.event.inputs.job == 'trial'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run trial expiry cycle
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EMAIL_DRIVER: ${{ secrets.EMAIL_DRIVER }}
+          EMAIL_FROM_ADDRESS: ${{ secrets.EMAIL_FROM_ADDRESS }}
+          FRONTEND_BASE_URL: ${{ secrets.FRONTEND_BASE_URL }}
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: python scripts/run_trial_expiry_cycle.py
+
+  gdpr-hard-delete:
+    name: GDPR hard-delete — past 30-day grace
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.job == 'all' ||
+      github.event.inputs.job == 'gdpr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run GDPR hard-delete sweep
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: python scripts/hard_delete_expired_users.py
