@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     agents,
     account,
     account_api_keys,
+    account_billing,
     account_usage,
     admin_users,
     ai_cost_estimate,
@@ -180,6 +181,7 @@ router.include_router(ai_runs.router, tags=["admin", "ai"])
 router.include_router(account.router, tags=["account", "gdpr"])
 router.include_router(account_usage.router, tags=["account", "usage"])
 router.include_router(account_api_keys.router, tags=["account", "api-keys"])
+router.include_router(account_billing.router, tags=["account", "billing"])
 router.include_router(telemetry.router, tags=["telemetry"])
 router.include_router(promo_codes.user_router, tags=["account", "promo"])
 router.include_router(promo_codes.admin_router, tags=["admin", "promo"])
