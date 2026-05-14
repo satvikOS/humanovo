@@ -180,6 +180,143 @@ async def restore_user(
     }
 
 
+@router.post("/admin/users/{user_id}/grant-trial", status_code=status.HTTP_200_OK)
+async def grant_trial(
+    user_id: UUID,
+    days: int = 14,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Grant a trial to an existing user (sets trial_ends_at = now()
+    + days). Use for: converted-free user who wants a second trial,
+    apology credits after support incidents, beta invitee onboarding
+    without going through Stripe.
+
+    Idempotent on the new end date — calling twice extends to whichever
+    is later. 410 if the user has been hard-deleted."""
+    from datetime import UTC, datetime, timedelta
+
+    if days < 1 or days > 90:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="`days` must be between 1 and 90 (inclusive).",
+        )
+    target = await _get_target_user(db, user_id)
+    if target.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="User account has been permanently deleted.",
+        )
+
+    new_end = datetime.now(UTC) + timedelta(days=days)
+    # Idempotent extension: never SHORTEN an existing trial; if the
+    # current trial_ends_at is later than the proposed new_end, keep
+    # the longer one. Operators wanting to truncate should use a
+    # dedicated endpoint (not yet implemented).
+    if target.trial_ends_at is not None and target.trial_ends_at > new_end:
+        new_end = target.trial_ends_at
+        extended = False
+    else:
+        extended = True
+
+    target.trial_ends_at = new_end
+    await db.commit()
+    await _audit(
+        db,
+        actor=actor,
+        action="admin.user.grant_trial",
+        target_user_id=str(target.id),
+        details={
+            "target_email": target.email,
+            "actor_id": str(actor.id),
+            "days": days,
+            "new_trial_ends_at": new_end.isoformat(),
+            "extended": extended,
+        },
+    )
+    return {
+        "status": "granted" if extended else "no_change_existing_is_later",
+        "user_id": str(target.id),
+        "trial_ends_at": new_end.isoformat(),
+    }
+
+
+@router.get("/admin/users/{user_id}/status")
+async def get_user_status(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Full lifecycle snapshot for one user: tier + trial state +
+    subscription + latest transition + recent crash count + last
+    login. Used by the admin Settings dashboard ("who is this user
+    and what state are they in?") + the support inbox to triage
+    tickets without round-tripping through three different DB
+    queries."""
+    from sqlalchemy import text as sql_text
+
+    target = await _get_target_user(db, user_id)
+
+    # Latest subscription transition (best-effort).
+    latest_transition = None
+    try:
+        from app.services.subscription_state import latest_transition_for_user
+        latest_transition = await latest_transition_for_user(db, user_id=target.id)
+    except Exception:
+        pass
+
+    # Recent crash count — last 7 days.
+    crash_count_7d = 0
+    try:
+        row = (await db.execute(
+            sql_text(
+                "SELECT COUNT(*) FROM crash_reports "
+                "WHERE user_id = :uid AND received_at >= now() - INTERVAL '7 days'"
+            ),
+            {"uid": str(target.id)},
+        )).first()
+        crash_count_7d = int(row[0]) if row else 0
+    except Exception:
+        pass
+
+    # Active API key count.
+    api_key_count = 0
+    try:
+        row = (await db.execute(
+            sql_text(
+                "SELECT COUNT(*) FROM user_api_keys "
+                "WHERE user_id = :uid AND revoked_at IS NULL"
+            ),
+            {"uid": str(target.id)},
+        )).first()
+        api_key_count = int(row[0]) if row else 0
+    except Exception:
+        pass
+
+    return {
+        "user_id": str(target.id),
+        "email": target.email,
+        "full_name": target.full_name,
+        "role": target.role.value if hasattr(target.role, "value") else str(target.role),
+        "tier": target.tier.value if hasattr(target.tier, "value") else str(target.tier),
+        "is_active": target.is_active,
+        "is_verified": target.is_verified,
+        "telemetry_opt_in": bool(getattr(target, "telemetry_opt_in", False)),
+        "overage_enabled": bool(getattr(target, "overage_enabled", False)),
+        "trial_ends_at": target.trial_ends_at.isoformat() if target.trial_ends_at else None,
+        "delete_requested_at": target.delete_requested_at.isoformat() if target.delete_requested_at else None,
+        "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
+        "stripe_customer_id": target.stripe_customer_id,
+        "stripe_subscription_id": target.stripe_subscription_id,
+        "stripe_subscription_status": target.stripe_subscription_status,
+        "created_at": target.created_at.isoformat() if target.created_at else None,
+        "last_login_at": target.last_login_at.isoformat() if target.last_login_at else None,
+        "latest_subscription_transition": latest_transition,
+        "crash_reports_last_7d": crash_count_7d,
+        "active_api_keys": api_key_count,
+    }
+
+
 @router.post(
     "/admin/users/{user_id}/restore-deletion",
     status_code=status.HTTP_200_OK,
