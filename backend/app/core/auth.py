@@ -7,7 +7,7 @@ JWT-based authentication for humanovo.
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -134,23 +134,71 @@ def decode_token(token: str) -> TokenData | None:
 
 
 async def get_current_user(
+    request: Request | None = None,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    """Get current authenticated user from JWT token."""
+    """Get the current authenticated user.
+
+    Two paths:
+
+      1. JWT bearer (interactive login). Grants ALL scopes the user's
+         role implies; `request.state.granted_scopes` is set to None
+         (meaning "no scope restriction").
+
+      2. API key bearer (`apikey_*` token, Phase 2.1). Verifies
+         against user_api_keys, returns the owning user, and stashes
+         the granted scopes on `request.state.granted_scopes`. Routes
+         that need a specific scope use `require_scope("name")` to
+         check.
+
+    The token discriminator is the literal `apikey_` prefix — JWTs
+    don't start with that, so the branch is unambiguous."""
     if not credentials:
         return None
 
-    token_data = decode_token(credentials.credentials)
+    raw = credentials.credentials
+    # ─── API key path ────────────────────────────────────────
+    if raw.startswith("apikey_"):
+        # Local import — avoids a circular at module load (auth ←
+        # api_key_service imports nothing from auth, but the import
+        # graph during FastAPI startup is fragile).
+        from app.services.api_key_service import verify_and_get_user_with_scopes
+
+        verification = await verify_and_get_user_with_scopes(db, raw_token=raw)
+        if verification is None:
+            return None
+        result = await db.execute(select(User).where(User.id == verification.user_id))
+        user = result.scalar_one_or_none()
+        if not user or not user.is_active:
+            return None
+        # Stash the granted scopes so require_scope() can read them.
+        # `request` is None when the dependency is invoked outside an
+        # HTTP cycle (rare; only ws + tests). Use a getattr-guarded
+        # access so the stash is best-effort.
+        if request is not None:
+            try:
+                request.state.granted_scopes = verification.scopes
+                request.state.api_key_id = verification.key_id
+            except Exception:
+                pass
+        return user
+
+    # ─── JWT path ────────────────────────────────────────────
+    token_data = decode_token(raw)
     if not token_data:
         return None
-
     result = await db.execute(select(User).where(User.id == token_data.user_id))
     user = result.scalar_one_or_none()
-
     if not user or not user.is_active:
         return None
-
+    # JWT carries full session powers — no scope restriction.
+    if request is not None:
+        try:
+            request.state.granted_scopes = None
+            request.state.api_key_id = None
+        except Exception:
+            pass
     return user
 
 
@@ -199,6 +247,38 @@ async def get_current_admin_user(
 
 AUTH_REQUIRED = [Depends(get_current_active_user)]
 ADMIN_REQUIRED = [Depends(get_current_admin_user)]
+
+
+def require_scope(scope: str):
+    """Factory: returns a FastAPI dependency that enforces an API-key
+    scope. JWT-authenticated callers bypass the check (a logged-in
+    user already has full session powers).
+
+    Usage:
+        @router.post("/discovery/start", dependencies=[Depends(require_scope("discovery:write"))])
+
+    The dependency reads `request.state.granted_scopes` populated by
+    `get_current_user`. None there means JWT (no restriction); a list
+    means API-key auth — the scope must be in that list."""
+    async def _check(
+        request: Request,
+        current_user: User = Depends(get_current_active_user),
+    ) -> User:
+        granted = getattr(request.state, "granted_scopes", None)
+        if granted is None:
+            # JWT session — full powers.
+            return current_user
+        if scope not in granted:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"API key missing required scope '{scope}'. "
+                    f"Granted: {granted}."
+                ),
+            )
+        return current_user
+
+    return _check
 
 
 # ─── WebSocket authentication ─────────────────────────────────────
