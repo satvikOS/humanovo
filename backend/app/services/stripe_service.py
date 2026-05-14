@@ -405,5 +405,17 @@ async def apply_checkout_completed(
         return {"status": "skipped", "reason": "unknown user"}
 
     user.stripe_customer_id = customer_id
+    # Checkout completion means the user has paid — they're no longer
+    # on a trial. Clear trial_ends_at so the trial-expiry cron drops
+    # them from its queue. Idempotent: a checkout from a customer who
+    # was already paying (renewal / upgrade) has NULL trial_ends_at
+    # already, so this is a no-op.
+    cleared_trial = user.trial_ends_at is not None
+    user.trial_ends_at = None
     await db.flush()
-    return {"status": "applied", "user_id": user_id_raw, "customer_id": customer_id}
+    return {
+        "status": "applied",
+        "user_id": user_id_raw,
+        "customer_id": customer_id,
+        "cleared_trial": cleared_trial,
+    }
