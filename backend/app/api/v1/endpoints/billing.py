@@ -322,16 +322,40 @@ async def stripe_webhook(
         await db.commit()
         return {"received": True, "event": event_type, **result}
 
+    if event_type == "invoice.paid":
+        # Paying customer just had a successful invoice. Send the
+        # receipt email via the receipt service (idempotent on
+        # invoice.id). Subscription state machine already updated
+        # tier via customer.subscription.updated; this is purely
+        # the user-facing notification.
+        try:
+            from app.services.receipt_service import send_receipt
+            recv_result = await send_receipt(db, invoice=data)
+            await db.commit()
+            return {"received": True, "event": event_type, **recv_result}
+        except Exception as e:
+            logger.warning("invoice.paid receipt send failed: %s", e)
+            return {"received": True, "event": event_type, "status": "logged_no_send"}
+
     if event_type == "invoice.payment_failed":
         # Stripe will retry the invoice for ~3 weeks; we don't downgrade
         # the user yet (subscription.updated → past_due covers that).
-        # Just log so we have a breadcrumb if the user calls support.
-        sub_id = data.get("subscription")
-        logger.warning(
-            "stripe invoice.payment_failed",
-            extra={"subscription_id": sub_id, "customer_id": data.get("customer")},
-        )
-        return {"received": True, "event": event_type, "status": "logged"}
+        # Send the first-touch payment-failed email (lightweight; the
+        # full dunning cadence fires from the state machine when
+        # subscription status flips past_due — Phase 2.6).
+        try:
+            from app.services.receipt_service import send_payment_failed
+            sent_result = await send_payment_failed(db, invoice=data)
+            await db.commit()
+            return {"received": True, "event": event_type, **sent_result}
+        except Exception as e:
+            sub_id = data.get("subscription")
+            logger.warning(
+                "stripe invoice.payment_failed first-touch email failed: %s",
+                e,
+                extra={"subscription_id": sub_id, "customer_id": data.get("customer")},
+            )
+            return {"received": True, "event": event_type, "status": "logged_no_send"}
 
     # All other events (price.created, charge.succeeded, etc.) — log
     # at info, return 2xx so Stripe doesn't retry.
