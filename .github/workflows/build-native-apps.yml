@@ -82,7 +82,84 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-release:
+    # Single point that resolves the tag/version + creates the GitHub
+    # draft release. The matrix builds then upload artifacts to that
+    # release via `releaseId`, eliminating the create-release race
+    # where each platform's tauri-action raced past the "tag exists?"
+    # check and the loser got HTTP 422 "tag_name already_exists" from
+    # GitHub. The race was deterministic enough to break Linux on
+    # every parallel build until this was added.
+    runs-on: ubuntu-22.04
+    outputs:
+      tag:        ${{ steps.version.outputs.tag }}
+      version:    ${{ steps.version.outputs.version }}
+      mode:       ${{ steps.version.outputs.mode }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Resolve version + tag for this build
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+            MODE="tag"
+          elif [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "humanovo" ]]; then
+            SHORT="${GITHUB_SHA::8}"
+            TAG="auto-${SHORT}"
+            BASE="$(node -p "require('./frontend/package.json').version")"
+            VERSION="${BASE}+${GITHUB_RUN_NUMBER}"
+            MODE="auto"
+          elif [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
+            TAG="${{ github.event.inputs.release_tag }}"
+            VERSION="${TAG#v}"
+            MODE="dispatch-tag"
+          else
+            TAG=""
+            VERSION="0.0.0-dev"
+            MODE="dispatch-only"
+          fi
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}"       >> "$GITHUB_OUTPUT"
+          echo "Resolved: tag=${TAG} version=${VERSION} mode=${MODE}"
+
+      - name: Create draft release (when this build produces one)
+        id: draft
+        # Skip for dispatch-only builds (no tag = no release).
+        # For tag / dispatch-tag / auto: create a draft release if it
+        # doesn't already exist (idempotent), then capture its numeric
+        # ID so each matrix build can upload artifacts to it via
+        # tauri-action's `releaseId` parameter. tauri-action treats
+        # releaseId as authoritative and skips its own create-release
+        # step entirely, so the race that previously broke Linux can
+        # no longer occur.
+        if: steps.version.outputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Reusing existing release $TAG (retry / re-run scenario)."
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "humanovo ${VERSION}" \
+              --notes "Build in progress — installers attach as the matrix jobs finish." \
+              --draft
+          fi
+          RELEASE_ID=$(gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.id')
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+          echo "Draft release ready: tag=$TAG id=$RELEASE_ID"
+
   build:
+    needs: prepare-release
     strategy:
       fail-fast: false
       matrix:
@@ -277,48 +354,20 @@ jobs:
             src-tauri/icons/icon.png \
             --output src-tauri/icons
 
-      - name: Resolve version + tag for this build
+      - name: Re-export version from prepare-release into step outputs
         id: version
+        # Shim. The single source of truth for tag/version/mode/release_id
+        # is the prepare-release job (one resolution → all 3 matrix
+        # platforms agree). This step just re-exports those values as
+        # this job's `steps.version.outputs.*` so the rest of the workflow
+        # (tauri-action `with:`, the stable-name-alias uploader, the
+        # job-summary printer) reads them unchanged.
         shell: bash
         run: |
-          # Three modes:
-          #
-          #   1. tag push  refs/tags/vX.Y.Z       → use that tag verbatim
-          #   2. push to humanovo                  → coin auto-{shortSHA}
-          #   3. workflow_dispatch w/ release_tag  → use that tag
-          #   4. workflow_dispatch no tag          → empty (artifact-only)
-          #
-          # The version (without "v" prefix) gets baked into tauri.conf
-          # so installed apps can compare against `latest.json` and
-          # decide whether to upgrade.
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#v}"
-            MODE="tag"
-          elif [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "humanovo" ]]; then
-            SHORT="${GITHUB_SHA::8}"
-            TAG="auto-${SHORT}"
-            BASE="$(node -p "require('./frontend/package.json').version")"
-            # NB: build metadata after `+` MUST be numeric-only and
-            # ≤ 65535 for the Windows MSI bundler. The hex SHA fails
-            # that check, so we use GITHUB_RUN_NUMBER (monotonic, always
-            # numeric, easy to reason about) for the version, and keep
-            # the SHA in the release tag for traceability.
-            VERSION="${BASE}+${GITHUB_RUN_NUMBER}"
-            MODE="auto"
-          elif [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
-            TAG="${{ github.event.inputs.release_tag }}"
-            VERSION="${TAG#v}"
-            MODE="dispatch-tag"
-          else
-            TAG=""
-            VERSION="0.0.0-dev"
-            MODE="dispatch-only"
-          fi
-          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "mode=${MODE}"       >> "$GITHUB_OUTPUT"
-          echo "Resolved: tag=${TAG} version=${VERSION} mode=${MODE}"
+          echo "tag=${{ needs.prepare-release.outputs.tag }}"             >> "$GITHUB_OUTPUT"
+          echo "version=${{ needs.prepare-release.outputs.version }}"     >> "$GITHUB_OUTPUT"
+          echo "mode=${{ needs.prepare-release.outputs.mode }}"           >> "$GITHUB_OUTPUT"
+          echo "release_id=${{ needs.prepare-release.outputs.release_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Sync resolved version into tauri.conf.json
         shell: bash
@@ -418,6 +467,15 @@ jobs:
           # without tripping `security import` / signer errors.
         with:
           projectPath: frontend
+          # releaseId pins the upload to the draft release that
+          # prepare-release created. tauri-action treats releaseId as
+          # authoritative and skips its own create-release step, which
+          # is what avoids the parallel-matrix race (HTTP 422
+          # "tag_name already_exists") that previously broke Linux on
+          # every push. tagName + releaseName + releaseBody are still
+          # set so dispatch-only builds (where releaseId is empty)
+          # behave the same as before.
+          releaseId: ${{ steps.version.outputs.release_id }}
           tagName: ${{ steps.version.outputs.tag }}
           releaseName: humanovo ${{ steps.version.outputs.version }}
           releaseBody: |
@@ -435,10 +493,12 @@ jobs:
             All filenames are stable across releases — `releases/latest/download/<name>` always points at the newest build.
 
             Already installed? The Tauri auto-updater picks this up on next launch.
-          # Auto-builds publish straight away — that's the "auto-upgrades
-          # the 3 apps" guarantee. Tag pushes / dispatched builds default
-          # to draft so a human reviews before shipping.
-          releaseDraft: ${{ steps.version.outputs.mode != 'auto' }}
+          # The release is always created as a draft by prepare-release.
+          # The publish-release tail job flips it to published for auto
+          # builds once all 3 matrix jobs have attached their artifacts.
+          # Tag / dispatch-tag builds intentionally stay draft so a
+          # human reviews before shipping.
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
 
@@ -522,3 +582,30 @@ jobs:
                 ;;
             esac
           } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-release:
+    # Flips the draft release prepare-release created to published, but
+    # only for `auto` builds (push to humanovo) and only when ALL 3
+    # matrix platforms succeeded. Tag / dispatch-tag builds stay draft
+    # so a human can review before shipping. If any matrix job failed
+    # we keep the release as a draft too — the operator inspects the
+    # partial artifacts and decides whether to publish anyway or kick
+    # off a rebuild.
+    needs: [prepare-release, build]
+    if: |
+      always() &&
+      needs.prepare-release.outputs.mode == 'auto' &&
+      needs.prepare-release.outputs.tag != '' &&
+      needs.build.result == 'success'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Un-draft the release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false
+          echo "Published release $TAG."
