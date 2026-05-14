@@ -162,17 +162,44 @@ jobs:
             gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
               --jq "[.[] | select(.tag_name == \"$TAG\") | .id] | first // empty"
           }
+          # Try the lookup first — if a previous attempt already
+          # created this draft (re-run, retry, etc.), reuse it.
           RELEASE_ID="$(find_id)"
           if [[ -n "$RELEASE_ID" ]]; then
-            echo "Reusing existing release $TAG (id=$RELEASE_ID, retry / re-run scenario)."
+            echo "Reusing existing release $TAG (id=$RELEASE_ID)."
           else
-            gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "humanovo ${VERSION}" \
-              --notes "Build in progress — installers attach as the matrix jobs finish." \
-              --draft
-            RELEASE_ID="$(find_id)"
+            # POST directly so we get .id from the response — calling
+            # `gh release create` and then re-listing fails on the
+            # ~1s eventual-consistency window on the /releases list
+            # endpoint (observed empirically on 4f88bb3: created at
+            # T+0, list returned empty at T+1, populated at T+5).
+            # The direct-API path skips the list entirely.
+            set +e
+            CREATE_OUT=$(gh api --method POST \
+              "/repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="humanovo ${VERSION}" \
+              -f body="Build in progress — installers attach as the matrix jobs finish." \
+              -F draft=true \
+              --jq '.id' 2>&1)
+            CREATE_RC=$?
+            set -e
+            if [[ "$CREATE_RC" -eq 0 ]]; then
+              RELEASE_ID="$CREATE_OUT"
+              echo "Created draft release $TAG (id=$RELEASE_ID)."
+            else
+              echo "Create returned non-zero; trying lookup with backoff."
+              echo "  raw: $CREATE_OUT"
+              for attempt in 1 2 3 4 5; do
+                RELEASE_ID="$(find_id)"
+                if [[ -n "$RELEASE_ID" ]]; then
+                  echo "Found existing release id=$RELEASE_ID on attempt $attempt."
+                  break
+                fi
+                sleep 3
+              done
+            fi
           fi
           if [[ -z "$RELEASE_ID" ]]; then
             echo "FATAL: release with tag $TAG not found after creation"
