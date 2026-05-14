@@ -119,6 +119,13 @@ class User(BaseModel):
     # See migration 029 + app/api/v1/endpoints/telemetry.py.
     telemetry_opt_in = Column(Boolean, default=False, nullable=False)
 
+    # 14-day free-trial deadline. NULL = paying customer (never on
+    # a trial) OR already trial-converted (downgraded). The trial-
+    # expiry cron uses this to schedule day-3 warning + expiry-day
+    # downgrade emails. See migration 032 +
+    # app/services/trial_expiry_service.py.
+    trial_ends_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     projects = relationship("Project", back_populates="owner", lazy="dynamic")
 
