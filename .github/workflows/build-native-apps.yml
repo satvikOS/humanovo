@@ -137,6 +137,19 @@ jobs:
         # releaseId as authoritative and skips its own create-release
         # step entirely, so the race that previously broke Linux can
         # no longer occur.
+        #
+        # Two GitHub API gotchas, both biting us before this comment:
+        #   1. Draft releases don't create the underlying git tag,
+        #      so GET /releases/tags/{tag} returns 404 even though
+        #      the release exists. We must list /releases and filter
+        #      by .tag_name to find drafts.
+        #   2. `gh release create` without --target stores the draft
+        #      with no commit binding. Without --target, the matrix
+        #      builds that look up the release by tag would resolve
+        #      to nothing once the eventual publish-release step
+        #      promotes it. Pin to GITHUB_SHA so the published tag
+        #      points at this commit (matches the auto-{shortSHA}
+        #      convention).
         if: steps.version.outputs.tag != ''
         shell: bash
         env:
@@ -145,16 +158,26 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Reusing existing release $TAG (retry / re-run scenario)."
+          find_id() {
+            gh api "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq "[.[] | select(.tag_name == \"$TAG\") | .id] | first // empty"
+          }
+          RELEASE_ID="$(find_id)"
+          if [[ -n "$RELEASE_ID" ]]; then
+            echo "Reusing existing release $TAG (id=$RELEASE_ID, retry / re-run scenario)."
           else
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --title "humanovo ${VERSION}" \
               --notes "Build in progress — installers attach as the matrix jobs finish." \
               --draft
+            RELEASE_ID="$(find_id)"
           fi
-          RELEASE_ID=$(gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.id')
+          if [[ -z "$RELEASE_ID" ]]; then
+            echo "FATAL: release with tag $TAG not found after creation"
+            exit 1
+          fi
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
           echo "Draft release ready: tag=$TAG id=$RELEASE_ID"
 
@@ -600,12 +623,18 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Un-draft the release
+        # Using PATCH on /releases/{id} (rather than `gh release edit
+        # <tag>`) because draft releases have no git tag yet — gh
+        # release edit's tag lookup hits the same 404 path that
+        # broke prepare-release. We already captured the numeric
+        # release_id, so PATCH by id is direct and unambiguous.
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare-release.outputs.tag }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release_id }}
         run: |
           set -euo pipefail
-          gh release edit "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft=false
-          echo "Published release $TAG."
+          gh api --method PATCH \
+            "/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false > /dev/null
+          echo "Published release $TAG (id=$RELEASE_ID)."
