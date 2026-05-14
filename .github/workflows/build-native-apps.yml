@@ -131,6 +131,32 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      - name: Verify cargo is the real cargo (not rustup-init stub)
+        # Intermittent on macOS-latest runners: `cargo` ends up resolving
+        # to the rustup-init stub before the toolchain finishes
+        # registering. The stub doesn't have `metadata` so tauri-action
+        # bails with: `error: unexpected argument 'metadata' found`
+        # followed by `Usage: rustup-init[EXE] [OPTIONS]`.
+        #
+        # Forcing `rustup default stable` + `cargo --version` here:
+        #   1. Commits the toolchain selection regardless of any prior
+        #      partial install state.
+        #   2. Surfaces the stub-vs-real issue WITH a clean error in
+        #      this step (early-fail) rather than 30 seconds into the
+        #      tauri-action's bundle build.
+        #
+        # Bash for all 3 OSes — `rustup` ships as a CLI on each, and
+        # actions/setup-* puts ~/.cargo/bin first on PATH.
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup default stable
+          rustup show
+          cargo --version
+          # If `cargo metadata` works here, the bundle step's invocation
+          # will work too. Catch the rustup-init-stub case explicitly.
+          cargo metadata --no-deps --format-version 1 --manifest-path frontend/src-tauri/Cargo.toml >/dev/null
+
       - name: Cache Rust deps
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
         with:
