@@ -662,6 +662,152 @@ function BillingIntervalToggle() {
   )
 }
 
+// Promo code redemption. The preview call validates without
+// side-effects so the user knows what they're applying before they
+// commit; the redeem call is what actually grants the benefit. Two
+// outcomes the UI handles distinctly:
+//   • trial_extension → server already pushed users.trial_ends_at
+//     forward. Confirmation message states the new date.
+//   • percent_off / fixed_cents_off → server minted a Stripe
+//     Coupon scoped to this user; the user needs to start/upgrade
+//     a subscription via checkout to claim it. UI nudges them to
+//     the Manage-billing button above.
+function PromoCodePanel() {
+  const [code, setCode] = useState('')
+  const [previewing, setPreviewing] = useState(false)
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof api.previewPromoCode>> | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [redeeming, setRedeeming] = useState(false)
+  const [redeemResult, setRedeemResult] = useState<string | null>(null)
+
+  const doPreview = async () => {
+    if (!code.trim()) {
+      toast('error', 'Enter a code first.')
+      return
+    }
+    setPreviewing(true)
+    setPreview(null)
+    setPreviewError(null)
+    setRedeemResult(null)
+    try {
+      const p = await api.previewPromoCode(code.trim())
+      setPreview(p)
+    } catch (e: unknown) {
+      const ax = e as { response?: { status?: number; data?: { detail?: string } } }
+      if (ax?.response?.status === 404) {
+        setPreviewError(
+          ax.response.data?.detail ?? "We don't recognise that code.",
+        )
+      } else {
+        const msg = e instanceof Error ? e.message : 'Could not preview code'
+        toast('error', msg)
+      }
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  const doRedeem = async () => {
+    if (!preview) return
+    setRedeeming(true)
+    setRedeemResult(null)
+    try {
+      const r = await api.redeemPromoCode(code.trim())
+      setRedeemResult(r.message)
+      // Clear preview so the same code can't be redeemed twice from
+      // the same view (the server enforces this anyway, but giving
+      // the UI a clean state is nicer than a 400 toast).
+      setPreview(null)
+      setCode('')
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } } }
+      const msg = ax?.response?.data?.detail
+        ?? (e instanceof Error ? e.message : 'Could not redeem code')
+      toast('error', msg)
+    } finally {
+      setRedeeming(false)
+    }
+  }
+
+  return (
+    <div>
+      <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+        <FiDollarSign className="w-4 h-4" />
+        Have a promo code?
+      </h3>
+      <div className="glass-card p-4 space-y-3" data-testid="promo-code-card">
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Trial extensions apply right away. Discount codes mint a
+          Stripe coupon you can claim at checkout.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={code}
+            onChange={e => setCode(e.target.value.toUpperCase())}
+            placeholder="EARLYBIRD25"
+            className="input flex-1 text-sm font-mono"
+            data-testid="promo-code-input"
+          />
+          <button
+            type="button"
+            onClick={doPreview}
+            disabled={previewing}
+            className="btn-secondary text-sm disabled:opacity-50"
+            data-testid="promo-code-preview"
+          >
+            {previewing ? 'Checking…' : 'Check'}
+          </button>
+        </div>
+
+        {previewError && (
+          <div className="flex items-start gap-2 text-xs text-red-400 pt-1">
+            <FiAlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+            <span>{previewError}</span>
+          </div>
+        )}
+
+        {preview && (
+          <div className="rounded border border-emerald-400/30 bg-emerald-400/5 p-3 space-y-2">
+            <div className="text-sm">
+              <strong className="text-emerald-400">
+                {preview.kind === 'trial_extension'
+                  ? `Extend trial by ${preview.value} days`
+                  : preview.kind === 'percent_off'
+                    ? `${preview.value}% off your next bill`
+                    : `$${(preview.value / 100).toFixed(2)} off your next bill`}
+              </strong>
+            </div>
+            {preview.description && (
+              <div className="text-xs text-[var(--color-text-muted)]">
+                {preview.description}
+              </div>
+            )}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={doRedeem}
+                disabled={redeeming}
+                className="btn-secondary text-sm disabled:opacity-50"
+                data-testid="promo-code-redeem"
+              >
+                {redeeming ? 'Applying…' : 'Apply'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {redeemResult && (
+          <div className="flex items-start gap-2 text-xs text-[var(--color-text-muted)] pt-1">
+            <FiTrendingUp className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-400" />
+            <span>{redeemResult}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // Inline cancel-subscription overlay. Kept self-contained — opens
 // only when the user explicitly clicks the cancel button below, so
 // the Settings page never holds modal state on load. The form
@@ -1043,6 +1189,10 @@ function UsageBillingSettings() {
           (The Stripe portal cancel above also works but bypasses our
           reason-capture form.) */}
       <CancelSubscriptionPanel />
+
+      {/* Promo code redemption — applies trial extensions immediately
+          or mints a Stripe coupon the user can claim at checkout. */}
+      <PromoCodePanel />
 
       {/* Cap configuration */}
       <div>

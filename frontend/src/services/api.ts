@@ -1156,6 +1156,36 @@ export const api = {
     return data
   },
 
+  // Promo code redemption. preview = lookup (no side effect);
+  // redeem applies the code. 404 from preview means the code is
+  // unknown/expired/revoked. 400 from redeem includes the human
+  // reason (one-shot already used, email-domain restricted, etc.).
+  async previewPromoCode(code: string): Promise<{
+    code: string
+    kind: 'percent_off' | 'fixed_cents_off' | 'trial_extension'
+    value: number
+    description: string | null
+    expires_at: string | null
+  }> {
+    const { data } = await apiClient.get(
+      `/account/preview-code/${encodeURIComponent(code)}`,
+    )
+    return data
+  },
+
+  async redeemPromoCode(code: string): Promise<{
+    status: string
+    code: string
+    kind: 'percent_off' | 'fixed_cents_off' | 'trial_extension'
+    value: number
+    new_trial_ends_at: string | null
+    stripe_coupon_id: string | null
+    message: string
+  }> {
+    const { data } = await apiClient.post('/account/redeem-code', { code })
+    return data
+  },
+
   // API keys (account-scoped). The raw token is only ever returned
   // on POST /api-keys; list/get must never include it. Callers must
   // surface the raw token to the user once and then discard it.
