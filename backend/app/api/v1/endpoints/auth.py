@@ -6,7 +6,7 @@ Login, registration, and user management.
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,12 +62,15 @@ class UserUpdateRequest(BaseModel):
 @router.post("/register", response_model=UserResponse, status_code=201)
 async def register(
     request: RegisterRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """
     Register a new user.
 
-    Creates a new user account with researcher role.
+    Creates a new user account with researcher role + schedules the
+    welcome email as a background task so the signup response isn't
+    held up by SMTP / SES latency.
     """
     try:
         user = await create_user(
@@ -78,6 +81,32 @@ async def register(
             ),
             db,
             role=UserRole.RESEARCHER,
+        )
+
+        # Welcome email — fire-and-forget. A driver failure here logs
+        # but does NOT roll back the user creation; the dedup row in
+        # email_sends prevents future double-sends. Wrapped in a tiny
+        # local async so the BackgroundTask gets a fresh DB session
+        # (the request's session would be closed by the time the
+        # background task runs).
+        async def _send_welcome_bg(
+            user_id: str, user_email: str, full_name: str | None,
+        ) -> None:
+            from app.core.database import async_session_factory
+            from app.services.welcome_email_service import (
+                send_welcome_email,
+            )
+            async with async_session_factory() as bg_db:
+                await send_welcome_email(
+                    bg_db,
+                    user_id=user_id,
+                    user_email=user_email,
+                    full_name=full_name,
+                )
+
+        background_tasks.add_task(
+            _send_welcome_bg,
+            str(user.id), user.email, user.full_name,
         )
 
         return UserResponse(
