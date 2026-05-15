@@ -118,6 +118,15 @@ function seedCharts() {
 }
 
 test('every chart type renders without crash', async ({ page }) => {
+  // This fixture seeds ALL 51 chart types (34 recharts 2D + 17
+  // Plotly WebGL 3D) into one grid — far past any real user's page.
+  // Mounting 17 simultaneous WebGL contexts plus 34 SVG charts
+  // legitimately needs more than the 30s suite default; the
+  // page.locator().count() coverage loop below was timing out
+  // purely on main-thread saturation, not a render bug. Give the
+  // test 2 minutes — proportional to the deliberately-extreme
+  // fixture.
+  test.setTimeout(120_000)
   // Larger viewport so the fullPage screenshot resolves enough
   // detail per chart to spot typography / overlap issues — at the
   // default 1280px the grid only fits 2 charts wide and they shrink
@@ -136,9 +145,12 @@ test('every chart type renders without crash', async ({ page }) => {
   }, seedCharts())
 
   await page.goto('/data-visualization', { waitUntil: 'domcontentloaded' })
-  // Recharts renders asynchronously; give it a beat to settle every
-  // chart on the page.
-  await page.waitForTimeout(3000)
+  // Recharts + Plotly render asynchronously. With 51 charts (17 of
+  // them WebGL) a 3s beat wasn't enough — the count loop ran while
+  // the page was still mid-mount and main-thread-bound. 8s lets the
+  // bulk of the grid settle so the queries below don't fight an
+  // actively-rendering page.
+  await page.waitForTimeout(8000)
 
   // The page renders one card per chart with its title visible. If a
   // chart's render branch throws, ErrorBoundary swaps the card for a
