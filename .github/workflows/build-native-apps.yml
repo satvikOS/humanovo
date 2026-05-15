@@ -511,6 +511,16 @@ jobs:
           # Either fix unblocks the build; the PAT path is preferable
           # because it survives org-level Workflow-permission resets.
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          # Mock-auth MUST stay enabled in the shipped installer for
+          # now. The app gates every route behind a login (RequireAuth)
+          # and there is no real auth backend live yet — so mock auth
+          # (1234 / 1234) is the ONLY way in. `vite build` runs in
+          # production mode, where vite.config.ts defaults
+          # VITE_ENABLE_MOCK_AUTH to 'false'; without this override the
+          # release build would lock every user out at the login
+          # screen. Flip back to 'false' (or drop this line) only once
+          # a real auth backend is deployed and reachable.
+          VITE_ENABLE_MOCK_AUTH: 'true'
           # Code-signing + Tauri-updater secrets are forwarded to env
           # by the previous step ONLY when the corresponding repo secret
           # is non-empty. Empty-secret repos produce unsigned installers
