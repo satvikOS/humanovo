@@ -18,6 +18,9 @@ import {
   FiTrendingUp,
   FiExternalLink,
   FiCreditCard,
+  FiKey,
+  FiCopy,
+  FiTrash2,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -84,6 +87,7 @@ const BASE_SETTINGS_SECTIONS = [
   { id: 'privacy', label: 'Privacy & Security', icon: FiShield },
   { id: 'data', label: 'Data & Storage', icon: FiDatabase },
   { id: 'integrations', label: 'Integrations', icon: FiGlobe },
+  { id: 'api-keys', label: 'API keys', icon: FiKey },
 ]
 const ADMIN_SECTION = { id: 'admin', label: 'Admin · Seed demo data', icon: FiDatabase }
 // Desktop-only section — surfaces native-shell affordances (manual
@@ -2269,6 +2273,277 @@ function AiProvidersRow() {
   )
 }
 
+// ─── API keys ───────────────────────────────────────────────────
+// Developers need a self-service way to mint + rotate keys without
+// emailing support. The backend (account_api_keys.py) returns the
+// raw token exactly once — on POST. List/get never include it.
+// This component:
+//   • shows the user's active keys (prefix + label + last-used).
+//   • lets them mint a new one with a label + scope checkboxes.
+//   • surfaces the raw token in a one-time reveal banner with a
+//     copy button. The banner persists until the user dismisses
+//     it so they have time to actually copy.
+//   • supports per-row revoke.
+type ApiKeyRow = Awaited<ReturnType<typeof api.listApiKeys>>['keys'][number]
+type ApiScope = 'discovery:read' | 'discovery:write' | 'account:read' | 'account:write'
+
+const ALL_API_SCOPES: ApiScope[] = [
+  'discovery:read', 'discovery:write', 'account:read', 'account:write',
+]
+
+function ApiKeysSettings() {
+  const [keys, setKeys] = useState<ApiKeyRow[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [newName, setNewName] = useState('')
+  const [newScopes, setNewScopes] = useState<Set<ApiScope>>(
+    () => new Set<ApiScope>(['discovery:read']),
+  )
+  const [creating, setCreating] = useState(false)
+  const [reveal, setReveal] = useState<{ token: string; name: string; prefix: string } | null>(null)
+  const [revoking, setRevoking] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const r = await api.listApiKeys()
+      setKeys(r.keys)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load API keys')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const toggleScope = (s: ApiScope) => {
+    const next = new Set(newScopes)
+    if (next.has(s)) next.delete(s)
+    else next.add(s)
+    setNewScopes(next)
+  }
+
+  const createKey = async () => {
+    if (!newName.trim()) {
+      toast('error', 'Give the key a name so you can recognise it later.')
+      return
+    }
+    if (newScopes.size === 0) {
+      toast('error', 'Pick at least one scope.')
+      return
+    }
+    setCreating(true)
+    try {
+      const out = await api.createApiKey({
+        name: newName.trim(),
+        scopes: Array.from(newScopes),
+      })
+      // Stash the raw token for the one-time reveal banner. The
+      // backend will not return it again.
+      setReveal({ token: out.raw_token, name: out.name, prefix: out.prefix })
+      setNewName('')
+      setNewScopes(new Set<ApiScope>(['discovery:read']))
+      load()
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } } }
+      const msg = ax?.response?.data?.detail
+        ?? (e instanceof Error ? e.message : 'Could not mint API key')
+      toast('error', msg)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const revokeKey = async (id: string) => {
+    setRevoking(id)
+    try {
+      await api.revokeApiKey(id)
+      load()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Revoke failed'
+      toast('error', msg)
+    } finally {
+      setRevoking(null)
+    }
+  }
+
+  const copyToClipboard = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(token)
+      toast('info', 'Token copied to clipboard.', { title: 'humanovo' })
+    } catch {
+      toast('error', 'Clipboard unavailable — copy the token by hand.')
+    }
+  }
+
+  return (
+    <div className="space-y-5" data-testid="api-keys-card">
+      <div>
+        <h2 className="text-lg font-semibold mb-1">API keys</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Mint personal API keys for the humanovo platform — used as
+          <code className="mx-1">Authorization: Bearer apikey_…</code>
+          headers from scripts, notebooks, or CI jobs.
+        </p>
+      </div>
+
+      {/* One-time reveal banner — only rendered right after a successful
+          POST. The raw token is NEVER stored anywhere we can re-fetch,
+          so we keep this banner up until the user explicitly dismisses
+          it (no auto-hide). */}
+      {reveal && (
+        <div
+          className="glass-card p-4 space-y-3 border-l-4 border-emerald-400"
+          data-testid="api-key-reveal-banner"
+        >
+          <div className="flex items-start gap-2">
+            <FiKey className="w-4 h-4 mt-0.5 text-emerald-400" />
+            <div className="text-sm">
+              <strong>{reveal.name}</strong> created. Copy the token now —
+              we won’t show it again.
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs font-mono bg-black/30 rounded px-2 py-1 overflow-x-auto whitespace-nowrap">
+              {reveal.token}
+            </code>
+            <button
+              type="button"
+              onClick={() => copyToClipboard(reveal.token)}
+              className="btn-secondary text-xs inline-flex items-center gap-1"
+              data-testid="api-key-copy"
+            >
+              <FiCopy className="w-3.5 h-3.5" /> Copy
+            </button>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setReveal(null)}
+              className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              I’ve copied it — dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Create form */}
+      <div>
+        <h3 className="text-base font-medium mb-2">Create a new key</h3>
+        <div className="glass-card p-4 space-y-3">
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+              Name (visible to you only — e.g. <em>cluster-runner</em>)
+            </label>
+            <input
+              type="text"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              maxLength={120}
+              className="input w-full text-sm"
+              data-testid="new-api-key-name"
+              placeholder="cluster-runner"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+              Scopes
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {ALL_API_SCOPES.map(s => (
+                <label
+                  key={s}
+                  className={clsx(
+                    'inline-flex items-center gap-2 px-2 py-1 text-xs rounded cursor-pointer border',
+                    newScopes.has(s)
+                      ? 'border-white/20 bg-white/10'
+                      : 'border-white/5 hover:border-white/10',
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={newScopes.has(s)}
+                    onChange={() => toggleScope(s)}
+                    className="w-3 h-3 accent-[var(--color-text)]"
+                  />
+                  <code>{s}</code>
+                </label>
+              ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={createKey}
+            disabled={creating}
+            className="btn-secondary text-sm disabled:opacity-50"
+            data-testid="new-api-key-submit"
+          >
+            {creating ? 'Minting…' : 'Create key'}
+          </button>
+        </div>
+      </div>
+
+      {/* Existing keys */}
+      <div>
+        <h3 className="text-base font-medium mb-2">Active keys</h3>
+        <div className="glass-card p-3 overflow-hidden">
+          {loading && <div className="text-sm text-[var(--color-text-muted)] py-2">Loading…</div>}
+          {!loading && error && (
+            <div className="text-sm text-red-400 py-2">{error}</div>
+          )}
+          {!loading && !error && keys && keys.length === 0 && (
+            <div className="text-sm text-[var(--color-text-muted)] py-2">
+              No active keys. Create one above to call the platform API.
+            </div>
+          )}
+          {!loading && keys && keys.length > 0 && (
+            <table className="w-full text-xs">
+              <thead className="text-[var(--color-text-muted)]">
+                <tr className="text-left">
+                  <th className="py-1 pr-2">Name</th>
+                  <th className="py-1 pr-2">Prefix</th>
+                  <th className="py-1 pr-2">Scopes</th>
+                  <th className="py-1 pr-2">Created</th>
+                  <th className="py-1 pr-2">Last used</th>
+                  <th className="py-1 pr-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {keys.map(k => (
+                  <tr key={k.id} className="border-t border-white/5">
+                    <td className="py-1 pr-2">{k.name}</td>
+                    <td className="py-1 pr-2 font-mono">{k.prefix}…</td>
+                    <td className="py-1 pr-2 font-mono">{k.scopes.join(', ') || '—'}</td>
+                    <td className="py-1 pr-2">{new Date(k.created_at).toLocaleDateString()}</td>
+                    <td className="py-1 pr-2">
+                      {k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="py-1 pr-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => revokeKey(k.id)}
+                        disabled={revoking === k.id}
+                        title="Revoke key"
+                        className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 inline-flex items-center gap-1"
+                        data-testid={`revoke-key-${k.id}`}
+                      >
+                        <FiTrash2 className="w-3.5 h-3.5" />
+                        {revoking === k.id ? 'Revoking…' : 'Revoke'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DesktopSettings() {
   // Pull current user once so we can conditionally show the
   // AI Providers row only to admins (the endpoint behind it 403s
@@ -2763,6 +3038,8 @@ export default function Settings() {
         return <DataSettings />
       case 'integrations':
         return <IntegrationSettings />
+      case 'api-keys':
+        return <ApiKeysSettings />
       case 'admin':
         // Two stacked admin sections — seed (existing) above the new
         // refunds card. Keeping them in one route rather than splitting
