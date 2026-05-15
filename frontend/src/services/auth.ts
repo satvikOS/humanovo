@@ -253,6 +253,22 @@ export async function changePassword(req: ChangePasswordRequest): Promise<void> 
   })
 }
 
+// Email verification — POST /auth/send-verification needs auth, GET
+// /verify-email is unauthenticated (token-protected).
+export async function sendVerificationEmail(): Promise<{ status: string; message: string }> {
+  const token = getToken()
+  if (!token) throw new Error('Not authenticated')
+  const { data } = await authClient.post('/send-verification', null, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  return data
+}
+
+export async function verifyEmailToken(token: string): Promise<{ status: string; message: string }> {
+  const { data } = await authClient.get('/verify-email', { params: { token } })
+  return data
+}
+
 // Anti-enumeration: backend ALWAYS returns 200 for /forgot-password,
 // even when the email doesn't match any user. UI should show the
 // generic "if it exists, we sent a link" copy regardless of outcome.

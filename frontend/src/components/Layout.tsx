@@ -56,6 +56,7 @@ import { useWorkspace, WorkspaceTab } from '../contexts/WorkspaceContext'
 import HumanovoGlyph from './HumanovoGlyph'
 import { Onboarding } from './Onboarding'
 import { TrialBanner } from './TrialBanner'
+import { VerifyEmailBanner } from './VerifyEmailBanner'
 
 const mainNavItems = filterV1([
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
@@ -1707,6 +1708,12 @@ if (path === '/clinical-trials') return 'Clinical Trials'
             page, freeing the chrome rather than persistently
             stealing pixels. */}
         <TrialBanner />
+
+        {/* Email-verification banner — only when is_verified=false.
+            Stacks below the trial banner so an unverified trial user
+            sees both nudges (trial countdown is more urgent, so it
+            goes first). */}
+        <VerifyEmailBanner />
 
         {/* Main content */}
         <main

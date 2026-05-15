@@ -38,6 +38,7 @@ const Login = lazy(() => import('./pages/Login'))
 const Signup = lazy(() => import('./pages/Signup'))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
+const VerifyEmail = lazy(() => import('./pages/VerifyEmail'))
 
 // Lazy-loaded pages: heavy (recharts, canvas, MATLAB interpreter, 3D),
 // or rarely the entry point. Split into their own chunks so we don't
@@ -147,6 +148,7 @@ function App() {
       <Route path="/signup" element={<LazyPageWrapper><Signup /></LazyPageWrapper>} />
       <Route path="/forgot-password" element={<LazyPageWrapper><ForgotPassword /></LazyPageWrapper>} />
       <Route path="/reset-password" element={<LazyPageWrapper><ResetPassword /></LazyPageWrapper>} />
+      <Route path="/verify-email" element={<LazyPageWrapper><VerifyEmail /></LazyPageWrapper>} />
 
       {/* Marketing lives at https://www.humanovo.net/ — the in-app /welcome,
           /pricing, /docs routes were removed (commit following this one)
