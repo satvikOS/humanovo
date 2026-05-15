@@ -1156,6 +1156,23 @@ export const api = {
     return data
   },
 
+  // Cancel subscription at period end. The server records the
+  // reason regardless of Stripe outcome (so analytics survives a
+  // Stripe outage), then schedules cancel_at_period_end=true on
+  // Stripe. UI gets a 409 when the user has no active sub.
+  async cancelSubscription(body: {
+    reason_category:
+      | 'price' | 'features' | 'bug' | 'churn' | 'no_longer_needed' | 'other'
+    reason_text?: string
+  }): Promise<{
+    reason_recorded: boolean
+    stripe: { status: string; cancel_at?: number | null; reason?: string }
+    message: string
+  }> {
+    const { data } = await apiClient.post('/account/cancel-subscription', body)
+    return data
+  },
+
   // Billing-interval preference (monthly / annual). The actual
   // Stripe subscription swap still happens in the Customer Portal;
   // this just persists the user's preference locally so the

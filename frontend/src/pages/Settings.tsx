@@ -658,6 +658,189 @@ function BillingIntervalToggle() {
   )
 }
 
+// Inline cancel-subscription overlay. Kept self-contained — opens
+// only when the user explicitly clicks the cancel button below, so
+// the Settings page never holds modal state on load. The form
+// captures a categorical reason + free-text so the cancellation
+// reasons analytics (Phase 3.6 backend) actually gets populated;
+// without the categorical, every reason gets lumped into "other".
+type CancelReason =
+  | 'price' | 'features' | 'bug' | 'churn' | 'no_longer_needed' | 'other'
+
+const CANCEL_REASON_LABELS: Record<CancelReason, string> = {
+  price: 'Too expensive',
+  features: 'Missing features / didn’t work for me',
+  bug: 'Kept hitting bugs',
+  churn: 'Moving to a different tool',
+  no_longer_needed: 'Project ended / no longer needed',
+  other: 'Other',
+}
+
+function CancelSubscriptionPanel() {
+  const [open, setOpen] = useState(false)
+  const [reasonCategory, setReasonCategory] = useState<CancelReason>('price')
+  const [reasonText, setReasonText] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [confirmation, setConfirmation] = useState<string | null>(null)
+  const [noSubHint, setNoSubHint] = useState<string | null>(null)
+
+  const reset = () => {
+    setReasonCategory('price')
+    setReasonText('')
+    setConfirmation(null)
+    setNoSubHint(null)
+  }
+
+  const submit = async () => {
+    if (reasonCategory === 'other' && !reasonText.trim()) {
+      toast('error', 'Please describe your reason briefly.')
+      return
+    }
+    setSubmitting(true)
+    setConfirmation(null)
+    try {
+      const r = await api.cancelSubscription({
+        reason_category: reasonCategory,
+        reason_text: reasonText.trim() || undefined,
+      })
+      setConfirmation(r.message)
+    } catch (e: unknown) {
+      const ax = e as { response?: { status?: number; data?: { detail?: string } } }
+      if (ax?.response?.status === 409) {
+        // No active sub — distinct from a real error.
+        setNoSubHint(
+          ax.response.data?.detail
+            ?? "You don't have an active subscription to cancel.",
+        )
+      } else {
+        const msg = e instanceof Error ? e.message : 'Could not cancel subscription'
+        toast('error', msg)
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div>
+      <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+        <FiAlertCircle className="w-4 h-4" />
+        Cancel subscription
+      </h3>
+      <div className="glass-card p-4 space-y-3">
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Cancel at end of the current billing period. You keep access
+          until then; we don’t charge again.
+        </p>
+        <button
+          type="button"
+          onClick={() => { reset(); setOpen(true) }}
+          className="btn-secondary text-sm"
+          data-testid="open-cancel-modal"
+        >
+          Cancel my subscription…
+        </button>
+        {noSubHint && (
+          <div className="flex items-start gap-2 text-xs text-[var(--color-text-muted)] pt-1">
+            <FiAlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+            <span>{noSubHint}</span>
+          </div>
+        )}
+      </div>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cancel subscription"
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          data-testid="cancel-subscription-modal"
+        >
+          <div
+            className="absolute inset-0 modal-overlay bg-black/60 backdrop-blur-sm"
+            onClick={() => !submitting && setOpen(false)}
+          />
+          <div className="relative glass-card max-w-md w-[92%] p-5 space-y-4">
+            <h4 className="text-base font-semibold">
+              {confirmation ? 'Cancellation scheduled' : 'Tell us why you’re leaving'}
+            </h4>
+            {confirmation ? (
+              <>
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  {confirmation}
+                </p>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => { setOpen(false); reset() }}
+                    className="btn-secondary text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  Your access continues until the end of the current
+                  billing period. The reason helps us improve.
+                </p>
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+                    Reason
+                  </label>
+                  <select
+                    value={reasonCategory}
+                    onChange={e => setReasonCategory(e.target.value as CancelReason)}
+                    className="input w-full text-sm"
+                    data-testid="cancel-reason-category"
+                  >
+                    {(Object.keys(CANCEL_REASON_LABELS) as CancelReason[]).map(k => (
+                      <option key={k} value={k}>{CANCEL_REASON_LABELS[k]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+                    Anything else? (optional)
+                  </label>
+                  <textarea
+                    value={reasonText}
+                    onChange={e => setReasonText(e.target.value)}
+                    rows={3}
+                    className="input w-full text-sm"
+                    placeholder="A sentence helps us a lot."
+                    data-testid="cancel-reason-text"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    disabled={submitting}
+                    className="btn-secondary text-sm disabled:opacity-50"
+                  >
+                    Never mind
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={submitting}
+                    data-testid="cancel-subscription-submit"
+                    className="btn-secondary text-sm disabled:opacity-50"
+                  >
+                    {submitting ? 'Cancelling…' : 'Cancel subscription'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function UsageBillingSettings() {
   const userId = _currentUserId()
   const [loading, setLoading] = useState(true)
@@ -850,6 +1033,12 @@ function UsageBillingSettings() {
           )}
         </div>
       </div>
+
+      {/* Cancel subscription — first-party flow so the cancellation
+          reason analytics in the backend actually gets populated.
+          (The Stripe portal cancel above also works but bypasses our
+          reason-capture form.) */}
+      <CancelSubscriptionPanel />
 
       {/* Cap configuration */}
       <div>
