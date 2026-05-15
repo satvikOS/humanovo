@@ -1344,6 +1344,69 @@ export const api = {
     return data
   },
 
+  // Admin user lifecycle — the support triage surface. Status is a
+  // full snapshot (tier / trial / subscription / crashes / API keys);
+  // the action endpoints are explicit state changes that audit-log.
+  async adminGetUserStatus(userId: string): Promise<{
+    user_id: string
+    email: string
+    full_name: string | null
+    role: string
+    tier: string
+    is_active: boolean
+    is_verified: boolean
+    telemetry_opt_in: boolean
+    overage_enabled: boolean
+    trial_ends_at: string | null
+    delete_requested_at: string | null
+    deleted_at: string | null
+    stripe_customer_id: string | null
+    stripe_subscription_id: string | null
+    stripe_subscription_status: string | null
+    created_at: string | null
+    last_login_at: string | null
+    latest_subscription_transition: unknown
+    crash_reports_last_7d: number
+    active_api_keys: number
+  }> {
+    const { data } = await apiClient.get(
+      `/admin/users/${encodeURIComponent(userId)}/status`,
+    )
+    return data
+  },
+
+  async adminDisableUser(userId: string): Promise<{ status: string }> {
+    const { data } = await apiClient.post(
+      `/admin/users/${encodeURIComponent(userId)}/disable`,
+    )
+    return data
+  },
+
+  async adminRestoreUser(userId: string): Promise<{ status: string }> {
+    const { data } = await apiClient.post(
+      `/admin/users/${encodeURIComponent(userId)}/restore`,
+    )
+    return data
+  },
+
+  async adminGrantTrial(
+    userId: string,
+    days: number,
+  ): Promise<{ status: string; trial_ends_at: string | null }> {
+    const { data } = await apiClient.post(
+      `/admin/users/${encodeURIComponent(userId)}/grant-trial`,
+      { days },
+    )
+    return data
+  },
+
+  async adminRestoreDeletion(userId: string): Promise<{ status: string }> {
+    const { data } = await apiClient.post(
+      `/admin/users/${encodeURIComponent(userId)}/restore-deletion`,
+    )
+    return data
+  },
+
   // Admin refund operations — see backend admin_billing.py.
   // listAdminRefunds: paginated history newest first, optionally
   // filtered by status. The dashboard shows recent attempts including

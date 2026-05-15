@@ -2589,6 +2589,196 @@ function AdminRefundsCard() {
   )
 }
 
+// ─── Admin · User lookup ───────────────────────────────────────
+// Support-triage panel. Paste a user_id, see their full lifecycle
+// state (tier / trial / subscription / crashes / API keys), and
+// exercise the per-user action endpoints (disable / restore /
+// grant-trial / restore-deletion) — each of which audit-logs on
+// the backend so the action is attributable.
+type UserStatus = Awaited<ReturnType<typeof api.adminGetUserStatus>>
+
+function AdminUserLookupCard() {
+  const [userId, setUserId] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<UserStatus | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [grantDays, setGrantDays] = useState(14)
+
+  const lookup = async () => {
+    if (!userId.trim()) {
+      toast('error', 'Paste a user id (UUID) first.')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    setStatus(null)
+    try {
+      const s = await api.adminGetUserStatus(userId.trim())
+      setStatus(s)
+    } catch (e: unknown) {
+      const ax = e as { response?: { status?: number; data?: { detail?: string } } }
+      if (ax?.response?.status === 404) {
+        setError('No user with that id.')
+      } else {
+        setError(ax?.response?.data?.detail ?? (e instanceof Error ? e.message : 'Lookup failed'))
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const runAction = async (
+    name: string,
+    fn: () => Promise<unknown>,
+  ) => {
+    setBusy(name)
+    try {
+      await fn()
+      toast('info', `${name} applied. Refreshing…`, { title: 'humanovo' })
+      // Re-fetch so the panel reflects the new state.
+      await lookup()
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } } }
+      toast('error', ax?.response?.data?.detail ?? (e instanceof Error ? e.message : `${name} failed`))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const isoToHuman = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleString() : '—'
+
+  return (
+    <div className="space-y-5" data-testid="admin-user-lookup-card">
+      <div>
+        <h2 className="text-lg font-semibold mb-1">Admin · User lookup</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Snapshot of a user’s lifecycle state for triage. All actions
+          here write to the Merkle-chained audit log.
+        </p>
+      </div>
+
+      <div className="glass-card p-4 space-y-3">
+        <div>
+          <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+            User id (UUID)
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={userId}
+              onChange={e => setUserId(e.target.value)}
+              placeholder="0d9a…-…-…-…-…"
+              className="input flex-1 text-sm font-mono"
+              data-testid="admin-user-id-input"
+            />
+            <button
+              type="button"
+              onClick={lookup}
+              disabled={loading}
+              className="btn-secondary text-sm disabled:opacity-50"
+              data-testid="admin-user-lookup-submit"
+            >
+              {loading ? 'Looking up…' : 'Look up'}
+            </button>
+          </div>
+        </div>
+        {error && (
+          <div className="text-xs text-red-400 pt-1">{error}</div>
+        )}
+      </div>
+
+      {status && (
+        <div className="glass-card p-4 space-y-3" data-testid="admin-user-status">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div><span className="text-[var(--color-text-muted)]">Email:</span> {status.email}</div>
+            <div><span className="text-[var(--color-text-muted)]">Tier:</span> {status.tier}</div>
+            <div><span className="text-[var(--color-text-muted)]">Role:</span> {status.role}</div>
+            <div><span className="text-[var(--color-text-muted)]">Active:</span> {status.is_active ? 'yes' : 'no'}</div>
+            <div><span className="text-[var(--color-text-muted)]">Verified:</span> {status.is_verified ? 'yes' : 'no'}</div>
+            <div><span className="text-[var(--color-text-muted)]">Trial ends:</span> {isoToHuman(status.trial_ends_at)}</div>
+            <div><span className="text-[var(--color-text-muted)]">Stripe sub:</span> {status.stripe_subscription_id ?? '—'}</div>
+            <div><span className="text-[var(--color-text-muted)]">Sub status:</span> {status.stripe_subscription_status ?? '—'}</div>
+            <div><span className="text-[var(--color-text-muted)]">Crashes 7d:</span> {status.crash_reports_last_7d}</div>
+            <div><span className="text-[var(--color-text-muted)]">API keys:</span> {status.active_api_keys}</div>
+            <div><span className="text-[var(--color-text-muted)]">Created:</span> {isoToHuman(status.created_at)}</div>
+            <div><span className="text-[var(--color-text-muted)]">Last login:</span> {isoToHuman(status.last_login_at)}</div>
+            {status.delete_requested_at && (
+              <div className="col-span-2 text-amber-400">
+                Deletion requested {isoToHuman(status.delete_requested_at)}
+              </div>
+            )}
+            {status.deleted_at && (
+              <div className="col-span-2 text-red-400">
+                Hard-deleted {isoToHuman(status.deleted_at)}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
+            {status.is_active ? (
+              <button
+                type="button"
+                onClick={() => runAction('Disable', () => api.adminDisableUser(status.user_id))}
+                disabled={busy !== null}
+                className="btn-secondary text-xs text-red-400 disabled:opacity-50"
+                data-testid="admin-user-disable"
+              >
+                {busy === 'Disable' ? '…' : 'Disable user'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => runAction('Restore', () => api.adminRestoreUser(status.user_id))}
+                disabled={busy !== null}
+                className="btn-secondary text-xs disabled:opacity-50"
+                data-testid="admin-user-restore"
+              >
+                {busy === 'Restore' ? '…' : 'Re-enable user'}
+              </button>
+            )}
+            {status.delete_requested_at && !status.deleted_at && (
+              <button
+                type="button"
+                onClick={() => runAction('Restore deletion', () => api.adminRestoreDeletion(status.user_id))}
+                disabled={busy !== null}
+                className="btn-secondary text-xs disabled:opacity-50"
+                data-testid="admin-user-restore-deletion"
+              >
+                {busy === 'Restore deletion' ? '…' : 'Cancel scheduled deletion'}
+              </button>
+            )}
+            <div className="ml-auto inline-flex items-center gap-1">
+              <input
+                type="number"
+                min={1} max={365}
+                value={grantDays}
+                onChange={e => setGrantDays(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
+                className="input text-xs w-16"
+                aria-label="Days to grant"
+              />
+              <span className="text-xs text-[var(--color-text-muted)]">days</span>
+              <button
+                type="button"
+                onClick={() => runAction(
+                  `Grant ${grantDays}-day trial`,
+                  () => api.adminGrantTrial(status.user_id, grantDays),
+                )}
+                disabled={busy !== null}
+                className="btn-secondary text-xs disabled:opacity-50"
+                data-testid="admin-user-grant-trial"
+              >
+                {busy?.startsWith('Grant') ? '…' : 'Grant trial'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function IntegrationSettings() {
   type Integrations = { github: boolean; slack: boolean; pubmed: boolean; orcid: boolean; zenodo: boolean }
   const defaultIntegrations: Integrations = { github: false, slack: false, pubmed: true, orcid: false, zenodo: false }
@@ -3534,13 +3724,15 @@ export default function Settings() {
       case 'api-keys':
         return <ApiKeysSettings />
       case 'admin':
-        // Two stacked admin sections — seed (existing) above the new
-        // refunds card. Keeping them in one route rather than splitting
-        // the side-nav avoids a second admin nav entry; admins land
-        // here, scroll if they need the lower card.
+        // Three stacked admin sections — seed (existing), refunds
+        // (Phase 3.14), user lookup (Phase 3.26). Keeping them in one
+        // route rather than splitting the side-nav avoids two extra
+        // admin nav entries; admins land here, scroll if they need
+        // a lower card.
         return (
           <div className="space-y-10">
             <AdminSeedSettings />
+            <AdminUserLookupCard />
             <AdminRefundsCard />
           </div>
         )
