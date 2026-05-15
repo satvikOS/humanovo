@@ -570,6 +570,16 @@ export default function ResearchImaging() {
   // once afterwards instead of dropping the update or stacking N renders.
   const renderDirtyRef = useRef(false)
   const renderRafRef = useRef<number | null>(null)
+  // Cache of the expensive windowing+filter result. applyWindow +
+  // applyFilter are O(width·height·kernel²) synchronous main-thread
+  // passes — on a large image a single sobel/median/bilateral pass
+  // takes seconds. renderCanvas runs on EVERY zoom / pan / annotation
+  // change and re-schedules itself via RAF when dirty; without this
+  // cache each of those re-ran the full filter, turning a heavy
+  // filter into a permanent main-thread freeze. We recompute only
+  // when the image, window, or filter actually changes — keyed
+  // below — and reuse the processed ImageData otherwise.
+  const processedRef = useRef<{ key: string; data: ImageData } | null>(null)
   const [filterBusy, setFilterBusy] = useState(false)
 
   const selected = useMemo(() => studies.find(s => s.id === selectedId) || null, [studies, selectedId])
@@ -601,7 +611,13 @@ export default function ResearchImaging() {
   useEffect(() => {
     if (!selected) { imgCacheRef.current = null; return }
     const img = new Image()
-    img.onload = () => { imgCacheRef.current = img; setImgGeneration(g => g + 1) }
+    img.onload = () => {
+      imgCacheRef.current = img
+      // New image → drop the cached windowing/filter result so the
+      // next render recomputes against the new pixels.
+      processedRef.current = null
+      setImgGeneration(g => g + 1)
+    }
     img.src = selected.imageData
     setZoom(1); setPan({ x: 0, y: 0 })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -802,9 +818,26 @@ export default function ResearchImaging() {
     const offCtx = off.getContext('2d')
     if (!offCtx) { renderingRef.current = false; return }
     offCtx.drawImage(img, 0, 0)
-    let data = offCtx.getImageData(0, 0, img.width, img.height)
-    data = applyWindow(data, selected.windowCenter, selected.windowWidth)
-    if (selected.filter !== 'none') data = applyFilter(data, selected.filter)
+    // Windowing + filter are the expensive part. Recompute ONLY when
+    // the image / window / filter actually changed — keyed below.
+    // Pure-view changes (zoom, pan, annotation, tool) reuse the
+    // cached processed pixels, so a heavy filter costs one slow pass
+    // instead of one per render frame (which previously froze the
+    // app whenever a sobel/median/bilateral filter was active).
+    const procKey = [
+      img.width, img.height,
+      selected.windowCenter, selected.windowWidth, selected.filter,
+    ].join('|')
+    let data: ImageData
+    if (processedRef.current && processedRef.current.key === procKey) {
+      data = processedRef.current.data
+    } else {
+      let d = offCtx.getImageData(0, 0, img.width, img.height)
+      d = applyWindow(d, selected.windowCenter, selected.windowWidth)
+      if (selected.filter !== 'none') d = applyFilter(d, selected.filter)
+      processedRef.current = { key: procKey, data: d }
+      data = d
+    }
     offCtx.putImageData(data, 0, 0)
 
     // Compute fit
