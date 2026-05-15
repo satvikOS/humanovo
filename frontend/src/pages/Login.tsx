@@ -201,6 +201,17 @@ export default function Login() {
             </button>
           </form>
 
+          <p className="text-xs mt-4 text-center" style={{ color: 'var(--color-text-muted)' }}>
+            <Link
+              to="/forgot-password"
+              className="underline hover:no-underline"
+              style={{ color: 'var(--color-text-muted)' }}
+              data-testid="login-forgot-password"
+            >
+              Forgot password?
+            </Link>
+          </p>
+
           <p className="text-xs mt-5 text-center" style={{ color: 'var(--color-text-muted)' }}>
             New here?{' '}
             <Link

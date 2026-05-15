@@ -252,3 +252,21 @@ export async function changePassword(req: ChangePasswordRequest): Promise<void> 
     headers: { Authorization: `Bearer ${token}` },
   })
 }
+
+// Anti-enumeration: backend ALWAYS returns 200 for /forgot-password,
+// even when the email doesn't match any user. UI should show the
+// generic "if it exists, we sent a link" copy regardless of outcome.
+export async function forgotPassword(email: string): Promise<{ status: string; message: string }> {
+  const { data } = await authClient.post('/forgot-password', { email })
+  return data
+}
+
+// Consumes a reset token from the URL + sets the new password.
+// Single-use: a 410 means the token already fired (or expired).
+export async function resetPassword(
+  token: string,
+  new_password: string,
+): Promise<{ status: string; message?: string }> {
+  const { data } = await authClient.post('/reset-password', { token, new_password })
+  return data
+}

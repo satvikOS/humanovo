@@ -30,6 +30,15 @@ const Notebook = lazy(() => import('./pages/Notebook'))
 const Timeline = lazy(() => import('./pages/Timeline'))
 const DataManager = lazy(() => import('./pages/DataManager'))
 
+// Pre-auth pages — rendered OUTSIDE the Layout wrapper so they show
+// without the sidebar / workspace tabs chrome. Lazy so anonymous
+// visitors don't pull the authenticated-shell bundle until they
+// finish logging in.
+const Login = lazy(() => import('./pages/Login'))
+const Signup = lazy(() => import('./pages/Signup'))
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
+const ResetPassword = lazy(() => import('./pages/ResetPassword'))
+
 // Lazy-loaded pages: heavy (recharts, canvas, MATLAB interpreter, 3D),
 // or rarely the entry point. Split into their own chunks so we don't
 // block initial paint on code that the user may never reach.
@@ -130,6 +139,15 @@ function App() {
           beforeunload). */}
       <CloseGuardManager />
       <Routes>
+      {/* Pre-auth surfaces — rendered without the authenticated app
+          shell. /login + /signup are the existing entry points; the
+          two password-recovery routes are wired so the email links
+          sent by /auth/forgot-password actually lead somewhere. */}
+      <Route path="/login" element={<LazyPageWrapper><Login /></LazyPageWrapper>} />
+      <Route path="/signup" element={<LazyPageWrapper><Signup /></LazyPageWrapper>} />
+      <Route path="/forgot-password" element={<LazyPageWrapper><ForgotPassword /></LazyPageWrapper>} />
+      <Route path="/reset-password" element={<LazyPageWrapper><ResetPassword /></LazyPageWrapper>} />
+
       {/* Marketing lives at https://www.humanovo.net/ — the in-app /welcome,
           /pricing, /docs routes were removed (commit following this one)
           to keep the bundle lean. External site is the canonical surface. */}
