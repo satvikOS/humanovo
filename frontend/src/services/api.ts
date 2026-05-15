@@ -1140,6 +1140,22 @@ export const api = {
     return data
   },
 
+  // Stripe Customer Portal — returns a short-lived URL the frontend
+  // opens in a new tab so the user can update card / cancel / download
+  // invoices on Stripe's hosted UI. 409 from the server means the user
+  // hasn't started any billing relationship yet (trial / free tier);
+  // callers should branch on that to show a "no billing yet" hint
+  // rather than a generic error.
+  async createBillingPortalSession(
+    returnUrl?: string,
+  ): Promise<{ url: string; return_url: string; expires_at: number | null }> {
+    const { data } = await apiClient.post(
+      '/account/billing/portal-session',
+      returnUrl ? { return_url: returnUrl } : {},
+    )
+    return data
+  },
+
   async getDocumentPermission(userId: string, documentId: string): Promise<{
     document_id: string
     user_id: string

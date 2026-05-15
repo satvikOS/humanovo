@@ -15,7 +15,9 @@ import {
   FiDollarSign,
   FiShare2,
   FiAlertCircle,
-  FiTrendingUp
+  FiTrendingUp,
+  FiExternalLink,
+  FiCreditCard,
 } from 'react-icons/fi'
 import clsx from 'clsx'
 import { useTheme } from '../contexts/ThemeContext'
@@ -646,6 +648,39 @@ function UsageBillingSettings() {
     budget?.status === 'warning' ? 'text-amber-400' :
     'text-emerald-400'
 
+  const [portalLoading, setPortalLoading] = useState(false)
+  const [portalHint, setPortalHint] = useState<string | null>(null)
+  const openBillingPortal = async () => {
+    setPortalLoading(true)
+    setPortalHint(null)
+    try {
+      const { url } = await api.createBillingPortalSession()
+      if (url) {
+        // open in a new tab so the user can come back to humanovo
+        window.open(url, '_blank', 'noopener,noreferrer')
+      } else {
+        setPortalHint('Stripe returned no portal URL — try again in a moment.')
+      }
+    } catch (e: unknown) {
+      // Distinguish "no billing yet" from real errors. The backend
+      // returns 409 with a hint when the user has no
+      // stripe_customer_id; show that text instead of a generic
+      // failure toast.
+      const ax = e as { response?: { status?: number; data?: { detail?: string } } }
+      if (ax?.response?.status === 409) {
+        setPortalHint(
+          ax.response.data?.detail
+            || "You haven't started a paid plan yet — nothing to manage in Stripe.",
+        )
+      } else {
+        const msg = e instanceof Error ? e.message : 'Could not open billing portal'
+        toast('error', msg)
+      }
+    } finally {
+      setPortalLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Summary */}
@@ -688,6 +723,39 @@ function UsageBillingSettings() {
             <div className="flex items-start gap-2 text-xs text-[var(--color-text-muted)] pt-1">
               <FiAlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
               <span>{budget.message}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Stripe billing portal — card / address / invoice download /
+          cancellation live there. The button is a no-network until
+          click so it can't slow down the page load. */}
+      <div>
+        <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+          <FiCreditCard className="w-4 h-4" />
+          Payment method &amp; invoices
+        </h3>
+        <div className="glass-card p-4 space-y-3">
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Card, billing address, tax id, invoice history, and
+            cancellation are all managed through the Stripe-hosted
+            portal.
+          </p>
+          <button
+            type="button"
+            onClick={openBillingPortal}
+            disabled={portalLoading}
+            className="btn-secondary inline-flex items-center gap-2 text-sm disabled:opacity-50"
+            data-testid="open-billing-portal"
+          >
+            <FiExternalLink className="w-3.5 h-3.5" />
+            {portalLoading ? 'Opening…' : 'Manage billing in Stripe'}
+          </button>
+          {portalHint && (
+            <div className="flex items-start gap-2 text-xs text-[var(--color-text-muted)] pt-1">
+              <FiAlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <span>{portalHint}</span>
             </div>
           )}
         </div>
