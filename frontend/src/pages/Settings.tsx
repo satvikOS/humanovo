@@ -662,6 +662,166 @@ function BillingIntervalToggle() {
   )
 }
 
+// Upgrade flow — fetches /pricing/tiers (public) and /billing/status
+// (authed). Renders a tier comparison strip with the current tier
+// badged "Current". Paid CTAs POST /billing/checkout and open the
+// returned Stripe URL in a new tab.
+type PricingPayload = Awaited<ReturnType<typeof api.getPricingTiers>>
+type PricingTier = PricingPayload['tiers'][number]
+type BillingStatus = Awaited<ReturnType<typeof api.getBillingStatus>>
+
+function UpgradePanel() {
+  const [pricing, setPricing] = useState<PricingPayload | null>(null)
+  const [status, setStatus] = useState<BillingStatus | null>(null)
+  const [cadence, setCadence] = useState<'monthly' | 'annual'>('monthly')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [starting, setStarting] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      api.getPricingTiers().catch(() => null),
+      api.getBillingStatus().catch(() => null),
+      api.getBillingInterval().catch(() => ({ billing_interval: 'monthly' as const })),
+    ]).then(([p, s, b]) => {
+      if (cancelled) return
+      setPricing(p)
+      setStatus(s)
+      setCadence(b.billing_interval)
+      if (!p) setError('Pricing unavailable — try again later.')
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  const currentTier = status?.tier
+  const startCheckout = async (tierKey: PricingTier['key']) => {
+    if (tierKey === 'trial') return  // trial isn't checkout-able
+    setStarting(tierKey)
+    try {
+      const r = await api.startBillingCheckout(tierKey)
+      if (r.checkout_url) {
+        window.open(r.checkout_url, '_blank', 'noopener,noreferrer')
+      } else {
+        toast('error', 'No checkout URL returned — try again.')
+      }
+    } catch (e: unknown) {
+      const ax = e as { response?: { status?: number; data?: { detail?: string } } }
+      if (ax?.response?.status === 503) {
+        toast('error', ax.response.data?.detail ?? 'Billing service is not configured yet.')
+      } else {
+        const msg = e instanceof Error ? e.message : 'Could not start checkout'
+        toast('error', msg)
+      }
+    } finally {
+      setStarting(null)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div>
+        <h3 className="text-base font-medium mb-4">Plans</h3>
+        <div className="glass-card p-4 text-sm text-[var(--color-text-muted)]">
+          Loading plans…
+        </div>
+      </div>
+    )
+  }
+  if (error || !pricing) {
+    return (
+      <div>
+        <h3 className="text-base font-medium mb-4">Plans</h3>
+        <div className="glass-card p-4 text-sm text-[var(--color-text-muted)]">
+          {error ?? 'Pricing is currently unavailable.'}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div data-testid="upgrade-panel">
+      <div className="flex items-baseline justify-between mb-4">
+        <h3 className="text-base font-medium flex items-center gap-2">
+          <FiTrendingUp className="w-4 h-4" />
+          Upgrade your plan
+        </h3>
+        <span className="text-xs text-[var(--color-text-muted)]">
+          {cadence === 'annual'
+            ? `Annual cadence — ${pricing.annual_discount_pct}% off`
+            : 'Monthly cadence'}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {pricing.tiers.map(t => {
+          const isCurrent = currentTier === t.key
+          const cents = cadence === 'annual' ? t.annual_price_cents : t.monthly_price_cents
+          const displayPrice = cents === 0
+            ? 'Free'
+            : cadence === 'annual'
+              ? `$${(cents / 100).toFixed(0)}/yr`
+              : `$${(cents / 100).toFixed(0)}/mo`
+          return (
+            <div
+              key={t.key}
+              className={clsx(
+                'glass-card p-4 space-y-3 flex flex-col',
+                isCurrent && 'border border-emerald-400/30',
+              )}
+              data-testid={`tier-card-${t.key}`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold">{t.name}</div>
+                {isCurrent && (
+                  <span className="text-xs text-emerald-400">Current</span>
+                )}
+              </div>
+              <div className="text-xs text-[var(--color-text-muted)]">{t.tagline}</div>
+              <div className="text-2xl font-semibold">{displayPrice}</div>
+              <ul className="text-xs text-[var(--color-text-muted)] space-y-1 flex-1">
+                {t.features.slice(0, 4).map(f => (
+                  <li key={f} className="flex items-start gap-1">
+                    <FiCheck className="w-3 h-3 mt-0.5 flex-shrink-0 text-emerald-400" />
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
+              {t.key === 'trial' ? (
+                <div className="text-xs text-[var(--color-text-muted)] pt-1">
+                  {pricing.trial_days}-day trial included on signup.
+                </div>
+              ) : isCurrent ? (
+                <button
+                  type="button"
+                  disabled
+                  className="btn-secondary text-sm opacity-50 cursor-default"
+                >
+                  You’re on this plan
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => startCheckout(t.key)}
+                  disabled={starting === t.key}
+                  className="btn-secondary text-sm disabled:opacity-50"
+                  data-testid={`start-checkout-${t.key}`}
+                >
+                  {starting === t.key
+                    ? 'Opening checkout…'
+                    : currentTier && currentTier !== 'trial'
+                      ? 'Switch to this plan'
+                      : 'Start this plan'}
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // Promo code redemption. The preview call validates without
 // side-effects so the user knows what they're applying before they
 // commit; the redeem call is what actually grants the benefit. Two
@@ -1145,6 +1305,12 @@ function UsageBillingSettings() {
           )}
         </div>
       </div>
+
+      {/* Upgrade flow — surfaces /pricing/tiers and lets the user
+          start a Stripe Checkout session against any paid tier.
+          Closes the loop for trial users who currently have no
+          in-app path to actually subscribe. */}
+      <UpgradePanel />
 
       {/* Billing interval — monthly vs annual (17% off). Just the
           local preference; the actual Stripe price-swap still

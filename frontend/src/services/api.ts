@@ -1156,6 +1156,53 @@ export const api = {
     return data
   },
 
+  // Pricing tiers + upgrade flow. The /pricing/tiers endpoint is
+  // PUBLIC (no auth) so trial users can see what they'd be paying
+  // for before they hit checkout. /billing/checkout returns a Stripe
+  // Checkout URL that we open in a new tab.
+  async getPricingTiers(): Promise<{
+    tiers: Array<{
+      key: 'trial' | 'researcher' | 'lab' | 'institution'
+      name: string
+      tagline: string
+      monthly_price_cents: number
+      annual_price_cents: number
+      monthly_cap_cents: number
+      monthly_runs_at_default_n: number
+      features: string[]
+      stripe_price_id_monthly: string | null
+      stripe_price_id_annual: string | null
+    }>
+    overage_per_run_cents: number
+    trial_days: number
+    annual_discount_pct: number
+    currency: string
+    note: string
+  }> {
+    const { data } = await apiClient.get('/pricing/tiers')
+    return data
+  },
+
+  async getBillingStatus(): Promise<{
+    tier: string
+    monthly_cap_cents: number
+    spend_cents: number
+    has_paid_subscription: boolean
+    subscription_status: string | null
+  }> {
+    const { data } = await apiClient.get('/billing/status')
+    return data
+  },
+
+  async startBillingCheckout(targetTier: 'researcher' | 'lab' | 'institution'): Promise<{
+    checkout_url: string
+  }> {
+    const { data } = await apiClient.post('/billing/checkout', {
+      target_tier: targetTier,
+    })
+    return data
+  },
+
   // Promo code redemption. preview = lookup (no side effect);
   // redeem applies the code. 404 from preview means the code is
   // unknown/expired/revoked. 400 from redeem includes the human
