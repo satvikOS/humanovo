@@ -20,7 +20,9 @@ from fastapi import HTTPException
 
 from app.api.v1.endpoints.account_billing import (
     CancelSubscriptionRequest,
+    PortalSessionRequest,
     cancel_subscription,
+    create_portal_session,
     list_invoices,
 )
 
@@ -191,4 +193,83 @@ async def test_invoices_502_on_stripe_error():
 
         with pytest.raises(HTTPException) as exc:
             await list_invoices(limit=10, current_user=user)
+        assert exc.value.status_code == 502
+
+
+# --- Portal session ---
+
+@pytest.mark.asyncio
+async def test_portal_session_409_without_stripe_customer():
+    """Free / trial-only users have no customer record; nothing to
+    manage in the Portal, so we 409 with a hint to start a sub
+    instead of opaque 500-style failure."""
+    user = _user(has_customer=False, has_sub=False)
+    with pytest.raises(HTTPException) as exc:
+        await create_portal_session(body=None, current_user=user)
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_portal_session_400_on_non_http_return_url():
+    """Don't let the frontend smuggle javascript: or app:// URLs
+    into Stripe's redirect."""
+    user = _user()
+    with pytest.raises(HTTPException) as exc:
+        await create_portal_session(
+            body=PortalSessionRequest(return_url="javascript:alert(1)"),
+            current_user=user,
+        )
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_portal_session_503_when_stripe_unconfigured():
+    user = _user()
+    fake_stripe = MagicMock()
+    with patch.dict("sys.modules", {"stripe": fake_stripe}), \
+         patch("app.api.v1.endpoints.account_billing.settings") as mock_settings:
+        mock_settings.STRIPE_SECRET_KEY = None
+        mock_settings.FRONTEND_BASE_URL = "https://app.humanovo.net"
+        with pytest.raises(HTTPException) as exc:
+            await create_portal_session(body=None, current_user=user)
+        assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_portal_session_returns_url_from_stripe_response():
+    user = _user()
+    fake_stripe = MagicMock()
+    fake_stripe.billing_portal.Session.create = MagicMock(
+        return_value=SimpleNamespace(
+            url="https://billing.stripe.com/p/session/abc",
+            expires_at=1700000000,
+        ),
+    )
+    with patch.dict("sys.modules", {"stripe": fake_stripe}), \
+         patch("app.api.v1.endpoints.account_billing.settings") as mock_settings:
+        mock_settings.STRIPE_SECRET_KEY = "sk_test"
+        mock_settings.FRONTEND_BASE_URL = "https://app.humanovo.net"
+        out = await create_portal_session(body=None, current_user=user)
+
+    assert out["url"] == "https://billing.stripe.com/p/session/abc"
+    assert out["return_url"] == "https://app.humanovo.net/account/billing"
+    # The Stripe call must receive customer + return_url.
+    call_kwargs = fake_stripe.billing_portal.Session.create.call_args.kwargs
+    assert call_kwargs["customer"] == "cus_test"
+    assert call_kwargs["return_url"] == "https://app.humanovo.net/account/billing"
+
+
+@pytest.mark.asyncio
+async def test_portal_session_502_on_stripe_error():
+    user = _user()
+    fake_stripe = MagicMock()
+    fake_stripe.billing_portal.Session.create = MagicMock(
+        side_effect=RuntimeError("stripe down"),
+    )
+    with patch.dict("sys.modules", {"stripe": fake_stripe}), \
+         patch("app.api.v1.endpoints.account_billing.settings") as mock_settings:
+        mock_settings.STRIPE_SECRET_KEY = "sk_test"
+        mock_settings.FRONTEND_BASE_URL = "https://app.humanovo.net"
+        with pytest.raises(HTTPException) as exc:
+            await create_portal_session(body=None, current_user=user)
         assert exc.value.status_code == 502

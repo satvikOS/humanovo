@@ -207,3 +207,100 @@ async def list_invoices(
         )
 
     return {"invoices": invoices, "count": len(invoices)}
+
+
+class PortalSessionRequest(BaseModel):
+    return_url: str | None = Field(
+        default=None,
+        description=(
+            "URL Stripe should redirect to when the user clicks "
+            "'Return to humanovo'. Defaults to the FRONTEND_BASE_URL "
+            "account/billing page so we control the bounce-back."
+        ),
+    )
+
+
+def _default_return_url() -> str:
+    """Resolve the safe default return URL the Stripe Portal bounces
+    back to. Reads FRONTEND_BASE_URL from settings; falls back to the
+    public app domain so an unconfigured dev environment still gets
+    a sane round-trip."""
+    base = getattr(settings, "FRONTEND_BASE_URL", None) or "https://app.humanovo.net"
+    return f"{base.rstrip('/')}/account/billing"
+
+
+@router.post(
+    "/account/billing/portal-session",
+    dependencies=[Depends(rate_limit("user"))],
+)
+async def create_portal_session(
+    body: PortalSessionRequest | None = None,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Mint a Stripe Customer Portal session and return its URL.
+
+    The Portal is Stripe's hosted UI that lets the user update card,
+    address, tax id, see invoices, and cancel — all surfaces we
+    intentionally don't reimplement. The frontend opens the returned
+    `url` in a new tab; when the user clicks "Return to humanovo"
+    Stripe redirects back to `return_url`.
+
+    Failure modes:
+      • User has no stripe_customer_id → 409 (no billing relationship
+        yet — likely a free-tier or trial user; nothing to manage).
+      • Stripe not configured → 503.
+      • Stripe API call fails → 502.
+
+    The `return_url` argument is validated against a tiny allowlist
+    of schemes (http/https only) to prevent a malicious frontend
+    from injecting javascript: or arbitrary protocol URLs into the
+    Stripe redirect.
+    """
+    if not current_user.stripe_customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "No billing relationship — start a subscription or "
+                "trial first."
+            ),
+        )
+
+    return_url = (body.return_url if body else None) or _default_return_url()
+    # Belt-and-braces: don't let the frontend smuggle a non-http(s)
+    # scheme into Stripe's redirect. Stripe itself validates but we
+    # match their bar so a misuse is caught here with a clear 400.
+    if not (return_url.startswith("https://") or return_url.startswith("http://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="return_url must be an http(s) URL.",
+        )
+
+    api_key = _stripe_api_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Billing service is not configured.",
+        )
+
+    try:
+        import stripe  # type: ignore
+        stripe.api_key = api_key
+        session = stripe.billing_portal.Session.create(
+            customer=current_user.stripe_customer_id,
+            return_url=return_url,
+        )
+    except Exception as e:
+        logger.warning(
+            "stripe billing_portal.Session.create failed user_id=%s: %s",
+            current_user.id, e,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not create billing-portal session.",
+        ) from None
+
+    return {
+        "url": getattr(session, "url", None),
+        "return_url": return_url,
+        "expires_at": getattr(session, "expires_at", None),
+    }
