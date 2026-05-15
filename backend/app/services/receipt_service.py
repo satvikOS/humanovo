@@ -238,6 +238,145 @@ async def send_payment_failed(
     return {"status": "sent" if ok else "send_failed", "user_id": str(user_id)}
 
 
+async def reconcile_stripe_refund_event(
+    db: AsyncSession,
+    *,
+    charge: dict[str, Any],
+) -> dict[str, Any]:
+    """Handle a Stripe `charge.refunded` webhook payload.
+
+    The Stripe dashboard lets support staff issue refunds directly,
+    bypassing our admin endpoint — when that happens we get the
+    webhook but no refund_records row. This function backfills:
+    for each refund in `charge.refunds.data`, if we don't already
+    have a row with that stripe_refund_id, insert one (status =
+    succeeded, reason = 'requested_by_customer', reason_text =
+    'reconciled from Stripe dashboard') and fire the customer
+    confirmation email so the cardholder still gets a heads-up.
+
+    Dedup is on stripe_refund_id, which is unique per Stripe refund,
+    so:
+      • Refunds issued via our admin endpoint → already in
+        refund_records with `issued_by_admin_id`; this function
+        sees the existing row and skips both the INSERT and the
+        email (send_refund_confirmation re-deduplicates on
+        email_sends.dedup_key anyway, so even a missed skip here
+        wouldn't double-email).
+      • Refunds issued via Stripe dashboard → inserted here with
+        `issued_by_admin_id = NULL` so reporting can split admin-
+        UI vs Stripe-UI origin if needed.
+
+    Best-effort: any per-refund error (e.g. unknown customer) is
+    logged + counted but does NOT raise — the webhook handler must
+    return 200 so Stripe doesn't retry forever.
+    """
+    charge_id = charge.get("id")
+    customer_id = charge.get("customer")
+    currency = (charge.get("currency") or "usd").lower()
+    refunds_payload = (charge.get("refunds") or {}).get("data") or []
+    if not refunds_payload:
+        return {"status": "no_refunds", "charge_id": charge_id}
+
+    # Resolve the user once — every refund on a single charge maps
+    # to the same customer.
+    user_row = None
+    if customer_id:
+        user_row = (await db.execute(
+            text(
+                "SELECT id, email FROM users "
+                "WHERE stripe_customer_id = :cid AND deleted_at IS NULL"
+            ),
+            {"cid": customer_id},
+        )).first()
+    if user_row is None:
+        # No matching user → can't anchor refund_records. Log and
+        # skip; the Stripe-side state is still correct.
+        logger.warning(
+            "charge.refunded: no user for customer=%s (charge=%s, refunds=%d)",
+            customer_id, charge_id, len(refunds_payload),
+        )
+        return {"status": "skipped_no_user", "charge_id": charge_id}
+    user_id, user_email = user_row
+
+    inserted = 0
+    skipped = 0
+    emailed = 0
+    for refund in refunds_payload:
+        refund_id = refund.get("id")
+        if not refund_id:
+            continue
+        # Dedup by stripe_refund_id — admin-endpoint refunds already
+        # have a row.
+        existing = (await db.execute(
+            text("SELECT 1 FROM refund_records WHERE stripe_refund_id = :rid LIMIT 1"),
+            {"rid": refund_id},
+        )).first()
+        if existing:
+            skipped += 1
+            continue
+
+        amount = int(refund.get("amount") or 0)
+        await db.execute(
+            text(
+                """
+                INSERT INTO refund_records
+                    (user_id, issued_by_admin_id, stripe_invoice_id,
+                     stripe_charge_id, stripe_refund_id, amount_cents,
+                     currency, reason, reason_text, status, error_message)
+                VALUES (:uid, NULL, :inv, :ch, :rid, :amt, :cur, :rsn,
+                        :rsn_txt, :stat, NULL)
+                """
+            ),
+            {
+                "uid": str(user_id),
+                # invoice id isn't on the charge object directly; we
+                # store the charge id under stripe_charge_id and leave
+                # invoice id blank (NOT NULL on the column → store the
+                # charge id there too so the row is anchored to
+                # *something*; reporting can recover the invoice via
+                # Stripe API if needed).
+                "inv": charge.get("invoice") or charge_id or "unknown",
+                "ch": charge_id,
+                "rid": refund_id,
+                "amt": amount,
+                "cur": currency,
+                "rsn": "requested_by_customer",
+                "rsn_txt": "reconciled from Stripe dashboard",
+                "stat": refund.get("status") or "succeeded",
+            },
+        )
+        inserted += 1
+
+        # Customer-facing confirmation. Idempotent on email_sends
+        # so a webhook retry won't double-mail.
+        try:
+            send_result = await send_refund_confirmation(
+                db,
+                user_id=user_id,
+                user_email=user_email,
+                invoice_id=charge.get("invoice") or charge_id or "unknown",
+                refund_id=refund_id,
+                amount_cents=amount,
+                currency=currency,
+            )
+            if send_result.get("status") == "sent":
+                emailed += 1
+        except Exception as e:
+            logger.warning(
+                "reconcile_stripe_refund: confirmation email failed for refund=%s: %s",
+                refund_id, e,
+            )
+
+    return {
+        "status": "ok",
+        "charge_id": charge_id,
+        "user_id": str(user_id),
+        "inserted": inserted,
+        "skipped_existing": skipped,
+        "emailed": emailed,
+    }
+
+
 async def send_refund_confirmation(
     db: AsyncSession,
     *,

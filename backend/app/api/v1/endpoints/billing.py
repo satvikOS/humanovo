@@ -337,6 +337,24 @@ async def stripe_webhook(
             logger.warning("invoice.paid receipt send failed: %s", e)
             return {"received": True, "event": event_type, "status": "logged_no_send"}
 
+    if event_type == "charge.refunded":
+        # Reconcile a refund issued from the Stripe dashboard (i.e.
+        # one that bypassed our /admin/billing/refund endpoint). The
+        # reconciler dedupes on stripe_refund_id so admin-UI refunds
+        # — which already have a refund_records row — are skipped
+        # cleanly; only dashboard-originated refunds INSERT new rows
+        # and fire the customer confirmation email.
+        try:
+            from app.services.receipt_service import (
+                reconcile_stripe_refund_event,
+            )
+            recon_result = await reconcile_stripe_refund_event(db, charge=data)
+            await db.commit()
+            return {"received": True, "event": event_type, **recon_result}
+        except Exception as e:
+            logger.warning("charge.refunded reconcile failed: %s", e)
+            return {"received": True, "event": event_type, "status": "logged_no_reconcile"}
+
     if event_type == "invoice.payment_failed":
         # Stripe will retry the invoice for ~3 weeks; we don't downgrade
         # the user yet (subscription.updated → past_due covers that).
