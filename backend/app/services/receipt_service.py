@@ -236,3 +236,77 @@ async def send_payment_failed(
         text_body=text_body, html_body=html_body,
     )
     return {"status": "sent" if ok else "send_failed", "user_id": str(user_id)}
+
+
+async def send_refund_confirmation(
+    db: AsyncSession,
+    *,
+    user_id: UUID | str,
+    user_email: str,
+    invoice_id: str,
+    refund_id: str,
+    amount_cents: int,
+    currency: str = "usd",
+) -> dict[str, Any]:
+    """Dispatch a refund-confirmation email when our admin endpoint
+    has successfully issued a Stripe refund. Called from
+    admin_billing.issue_refund after Stripe returns status=succeeded.
+
+    Why this email matters: the customer's card statement won't
+    reflect the credit for 5–10 business days. A silent refund is a
+    common driver of "is this fraud?" support tickets. Naming the
+    amount + invoice + ETA up-front is cheap and removes the
+    ambiguity.
+
+    Dedup key: `<user_id>:refund:<refund_id>` — the Stripe refund id
+    is unique-per-refund, so two admin clicks on the same invoice
+    (= two refunds) each get their own email; a webhook retry for the
+    same refund does not."""
+    if not refund_id:
+        # Defensive: caller should have status='succeeded' before
+        # invoking us, which implies refund_id was returned. Bail
+        # silently rather than emailing with a placeholder.
+        return {"status": "skipped", "reason": "missing refund_id"}
+
+    amount_display = _format_amount(amount_cents, currency)
+    text_body = (
+        f"We've issued a refund of {amount_display} against your "
+        f"humanovo invoice {invoice_id}.\n\n"
+        "The credit should appear on the card you paid with within "
+        "5–10 business days, depending on your bank.\n\n"
+        "Reference (if you need it for your records):\n"
+        f"  Refund id: {refund_id}\n"
+        f"  Invoice id: {invoice_id}\n\n"
+        "If you don't see the credit after 10 business days, or if "
+        "this refund was unexpected, reply to this email and we'll "
+        "investigate right away.\n\n"
+        "— the humanovo team\n"
+    )
+    html_body = (
+        "<div style='font-family:Inter,system-ui,sans-serif;"
+        "max-width:560px;margin:0 auto;color:#1a1a1a'>"
+        f"<h2 style='font-weight:600'>Refund issued</h2>"
+        f"<p>We've issued a refund of <strong>{amount_display}</strong> "
+        f"against your humanovo invoice <code>{invoice_id}</code>.</p>"
+        "<p>The credit should appear on the card you paid with within "
+        "<strong>5–10 business days</strong>, depending on your bank.</p>"
+        "<p style='color:#555'>Reference (for your records):<br/>"
+        f"Refund id: <code>{refund_id}</code><br/>"
+        f"Invoice id: <code>{invoice_id}</code></p>"
+        "<p>If you don't see the credit after 10 business days, or "
+        "if this refund was unexpected, reply to this email and we'll "
+        "investigate right away.</p>"
+        "<p style='margin-top:24px;color:#555'>— the humanovo team</p>"
+        "</div>"
+    )
+
+    dedup_key = f"{user_id}:refund:{refund_id}"
+    ok = await _send(
+        db,
+        user_id=user_id, user_email=user_email,
+        template_key="refund.confirmation",
+        dedup_key=dedup_key,
+        subject=f"humanovo refund issued — {amount_display}",
+        text_body=text_body, html_body=html_body,
+    )
+    return {"status": "sent" if ok else "send_failed", "user_id": str(user_id)}

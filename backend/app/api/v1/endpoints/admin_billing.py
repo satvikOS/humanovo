@@ -211,9 +211,11 @@ async def issue_refund(
         )
 
     # Resolve the user behind that customer so the refund_records row
-    # is anchored to a real account.
+    # is anchored to a real account. Also fetch email up-front so a
+    # successful refund can fire the confirmation email below without
+    # a second DB lookup.
     user_q = await db.execute(
-        select(User.id).where(User.stripe_customer_id == customer_id)
+        select(User.id, User.email).where(User.stripe_customer_id == customer_id)
     )
     row = user_q.first()
     if not row:
@@ -226,6 +228,7 @@ async def issue_refund(
             ),
         )
     target_user_id = str(row[0])
+    target_user_email: str = row[1]
 
     amount = body.amount_cents if body.amount_cents is not None else invoice_amount_paid
     if amount <= 0:
@@ -317,6 +320,30 @@ async def issue_refund(
         reason=body.reason,
         refund_id=refund_id,
     )
+
+    # Refund-confirmation email — fire only on success because the
+    # bank-side timing copy in the template ("appears in 5–10 business
+    # days") doesn't make sense for a failed Stripe call. Errors are
+    # swallowed; the refund_records row is the durable record and
+    # ops can resend by hand if needed.
+    if refund_status == "succeeded" and refund_id:
+        try:
+            from app.services.receipt_service import send_refund_confirmation
+            await send_refund_confirmation(
+                db,
+                user_id=target_user_id,
+                user_email=target_user_email,
+                invoice_id=invoice_id,
+                refund_id=refund_id,
+                amount_cents=amount,
+                currency=invoice_currency,
+            )
+            await db.commit()
+        except Exception as e:
+            logger.warning(
+                "refund confirmation email failed user=%s refund=%s: %s",
+                target_user_id, refund_id, e,
+            )
 
     return {
         "invoice_id": invoice_id,

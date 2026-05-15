@@ -32,14 +32,25 @@ def _admin():
     return SimpleNamespace(id=uuid4(), email="admin@humanovo.net")
 
 
-def _db_with_user_row(user_id):
+def _db_with_user_row(user_id, email: str = "u@example.com"):
     """Build a DB mock whose first execute() (the user lookup) returns
-    a single row [(user_id,)], and subsequent calls are no-op
-    AsyncMocks. .commit and .add are stubbed."""
+    a single row [(user_id, email)], and subsequent calls are no-op
+    AsyncMocks. .commit is stubbed.
+
+    side_effect has extra slack so the refund-confirmation-email
+    path (dedup check + INSERT into email_sends after the refund row)
+    has rows to consume without raising StopIteration."""
     db = MagicMock()
     user_lookup = MagicMock()
-    user_lookup.first = MagicMock(return_value=(user_id,))
-    db.execute = AsyncMock(side_effect=[user_lookup, MagicMock()])
+    user_lookup.first = MagicMock(return_value=(user_id, email))
+    dedup_lookup = MagicMock()
+    dedup_lookup.first = MagicMock(return_value=None)
+    db.execute = AsyncMock(side_effect=[
+        user_lookup,                 # 1. user lookup in admin_billing
+        MagicMock(),                 # 2. INSERT refund_records
+        dedup_lookup,                # 3. email_sends dedup check
+        MagicMock(),                 # 4. INSERT email_sends row
+    ])
     db.commit = AsyncMock()
     return db
 
@@ -292,6 +303,78 @@ async def test_refund_maps_other_reason_to_stripe_requested_by_customer():
     insert_params = db.execute.call_args_list[1].args[1]
     assert insert_params["rsn"] == "other"
     assert insert_params["rsn_txt"] == "goodwill credit for downtime"
+
+
+@pytest.mark.asyncio
+async def test_refund_success_sends_confirmation_email_via_driver():
+    """A successful Stripe refund must fire the refund-confirmation
+    email to the customer (so they see the credit coming before it
+    posts to their card statement). On failure, no email."""
+    actor = _admin()
+    user_id = uuid4()
+    db = _db_with_user_row(user_id)
+    fake_stripe = MagicMock()
+    fake_stripe.Invoice.retrieve = MagicMock(return_value=_fake_invoice())
+    fake_stripe.Refund.create = MagicMock(return_value=SimpleNamespace(
+        id="re_test_email", status="succeeded",
+    ))
+    fake_driver = MagicMock()
+    fake_driver.send_email = AsyncMock(return_value=True)
+    with patch.dict("sys.modules", {"stripe": fake_stripe}), \
+         patch("app.api.v1.endpoints.admin_billing.settings") as mock_settings, \
+         patch(
+             "app.services.email_service.get_email_driver",
+             return_value=fake_driver,
+         ):
+        mock_settings.STRIPE_SECRET_KEY = "sk_test"
+        out = await issue_refund(
+            invoice_id="in_test",
+            body=RefundRequest(reason="duplicate"),
+            db=db,
+            actor=actor,
+        )
+
+    assert out["status"] == "succeeded"
+    fake_driver.send_email.assert_called_once()
+    sent_kwargs = fake_driver.send_email.call_args.kwargs
+    assert sent_kwargs["to"] == "u@example.com"
+    # Email body must surface refund id + amount + 5–10 business days
+    # so the customer recognises the credit when it appears.
+    assert "re_test_email" in sent_kwargs["text"]
+    assert "$49.00" in sent_kwargs["text"]
+    assert "5–10 business days" in sent_kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_refund_failure_does_not_send_email():
+    """Stripe refund rejection → no customer email (the 'expect a
+    credit' copy would be misleading)."""
+    actor = _admin()
+    user_id = uuid4()
+    db = _db_with_user_row(user_id)
+    fake_stripe = MagicMock()
+    fake_stripe.Invoice.retrieve = MagicMock(return_value=_fake_invoice())
+    fake_stripe.Refund.create = MagicMock(
+        side_effect=RuntimeError("charge_already_refunded"),
+    )
+    fake_driver = MagicMock()
+    fake_driver.send_email = AsyncMock(return_value=True)
+    with patch.dict("sys.modules", {"stripe": fake_stripe}), \
+         patch("app.api.v1.endpoints.admin_billing.settings") as mock_settings, \
+         patch(
+             "app.services.email_service.get_email_driver",
+             return_value=fake_driver,
+         ):
+        mock_settings.STRIPE_SECRET_KEY = "sk_test"
+        out = await issue_refund(
+            invoice_id="in_test",
+            body=RefundRequest(reason="duplicate"),
+            db=db,
+            actor=actor,
+        )
+
+    assert out["status"] == "failed"
+    fake_driver.send_email.assert_not_called()
 
 
 @pytest.mark.asyncio
