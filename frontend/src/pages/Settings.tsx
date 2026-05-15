@@ -1559,6 +1559,260 @@ function AdminSeedSettings() {
   )
 }
 
+// ─── Admin · Refunds ──────────────────────────────────────────────
+// Lists recent Stripe refunds (success + failed + pending) and lets
+// an admin issue a new refund against a specific invoice id. The
+// backend (admin_billing.py) handles validation + Stripe call +
+// records to refund_records + Merkle-chain audit; this UI is a
+// thin form on top.
+type AdminRefund = Awaited<ReturnType<typeof api.listAdminRefunds>>['refunds'][number]
+type IssueRefundReason = 'duplicate' | 'fraudulent' | 'requested_by_customer' | 'other'
+
+function AdminRefundsCard() {
+  const [refunds, setRefunds] = useState<AdminRefund[] | null>(null)
+  const [filter, setFilter] = useState<'all' | 'succeeded' | 'failed' | 'pending'>('all')
+  const [loading, setLoading] = useState(false)
+  const [issuing, setIssuing] = useState(false)
+  const [issueResult, setIssueResult] = useState<string | null>(null)
+
+  // Form state — kept local; no draft persistence (admin actions
+  // are one-shot and we want explicit confirmation each time).
+  const [invoiceId, setInvoiceId] = useState('')
+  const [reason, setReason] = useState<IssueRefundReason>('requested_by_customer')
+  const [reasonText, setReasonText] = useState('')
+  const [amountDollars, setAmountDollars] = useState('')  // empty = full refund
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const opts: Parameters<typeof api.listAdminRefunds>[0] =
+        filter === 'all' ? { limit: 25 } : { limit: 25, status: filter }
+      const r = await api.listAdminRefunds(opts)
+      setRefunds(r.refunds)
+    } catch (e: unknown) {
+      toast('error', e instanceof Error ? e.message : 'Failed to load refunds')
+      setRefunds([])
+    } finally {
+      setLoading(false)
+    }
+  }, [filter])
+
+  useEffect(() => { load() }, [load])
+
+  const issueRefund = async () => {
+    if (!invoiceId.trim()) {
+      toast('error', 'Invoice id is required (starts with `in_`).')
+      return
+    }
+    if (reason === 'other' && !reasonText.trim()) {
+      toast('error', 'Free-text reason is required when category=other.')
+      return
+    }
+    setIssuing(true)
+    setIssueResult(null)
+    try {
+      // Convert dollars → cents only when the operator provided a
+      // partial-refund value. Empty string = full refund.
+      const body: Parameters<typeof api.issueAdminRefund>[1] = { reason }
+      if (reasonText.trim()) body.reason_text = reasonText.trim()
+      const amt = amountDollars.trim()
+      if (amt) {
+        const cents = Math.round(Number(amt) * 100)
+        if (!Number.isFinite(cents) || cents <= 0) {
+          toast('error', 'Amount must be a positive number of dollars.')
+          setIssuing(false)
+          return
+        }
+        body.amount_cents = cents
+      }
+      const out = await api.issueAdminRefund(invoiceId.trim(), body)
+      if (out.status === 'succeeded') {
+        setIssueResult(
+          `Refunded $${(out.amount_cents / 100).toFixed(2)} ${out.currency.toUpperCase()} (${out.refund_id ?? 'no id returned'}).`,
+        )
+        // Clear the form on success — operator will re-paste a new
+        // invoice id for the next refund.
+        setInvoiceId('')
+        setReasonText('')
+        setAmountDollars('')
+      } else {
+        setIssueResult(
+          `Stripe returned status=${out.status}. ${out.error_message ?? ''}`,
+        )
+      }
+      load()
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } } }
+      const msg = ax?.response?.data?.detail
+        ?? (e instanceof Error ? e.message : 'Refund failed')
+      setIssueResult(`Failed: ${msg}`)
+    } finally {
+      setIssuing(false)
+    }
+  }
+
+  const statusColor = (s: string) =>
+    s === 'succeeded' ? 'text-emerald-400' :
+    s === 'pending' ? 'text-amber-400' :
+    'text-red-400'
+
+  return (
+    <div className="space-y-5" data-testid="admin-refunds-card">
+      <div>
+        <h2 className="text-lg font-semibold mb-1">Admin · Refunds</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Issue Stripe refunds against an invoice id, and review recent
+          attempts (including failures).
+        </p>
+      </div>
+
+      {/* Issue form */}
+      <div className="glass-card p-4 space-y-3">
+        <div>
+          <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+            Stripe invoice id
+          </label>
+          <input
+            type="text"
+            value={invoiceId}
+            onChange={e => setInvoiceId(e.target.value)}
+            placeholder="in_1Pa…"
+            className="input w-full text-sm font-mono"
+            data-testid="refund-invoice-id"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+              Reason
+            </label>
+            <select
+              value={reason}
+              onChange={e => setReason(e.target.value as IssueRefundReason)}
+              className="input w-full text-sm"
+              data-testid="refund-reason"
+            >
+              <option value="requested_by_customer">requested_by_customer</option>
+              <option value="duplicate">duplicate</option>
+              <option value="fraudulent">fraudulent</option>
+              <option value="other">other</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+              Amount (USD, leave blank for full)
+            </label>
+            <input
+              type="number" min={0} step="0.01"
+              value={amountDollars}
+              onChange={e => setAmountDollars(e.target.value)}
+              placeholder="full"
+              className="input w-full text-sm"
+              data-testid="refund-amount"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+            Notes (required when reason=other)
+          </label>
+          <input
+            type="text"
+            value={reasonText}
+            onChange={e => setReasonText(e.target.value)}
+            className="input w-full text-sm"
+            data-testid="refund-reason-text"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={issueRefund}
+          disabled={issuing}
+          className="btn-secondary text-sm disabled:opacity-50"
+          data-testid="refund-submit"
+        >
+          {issuing ? 'Issuing…' : 'Issue refund'}
+        </button>
+        {issueResult && (
+          <div className="text-xs text-[var(--color-text-muted)] pt-1">
+            {issueResult}
+          </div>
+        )}
+      </div>
+
+      {/* History */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-base font-medium">Recent refunds</h3>
+          <div className="flex items-center gap-2 text-xs">
+            {(['all', 'succeeded', 'failed', 'pending'] as const).map(opt => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setFilter(opt)}
+                className={clsx(
+                  'px-2 py-1 rounded',
+                  filter === opt
+                    ? 'bg-white/10 text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
+                )}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="glass-card p-3 overflow-hidden">
+          {loading && !refunds && (
+            <div className="text-sm text-[var(--color-text-muted)] py-2">
+              Loading…
+            </div>
+          )}
+          {refunds && refunds.length === 0 && (
+            <div className="text-sm text-[var(--color-text-muted)] py-2">
+              No refunds in this view.
+            </div>
+          )}
+          {refunds && refunds.length > 0 && (
+            <table className="w-full text-xs">
+              <thead className="text-[var(--color-text-muted)]">
+                <tr className="text-left">
+                  <th className="py-1 pr-2">When</th>
+                  <th className="py-1 pr-2">Invoice</th>
+                  <th className="py-1 pr-2">Amount</th>
+                  <th className="py-1 pr-2">Reason</th>
+                  <th className="py-1 pr-2">Status</th>
+                  <th className="py-1 pr-2">Refund id</th>
+                </tr>
+              </thead>
+              <tbody>
+                {refunds.map(r => (
+                  <tr key={r.id} className="border-t border-white/5">
+                    <td className="py-1 pr-2 whitespace-nowrap">
+                      {r.created_at ? new Date(r.created_at).toLocaleString() : '—'}
+                    </td>
+                    <td className="py-1 pr-2 font-mono">{r.stripe_invoice_id}</td>
+                    <td className="py-1 pr-2">
+                      ${(r.amount_cents / 100).toFixed(2)} {r.currency.toUpperCase()}
+                    </td>
+                    <td className="py-1 pr-2">{r.reason}</td>
+                    <td className={clsx('py-1 pr-2', statusColor(r.status))}>
+                      {r.status}
+                    </td>
+                    <td className="py-1 pr-2 font-mono text-[var(--color-text-muted)]">
+                      {r.stripe_refund_id ?? r.error_message ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function IntegrationSettings() {
   type Integrations = { github: boolean; slack: boolean; pubmed: boolean; orcid: boolean; zenodo: boolean }
   const defaultIntegrations: Integrations = { github: false, slack: false, pubmed: true, orcid: false, zenodo: false }
@@ -2231,7 +2485,16 @@ export default function Settings() {
       case 'integrations':
         return <IntegrationSettings />
       case 'admin':
-        return <AdminSeedSettings />
+        // Two stacked admin sections — seed (existing) above the new
+        // refunds card. Keeping them in one route rather than splitting
+        // the side-nav avoids a second admin nav entry; admins land
+        // here, scroll if they need the lower card.
+        return (
+          <div className="space-y-10">
+            <AdminSeedSettings />
+            <AdminRefundsCard />
+          </div>
+        )
       case 'desktop':
         return <DesktopSettings />
       default:

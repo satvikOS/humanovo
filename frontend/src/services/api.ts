@@ -1156,6 +1156,67 @@ export const api = {
     return data
   },
 
+  // Admin refund operations — see backend admin_billing.py.
+  // listAdminRefunds: paginated history newest first, optionally
+  // filtered by status. The dashboard shows recent attempts including
+  // failures so ops can spot patterns.
+  // issueAdminRefund: POST a refund to a specific invoice. amountCents
+  // omitted means refund the full invoice amount_paid. Reason MUST
+  // match the backend enum (duplicate / fraudulent / requested_by_customer
+  // / other); the server validates and 400s on mismatch.
+  async listAdminRefunds(opts: {
+    limit?: number
+    offset?: number
+    status?: 'succeeded' | 'pending' | 'failed'
+  } = {}): Promise<{
+    refunds: Array<{
+      id: string
+      user_id: string
+      issued_by_admin_id: string | null
+      stripe_invoice_id: string
+      stripe_charge_id: string | null
+      stripe_refund_id: string | null
+      amount_cents: number
+      currency: string
+      reason: string
+      reason_text: string | null
+      status: 'succeeded' | 'pending' | 'failed'
+      error_message: string | null
+      created_at: string | null
+    }>
+    count: number
+  }> {
+    const params: Record<string, string | number> = {
+      limit: opts.limit ?? 50,
+      offset: opts.offset ?? 0,
+    }
+    if (opts.status) params.status_filter = opts.status
+    const { data } = await apiClient.get('/admin/billing/refunds', { params })
+    return data
+  },
+
+  async issueAdminRefund(
+    invoiceId: string,
+    body: {
+      reason: 'duplicate' | 'fraudulent' | 'requested_by_customer' | 'other'
+      reason_text?: string
+      amount_cents?: number
+    },
+  ): Promise<{
+    invoice_id: string
+    refund_id: string | null
+    status: 'succeeded' | 'pending' | 'failed'
+    amount_cents: number
+    currency: string
+    error_message: string | null
+  }> {
+    const { data } = await apiClient.post(
+      `/admin/billing/refund/${encodeURIComponent(invoiceId)}`,
+      body,
+    )
+    return data
+  },
+
   async getDocumentPermission(userId: string, documentId: string): Promise<{
     document_id: string
     user_id: string
