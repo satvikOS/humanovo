@@ -76,6 +76,15 @@ jobs:
           pip install -r requirements.txt
       - name: Run dunning cycle
         env:
+          # PYTHONPATH=. exposes the `app` package living at backend/app
+          # to imports. Without it, `python scripts/X.py` only adds
+          # scripts/ to sys.path[0], so the script's `from app.core...`
+          # import fails with ModuleNotFoundError. Setting CWD to
+          # backend/ via the job's `defaults.run.working-directory` is
+          # necessary but not sufficient — Python doesn't add CWD to
+          # sys.path for script-mode invocations, only for `-m` and
+          # interactive REPL.
+          PYTHONPATH: .
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           EMAIL_DRIVER: ${{ secrets.EMAIL_DRIVER }}
@@ -110,6 +119,7 @@ jobs:
           pip install -r requirements.txt
       - name: Run trial expiry cycle
         env:
+          PYTHONPATH: .  # see dunning job for the rationale
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           EMAIL_DRIVER: ${{ secrets.EMAIL_DRIVER }}
           EMAIL_FROM_ADDRESS: ${{ secrets.EMAIL_FROM_ADDRESS }}
@@ -143,6 +153,7 @@ jobs:
           pip install -r requirements.txt
       - name: Run GDPR hard-delete sweep
         env:
+          PYTHONPATH: .  # see dunning job for the rationale
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           AWS_REGION: us-east-1
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
