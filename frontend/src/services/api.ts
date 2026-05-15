@@ -1156,6 +1156,33 @@ export const api = {
     return data
   },
 
+  // GDPR Art. 20 (data export) — returns a ZIP blob the UI prompts
+  // the user to save. The backend streams the archive so memory
+  // footprint stays bounded; we receive it as a Blob and dispatch
+  // a synthetic <a download> click. Don't JSON-parse the response.
+  async exportAccountData(): Promise<Blob> {
+    const { data } = await apiClient.get('/account/export', {
+      responseType: 'blob',
+    })
+    return data as Blob
+  },
+
+  // GDPR Art. 17 (right to erasure) — soft-deletes the account
+  // immediately and schedules the hard-delete cron to fire 30 days
+  // later. Repeated calls are idempotent (same scheduled_hard_delete_at
+  // returns). Restoring inside the window requires a support ticket
+  // for now (no self-serve restore endpoint).
+  async requestAccountDeletion(): Promise<{
+    status: string
+    requested_at: string
+    scheduled_hard_delete_at: string
+    grace_window_days: number
+    message: string
+  }> {
+    const { data } = await apiClient.post('/account/delete')
+    return data
+  },
+
   // Pricing tiers + upgrade flow. The /pricing/tiers endpoint is
   // PUBLIC (no auth) so trial users can see what they'd be paying
   // for before they hit checkout. /billing/checkout returns a Stripe

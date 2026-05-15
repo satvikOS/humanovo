@@ -547,6 +547,183 @@ function PrivacySettings() {
           </SettingRow>
         </div>
       </div>
+
+      {/* GDPR data rights — export (Art. 20) + delete (Art. 17).
+          Mandatory beta-readiness disclosure: users need a path to
+          exercise these from inside the app, not by emailing support. */}
+      <DataRightsPanel />
+    </div>
+  )
+}
+
+// GDPR data-rights panel. Two surfaces:
+//   • Download my data — GET /account/export → ZIP blob → synthetic
+//     download click. Streamed by the backend so it works for large
+//     accounts; the frontend just receives Blob and saves it.
+//   • Delete my account — POST /account/delete with a type-DELETE
+//     confirmation so a fat-finger can't nuke a paying account.
+//     Schedules a 30-day soft-delete; existing API tokens are kept
+//     valid until hard-delete so the user can change their mind
+//     (restore is a support ticket today — surface that in the copy).
+function DataRightsPanel() {
+  const [exporting, setExporting] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deletionConfirmation, setDeletionConfirmation] = useState<string | null>(null)
+
+  const downloadExport = async () => {
+    setExporting(true)
+    try {
+      const blob = await api.exportAccountData()
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `humanovo-account-${ts}.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      // Revoke after a tick so the browser definitely started the
+      // download — some browsers cancel a still-pending blob: URL on
+      // revoke.
+      setTimeout(() => URL.revokeObjectURL(url), 1500)
+      toast('info', 'Your archive is downloading.', { title: 'humanovo' })
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } } }
+      const msg = ax?.response?.data?.detail ?? (e instanceof Error ? e.message : 'Export failed')
+      toast('error', msg)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const submitDelete = async () => {
+    if (confirmText.trim().toUpperCase() !== 'DELETE') {
+      toast('error', "Type DELETE to confirm.")
+      return
+    }
+    setDeleting(true)
+    try {
+      const r = await api.requestAccountDeletion()
+      setDeletionConfirmation(r.message)
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } } }
+      const msg = ax?.response?.data?.detail ?? (e instanceof Error ? e.message : 'Could not request deletion')
+      toast('error', msg)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div data-testid="data-rights-panel">
+      <h3 className="text-base font-medium mb-4">Your data</h3>
+      <div className="glass-card p-4 space-y-3">
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Download every record we hold for your account, or request
+          deletion. (GDPR Article 20 + Article 17.)
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={downloadExport}
+            disabled={exporting}
+            className="btn-secondary text-sm disabled:opacity-50"
+            data-testid="account-export"
+          >
+            {exporting ? 'Building archive…' : 'Download my data'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowDelete(true)
+              setConfirmText('')
+              setDeletionConfirmation(null)
+            }}
+            className="btn-secondary text-sm text-red-400"
+            data-testid="account-delete-open"
+          >
+            Delete my account…
+          </button>
+        </div>
+      </div>
+
+      {showDelete && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Delete account"
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          data-testid="account-delete-modal"
+        >
+          <div
+            className="absolute inset-0 modal-overlay bg-black/60 backdrop-blur-sm"
+            onClick={() => !deleting && !deletionConfirmation && setShowDelete(false)}
+          />
+          <div className="relative glass-card max-w-md w-[92%] p-5 space-y-4">
+            <h4 className="text-base font-semibold text-red-400">Delete your account</h4>
+            {deletionConfirmation ? (
+              <>
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  {deletionConfirmation}
+                </p>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => { setShowDelete(false); setConfirmText(''); setDeletionConfirmation(null) }}
+                    className="btn-secondary text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  Your account is soft-deleted right away and permanently
+                  removed 30 days later. To restore inside the window,
+                  email <code>support@humanovo.net</code> — there’s no
+                  self-serve undo yet.
+                </p>
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1 block">
+                    Type <code>DELETE</code> to confirm
+                  </label>
+                  <input
+                    type="text"
+                    value={confirmText}
+                    onChange={e => setConfirmText(e.target.value)}
+                    className="input w-full text-sm"
+                    placeholder="DELETE"
+                    data-testid="account-delete-confirm-input"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDelete(false)}
+                    disabled={deleting}
+                    className="btn-secondary text-sm disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitDelete}
+                    disabled={deleting || confirmText.trim().toUpperCase() !== 'DELETE'}
+                    className="btn-secondary text-sm text-red-400 disabled:opacity-50"
+                    data-testid="account-delete-submit"
+                  >
+                    {deleting ? 'Requesting…' : 'Delete my account'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
