@@ -118,6 +118,10 @@ async def register(
             is_verified=user.is_verified,
             has_completed_onboarding=user.has_completed_onboarding,
             created_at=user.created_at,
+            tier=(
+                user.tier.value if hasattr(user.tier, "value") else (user.tier or "trial")
+            ),
+            trial_ends_at=getattr(user, "trial_ends_at", None),
         )
     except HTTPException:
         raise
@@ -186,6 +190,12 @@ async def get_current_user_info(
         is_verified=current_user.is_verified,
         has_completed_onboarding=current_user.has_completed_onboarding,
         created_at=current_user.created_at,
+        tier=(
+            current_user.tier.value
+            if hasattr(current_user.tier, "value")
+            else (current_user.tier or "trial")
+        ),
+        trial_ends_at=getattr(current_user, "trial_ends_at", None),
     )
 
 
@@ -215,6 +225,12 @@ async def update_current_user(
         is_verified=current_user.is_verified,
         has_completed_onboarding=current_user.has_completed_onboarding,
         created_at=current_user.created_at,
+        tier=(
+            current_user.tier.value
+            if hasattr(current_user.tier, "value")
+            else (current_user.tier or "trial")
+        ),
+        trial_ends_at=getattr(current_user, "trial_ends_at", None),
     )
 
 
@@ -281,6 +297,10 @@ async def list_users(
             is_verified=user.is_verified,
             has_completed_onboarding=user.has_completed_onboarding,
             created_at=user.created_at,
+            tier=(
+                user.tier.value if hasattr(user.tier, "value") else (user.tier or "trial")
+            ),
+            trial_ends_at=getattr(user, "trial_ends_at", None),
         )
         for user in users
     ]

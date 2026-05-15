@@ -55,6 +55,7 @@ import { filterV1 } from '../utils/featureFlags'
 import { useWorkspace, WorkspaceTab } from '../contexts/WorkspaceContext'
 import HumanovoGlyph from './HumanovoGlyph'
 import { Onboarding } from './Onboarding'
+import { TrialBanner } from './TrialBanner'
 
 const mainNavItems = filterV1([
   { to: '/dashboard', icon: FiHome, label: 'Dashboard', shortcut: '1' },
@@ -1699,6 +1700,13 @@ if (path === '/clinical-trials') return 'Clinical Trials'
 
         {/* Workspace tabs */}
         <WorkspaceTabs />
+
+        {/* Trial-state banner — visible only for tier=trial users
+            with a known trial_ends_at. Renders ABOVE the main
+            content so it scrolls away as the user navigates a long
+            page, freeing the chrome rather than persistently
+            stealing pixels. */}
+        <TrialBanner />
 
         {/* Main content */}
         <main

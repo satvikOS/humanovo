@@ -35,6 +35,14 @@ export interface AuthUser {
   // until the user clicks Skip or completes the last step.
   has_completed_onboarding: boolean
   created_at: string
+  // Pricing tier (trial / researcher / lab / institution). Surfaced
+  // so the TrialBanner + UpgradePanel can render the right state
+  // without an extra /billing/status round-trip.
+  tier?: 'trial' | 'researcher' | 'lab' | 'institution' | string
+  // ISO timestamp when the trial expires. Null after conversion
+  // or for users who never had a trial set. The TrialBanner
+  // computes days-remaining client-side from this.
+  trial_ends_at?: string | null
 }
 
 export interface LoginRequest {

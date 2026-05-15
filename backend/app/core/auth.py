@@ -71,6 +71,13 @@ class UserResponse(BaseModel):
     is_verified: bool
     has_completed_onboarding: bool = False
     created_at: datetime
+    # Surfaced so the frontend can render the trial-countdown banner
+    # and the upgrade-flow current-tier badge without a second API
+    # round-trip. `tier` defaults to 'trial' for legacy rows missing
+    # the column; `trial_ends_at` is null when the user has already
+    # converted or never had a trial set.
+    tier: str = "trial"
+    trial_ends_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
