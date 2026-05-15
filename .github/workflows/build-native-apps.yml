@@ -215,7 +215,17 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: --target universal-apple-darwin
+            # `--bundles app` deliberately skips Tauri's `dmg` target.
+            # Tauri's bundle_dmg.sh (AppleScript Finder styling +
+            # hdiutil attach/detach dance) is flaky on headless macOS
+            # CI runners — it failed mid-bundle on 0.2.0+162 with
+            # "error running bundle_dmg.sh", aborting the whole step
+            # and (because publish-release needs all 3 platforms) the
+            # Windows + Linux installers along with it. The `.app`
+            # bundle itself builds reliably; the dedicated
+            # "Build macOS DMG" step below wraps the .app in a plain,
+            # deterministic hdiutil DMG with a retry loop.
+            args: --target universal-apple-darwin --bundles app
             label: macos-universal
           - platform: ubuntu-22.04
             args: ''
@@ -561,6 +571,70 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Build macOS DMG (plain hdiutil, retried)
+        # Replaces Tauri's flaky bundle_dmg.sh. The .app was built by
+        # the step above (--bundles app). Here we wrap it in a simple
+        # compressed DMG using only `hdiutil create` — no AppleScript,
+        # no window-styling, no attach/detach race. The result is a
+        # functional drag-to-Applications DMG; it just lacks a custom
+        # background image, which no user has ever missed.
+        #
+        # hdiutil can still transiently fail on CI ("Resource busy",
+        # "Device not configured"), so we retry up to 3×. The DMG
+        # lands in the bundle/dmg/ dir where the stable-name-alias
+        # step below already globs for *.dmg.
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BUNDLE_ROOT="frontend/src-tauri/target/universal-apple-darwin/release/bundle"
+          APP_PATH="$BUNDLE_ROOT/macos/humanovo.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "FATAL: expected .app not found at $APP_PATH"
+            ls -la "$BUNDLE_ROOT/macos" || true
+            exit 1
+          fi
+          DMG_DIR="$BUNDLE_ROOT/dmg"
+          mkdir -p "$DMG_DIR"
+          DMG_PATH="$DMG_DIR/humanovo_${VERSION}_universal.dmg"
+          # Stage the .app + an /Applications symlink so the DMG opens
+          # as the familiar drag-to-install layout.
+          STAGE="$(mktemp -d)/humanovo"
+          mkdir -p "$STAGE"
+          cp -R "$APP_PATH" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          ok=
+          for attempt in 1 2 3; do
+            rm -f "$DMG_PATH"
+            if hdiutil create \
+                 -volname "humanovo" \
+                 -srcfolder "$STAGE" \
+                 -fs HFS+ \
+                 -format UDZO \
+                 -ov \
+                 "$DMG_PATH"; then
+              ok=1
+              echo "DMG created on attempt $attempt: $DMG_PATH"
+              break
+            fi
+            echo "hdiutil create failed (attempt $attempt) — retrying in 5s."
+            sleep 5
+          done
+          if [[ -z "$ok" ]]; then
+            echo "FATAL: hdiutil create failed after 3 attempts."
+            exit 1
+          fi
+          # Upload the versioned DMG to the draft release so it sits
+          # alongside the other platforms' installers. The stable-name
+          # alias step below additionally publishes humanovo-macos-
+          # universal.dmg.
+          gh release upload "${{ steps.version.outputs.tag }}" "$DMG_PATH" \
+            --repo "$GITHUB_REPOSITORY" --clobber || \
+            echo "WARN: versioned-DMG upload failed; alias step will still publish the stable name."
 
       - name: Attach stable-name aliases to release
         # Tauri's bundler emits files like humanovo_0.2.0+7_universal.dmg
