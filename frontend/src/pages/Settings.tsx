@@ -1386,6 +1386,14 @@ function UsageBillingSettings() {
     }
   }
 
+  // NOTE: these two hooks MUST sit above the `if (loading)` early
+  // return below. React requires every hook to run in the same
+  // order on every render — declaring them after a conditional
+  // return triggers "Rendered more hooks than during the previous
+  // render" the moment `loading` flips false.
+  const [portalLoading, setPortalLoading] = useState(false)
+  const [portalHint, setPortalHint] = useState<string | null>(null)
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -1403,8 +1411,6 @@ function UsageBillingSettings() {
     budget?.status === 'warning' ? 'text-amber-400' :
     'text-emerald-400'
 
-  const [portalLoading, setPortalLoading] = useState(false)
-  const [portalHint, setPortalHint] = useState<string | null>(null)
   const openBillingPortal = async () => {
     setPortalLoading(true)
     setPortalHint(null)
