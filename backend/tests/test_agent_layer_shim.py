@@ -19,13 +19,30 @@ from app.agents.agent_layer_shim import (
 )
 
 
-def test_routing_disabled_by_default():
-    """Default settings.USE_AGENT_LAYER_FOR_STAGES = [] → legacy path
-    for every stage."""
+def test_routing_disabled_when_explicitly_empty():
+    """When settings.USE_AGENT_LAYER_FOR_STAGES = [] (explicit
+    operator override), every stage runs on the legacy path. The
+    default is now [9-12] (Phase 2) but operators can still pin
+    to empty for full-legacy rollback."""
     with patch("app.agents.agent_layer_shim.settings") as mock_settings:
         mock_settings.USE_AGENT_LAYER_FOR_STAGES = []
         for stage_num in range(1, 13):
             assert should_route_through_agent_layer(stage_num) is False
+
+
+def test_default_routing_is_phase_2():
+    """The shipped default routes the four post-grounding stages
+    (9 SCORE / 10 NOMINATE / 11 PROTOCOL / 12 FINALIZE) through the
+    agent layer. Stages 1-8 stay on the legacy path until Phase 3.
+    Reads the real settings module — guards against an inadvertent
+    revert of the config-level default."""
+    from app.core.config import settings as real_settings
+    assert real_settings.USE_AGENT_LAYER_FOR_STAGES == [9, 10, 11, 12]
+    # And the routing function agrees.
+    for stage_num in range(1, 9):
+        assert should_route_through_agent_layer(stage_num) is False
+    for stage_num in (9, 10, 11, 12):
+        assert should_route_through_agent_layer(stage_num) is True
 
 
 def test_routing_phase_1_finalize_only():
