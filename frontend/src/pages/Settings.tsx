@@ -573,6 +573,91 @@ function _currentUserId(): string {
 type BudgetPayload = Awaited<ReturnType<typeof api.getUserBudget>>
 type BudgetUsagePayload = Awaited<ReturnType<typeof api.getUserBudgetUsage>>
 
+// Annual / monthly toggle. The PUT just records the user's
+// preference — the real Stripe subscription swap (which actually
+// changes the charge cadence) happens in the Customer Portal.
+// Surfacing this here gives the user the "click annual, save 17%"
+// affordance the pricing page advertises, without us reinventing
+// Stripe's subscription-modify UI.
+function BillingIntervalToggle() {
+  // Local name avoids shadowing window.setInterval — `cadence` is
+  // unambiguous to readers.
+  const [cadence, setCadence] = useState<'monthly' | 'annual' | null>(null)
+  const [saving, setSaving] = useState<'monthly' | 'annual' | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api.getBillingInterval()
+      .then(r => { if (!cancelled) setCadence(r.billing_interval) })
+      .catch(() => { if (!cancelled) setCadence('monthly') })
+    return () => { cancelled = true }
+  }, [])
+
+  const choose = async (next: 'monthly' | 'annual') => {
+    if (next === cadence) return
+    setSaving(next)
+    try {
+      const r = await api.updateBillingInterval(next)
+      setCadence(r.billing_interval)
+      toast(
+        'info',
+        next === 'annual'
+          ? 'Preference saved. Open the Stripe portal below to apply the 17% annual discount to your active subscription.'
+          : 'Switched preference back to monthly.',
+        { title: 'humanovo' },
+      )
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Could not update billing interval'
+      toast('error', msg)
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  return (
+    <div>
+      <h3 className="text-base font-medium mb-4 flex items-center gap-2">
+        <FiTrendingUp className="w-4 h-4" />
+        Billing cadence
+      </h3>
+      <div className="glass-card p-4 space-y-3" data-testid="billing-interval-card">
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Annual billing gets a <strong>17% discount</strong> versus the
+          monthly price.
+        </p>
+        <div role="radiogroup" className="inline-flex rounded-md overflow-hidden border border-white/10">
+          {(['monthly', 'annual'] as const).map(opt => {
+            const selected = cadence === opt
+            return (
+              <button
+                key={opt}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => choose(opt)}
+                disabled={saving !== null}
+                data-testid={`billing-interval-${opt}`}
+                className={clsx(
+                  'px-4 py-1.5 text-sm transition-colors',
+                  selected
+                    ? 'bg-white/15 text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
+                  saving !== null && 'opacity-50 cursor-progress',
+                )}
+              >
+                {saving === opt ? 'Saving…' : opt[0].toUpperCase() + opt.slice(1)}
+                {opt === 'annual' && (
+                  <span className="ml-1 text-xs text-emerald-400">−17%</span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function UsageBillingSettings() {
   const userId = _currentUserId()
   const [loading, setLoading] = useState(true)
@@ -727,6 +812,11 @@ function UsageBillingSettings() {
           )}
         </div>
       </div>
+
+      {/* Billing interval — monthly vs annual (17% off). Just the
+          local preference; the actual Stripe price-swap still
+          happens in the Customer Portal below. */}
+      <BillingIntervalToggle />
 
       {/* Stripe billing portal — card / address / invoice download /
           cancellation live there. The button is a no-network until

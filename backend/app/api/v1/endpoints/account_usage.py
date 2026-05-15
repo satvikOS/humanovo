@@ -235,6 +235,24 @@ class BillingIntervalRequest(BaseModel):
     billing_interval: str  # 'monthly' | 'annual'
 
 
+@router.get(
+    "/account/billing-interval",
+    dependencies=[Depends(rate_limit("user"))],
+)
+async def get_billing_interval(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Read the user's local billing-interval preference for the
+    Settings UI toggle. Defaults to 'monthly' when the column is
+    NULL — legacy users from before migration 034 may not have a
+    value, and we don't want to force-write a default on a GET."""
+    return {
+        "billing_interval": (
+            getattr(current_user, "billing_interval", None) or "monthly"
+        ),
+    }
+
+
 @router.put(
     "/account/billing-interval",
     dependencies=[Depends(rate_limit("user"))],

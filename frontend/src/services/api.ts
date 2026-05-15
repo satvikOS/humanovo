@@ -1156,6 +1156,28 @@ export const api = {
     return data
   },
 
+  // Billing-interval preference (monthly / annual). The actual
+  // Stripe subscription swap still happens in the Customer Portal;
+  // this just persists the user's preference locally so the
+  // cost-preview projections render the right cadence.
+  async getBillingInterval(): Promise<{ billing_interval: 'monthly' | 'annual' }> {
+    const { data } = await apiClient.get('/account/billing-interval')
+    return data
+  },
+
+  async updateBillingInterval(
+    interval: 'monthly' | 'annual',
+  ): Promise<{
+    status: string
+    billing_interval: 'monthly' | 'annual'
+    note: string
+  }> {
+    const { data } = await apiClient.put('/account/billing-interval', {
+      billing_interval: interval,
+    })
+    return data
+  },
+
   // Admin refund operations — see backend admin_billing.py.
   // listAdminRefunds: paginated history newest first, optionally
   // filtered by status. The dashboard shows recent attempts including
