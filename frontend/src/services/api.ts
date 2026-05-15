@@ -1260,51 +1260,6 @@ export const api = {
     return data
   },
 
-  // API keys (account-scoped). The raw token is only ever returned
-  // on POST /api-keys; list/get must never include it. Callers must
-  // surface the raw token to the user once and then discard it.
-  async listApiKeys(): Promise<{
-    keys: Array<{
-      id: string
-      name: string
-      prefix: string
-      scopes: string[]
-      created_at: string
-      expires_at: string | null
-      last_used_at: string | null
-      revoked_at: string | null
-    }>
-    count: number
-  }> {
-    const { data } = await apiClient.get('/account/api-keys')
-    return data
-  },
-
-  async createApiKey(body: {
-    name: string
-    scopes?: string[]
-    expires_at?: string | null
-  }): Promise<{
-    id: string
-    name: string
-    prefix: string
-    scopes: string[]
-    created_at: string
-    expires_at: string | null
-    raw_token: string
-    warning: string
-  }> {
-    const { data } = await apiClient.post('/account/api-keys', body)
-    return data
-  },
-
-  async revokeApiKey(keyId: string): Promise<{ status: string; key_id: string }> {
-    const { data } = await apiClient.delete(
-      `/account/api-keys/${encodeURIComponent(keyId)}`,
-    )
-    return data
-  },
-
   // Cancel subscription at period end. The server records the
   // reason regardless of Stripe outcome (so analytics survives a
   // Stripe outage), then schedules cancel_at_period_end=true on

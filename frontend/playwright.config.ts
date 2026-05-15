@@ -20,7 +20,19 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Runs auth.setup.ts first — mock-logs-in once and saves the
+    // authenticated storage state. Required because the app now
+    // gates all routes behind RequireAuth.
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        // Every test inherits the logged-in localStorage token.
+        storageState: 'e2e/.auth/state.json',
+      },
+      dependencies: ['setup'],
+    },
   ],
   webServer: {
     // In CI: spin up a fresh dev server. Locally: reuse one if present.

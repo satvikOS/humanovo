@@ -4,6 +4,7 @@ import { type ReactNode } from 'react'
 import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
 import RouteGatePlaceholder from './components/RouteGatePlaceholder'
+import RequireAuth from './components/RequireAuth'
 import DeepLinkRouter from './components/DeepLinkRouter'
 import UpdateChecker from './components/UpdateChecker'
 import CloseGuardManager from './components/CloseGuardManager'
@@ -152,8 +153,15 @@ function App() {
 
       {/* Marketing lives at https://www.humanovo.net/ — the in-app /welcome,
           /pricing, /docs routes were removed (commit following this one)
-          to keep the bundle lean. External site is the canonical surface. */}
-      <Route path="/" element={<Layout />}>
+          to keep the bundle lean. External site is the canonical surface.
+
+          RequireAuth wraps the whole authenticated shell: an
+          unauthenticated visitor is redirected to /login before any
+          page under "/" renders. Mock auth (1234/1234) still works —
+          it issues a real token the gate accepts. The five pre-auth
+          routes above sit OUTSIDE this wrapper so login / signup /
+          recovery stay reachable. */}
+      <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
         <Route path="projects" element={<PageWrapper><Projects /></PageWrapper>} />

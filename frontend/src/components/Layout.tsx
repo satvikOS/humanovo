@@ -1666,7 +1666,7 @@ if (path === '/clinical-trials') return 'Clinical Trials'
                   <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
                   <div className="absolute right-0 top-full mt-1.5 w-44 py-1.5 glass-card-static z-50 animate-scale-in" style={{ background: 'var(--color-surface-solid)' }}>
                     <button
-                      onClick={() => { navigate('/settings'); setIsUserMenuOpen(false) }}
+                      onClick={() => { navigate('/settings?tab=account'); setIsUserMenuOpen(false) }}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)] transition-all"
                     >
                       <FiUser className="w-3.5 h-3.5" />
