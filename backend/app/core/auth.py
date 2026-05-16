@@ -141,7 +141,12 @@ def decode_token(token: str) -> TokenData | None:
 
 
 async def get_current_user(
-    request: Request | None = None,
+    # Annotated as bare `Request` (not `Request | None`) so FastAPI
+    # special-cases it as an injected param. A `Request | None` union
+    # makes FastAPI 0.136+ try to build a Pydantic field from it and
+    # raise FastAPIError at app import. The `= None` default keeps the
+    # function directly callable outside an HTTP cycle (ws + tests).
+    request: Request = None,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
