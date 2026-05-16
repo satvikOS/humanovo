@@ -14,7 +14,11 @@ FROM public.ecr.aws/lambda/python:3.12
 # asyncpg sometimes needs to compile if the wheel is missing on
 # Python 3.12 + manylinux2014). gcc + libpq-devel cover both
 # common cases. Stripped after pip install to keep the image lean.
-RUN dnf install -y --setopt=install_weak_deps=False \
+# NB: --setopt=install_weak_deps=0 — the dnf in the current Lambda
+# Python 3.12 base image rejects the capitalized boolean "False"
+# with "(--setopt) Invalid boolean value" (deploy run 25965949300).
+# dnf wants 0/1 (or lowercase true/false); 0 is unambiguous.
+RUN dnf install -y --setopt=install_weak_deps=0 \
         gcc \
         gcc-c++ \
         make \
