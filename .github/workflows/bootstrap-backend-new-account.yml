@@ -134,6 +134,37 @@ jobs:
         run: |
           terraform init
 
+      - name: Purge scheduled-for-deletion secrets
+        # Secrets Manager never hard-deletes: a delete leaves the
+        # secret in a 7-30 day "scheduled for deletion" recovery
+        # window, during which its NAME cannot be reused. terraform
+        # apply then fails with "a secret with this name is already
+        # scheduled for deletion" (observed on runs 25964931613 +
+        # 25965199778 after the env was torn down via the console,
+        # which defaults to the recovery window). For each secret
+        # this stack creates, restore it out of the window then
+        # force-delete it with no recovery so the name is freed
+        # immediately. Idempotent: a secret that doesn't exist or
+        # isn't pending deletion just no-ops.
+        env:
+          AWS_DEFAULT_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+        run: |
+          for s in humanovo/prod/db humanovo/prod/redis humanovo/prod/app; do
+            STATE=$(aws secretsmanager describe-secret --secret-id "$s" \
+              --query 'DeletedDate' --output text 2>/dev/null || echo "none")
+            if [ "$STATE" != "none" ] && [ -n "$STATE" ]; then
+              echo "Secret $s is scheduled for deletion — purging."
+              aws secretsmanager restore-secret --secret-id "$s" >/dev/null 2>&1 || true
+              aws secretsmanager delete-secret --secret-id "$s" \
+                --force-delete-without-recovery >/dev/null 2>&1 || true
+            else
+              echo "Secret $s: not pending deletion, nothing to purge."
+            fi
+          done
+          # Brief settle so the freed names are consistently available
+          # to the CreateSecret calls in the apply that follows.
+          sleep 15
+
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
         # The first bootstrap dispatch was SIGKILLed by the job
