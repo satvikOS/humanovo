@@ -198,6 +198,39 @@ jobs:
             --region "${AWS_REGION}"
           echo "Lambda update complete."
 
+      - name: Apply DB migrations (in-VPC Lambda invoke)
+        # The Aurora cluster is in an isolated VPC subnet that CI
+        # cannot reach. The Lambda IS in the VPC, so we apply schema
+        # by invoking it out-of-band with {"action":"migrate"} — the
+        # handler runs `alembic upgrade head` (see
+        # app/lambda_handler.py) instead of serving HTTP. Idempotent:
+        # alembic only applies migrations newer than the recorded
+        # head, so a no-change deploy's invoke is a cheap no-op.
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          LAMBDA_NAME="${{ steps.tf.outputs.lambda_name }}"
+          aws lambda invoke \
+            --function-name "$LAMBDA_NAME" \
+            --region "${AWS_REGION}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"action":"migrate"}' \
+            --cli-read-timeout 600 \
+            /tmp/migrate.json > /tmp/migrate-meta.json
+          echo "--- invoke metadata ---"; cat /tmp/migrate-meta.json
+          echo ""; echo "--- migrate result ---"; cat /tmp/migrate.json; echo ""
+          # The handler returns {"ok": true, ...} on success or
+          # {"ok": false, "error": "..."} on failure. A Lambda-level
+          # FunctionError (unhandled crash) also fails the build.
+          if grep -q '"FunctionError"' /tmp/migrate-meta.json; then
+            echo "::error::Migration invoke hit an unhandled Lambda error."
+            exit 1
+          fi
+          if ! grep -q '"ok": *true' /tmp/migrate.json; then
+            echo "::error::Migration reported failure — see result above."
+            exit 1
+          fi
+          echo "Migrations applied."
+
       - name: Print "skipped" summary if bootstrap not run
         if: steps.bootstrap_check.outputs.should_deploy != 'true'
         run: |

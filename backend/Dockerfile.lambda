@@ -50,6 +50,14 @@ RUN pip install --no-cache-dir \
 # rebuilds this layer.
 COPY app/ ${LAMBDA_TASK_ROOT}/app/
 
+# Alembic migration files + config. Needed so the Lambda can run
+# `alembic upgrade head` against the VPC-private Aurora when invoked
+# out-of-band with {"action":"migrate"} — see app/lambda_handler.py.
+# The Aurora isn't reachable from CI (isolated subnet), so the
+# in-VPC Lambda is the migration runner.
+COPY alembic.ini ${LAMBDA_TASK_ROOT}/
+COPY migrations/ ${LAMBDA_TASK_ROOT}/migrations/
+
 # Strip build-time deps to reduce the final image size. Wheels are
 # already extracted into ${LAMBDA_TASK_ROOT}; gcc et al. aren't needed
 # at runtime.
