@@ -3147,9 +3147,26 @@ function DesktopSettings() {
       await processMod.relaunch()
     } catch (err) {
       setUpdatePhase('idle')
-      toast('error', err instanceof Error ? err.message : 'Update failed', {
-        title: 'humanovo',
-      })
+      const raw = err instanceof Error ? err.message : String(err)
+      // Distinguish "auto-update isn't wired up in this build" from a
+      // genuine update failure. Until the release is signed (the
+      // Tauri updater keypair is added to CI secrets), builds ship
+      // with the updater config inactive — check() then fails with a
+      // not-configured / missing-endpoint / signature-key error. Show
+      // the user an honest, non-alarming message in that case rather
+      // than a bare "Update failed".
+      const notConfigured = /updater|not configured|no .*endpoint|signature|pubkey|public key/i.test(raw)
+      if (notConfigured) {
+        toast(
+          'info',
+          'Auto-update isn’t enabled in this build yet — it switches on once releases are code-signed. Your data is safe; grab the latest build from the releases page meanwhile.',
+          { title: 'humanovo' },
+        )
+      } else {
+        toast('error', raw || 'Update check failed — try again shortly.', {
+          title: 'humanovo',
+        })
+      }
     } finally {
       setChecking(false)
     }
