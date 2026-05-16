@@ -51,7 +51,14 @@ jobs:
   bootstrap:
     name: Provision backend VPC + Aurora + Lambda + API GW
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 60 min was too short — the first dispatch (run 25947588762) was
+    # killed by the timeout mid `terraform apply`, ~60 min in. A cold
+    # AWS account provisioning a full VPC + NAT + Aurora cluster +
+    # Lambda + API Gateway in one apply routinely needs 60-120 min
+    # (Aurora cluster creation alone is 20-40 min). 180 min leaves
+    # ample headroom, including for a resumed apply that has to
+    # reconcile the partially-created resources from the timed-out run.
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
@@ -129,11 +136,34 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
+        # The first bootstrap dispatch was SIGKILLed by the job
+        # timeout mid-apply. terraform releases its DynamoDB state
+        # lock only on a clean exit, so a stale lock may still be
+        # held. Detect that specific failure, force-unlock (safe —
+        # we know the holding run is dead), and retry once. Any
+        # other plan failure still aborts.
         run: |
           ARGS=(-no-color -out=tfplan)
           ARGS+=(-var "aws_region=${{ github.event.inputs.aws_region }}")
           ARGS+=(-var "production_nat=${{ github.event.inputs.production_nat }}")
-          terraform plan "${ARGS[@]}"
+          set +e
+          PLAN_OUT="$(terraform plan "${ARGS[@]}" 2>&1)"
+          PLAN_RC=$?
+          set -e
+          echo "$PLAN_OUT"
+          if [ "$PLAN_RC" -ne 0 ] && echo "$PLAN_OUT" | grep -q "Error acquiring the state lock"; then
+            LOCK_ID="$(echo "$PLAN_OUT" | grep -oE 'ID:[[:space:]]+[0-9a-fA-F-]+' | head -1 | awk '{print $2}')"
+            if [ -n "$LOCK_ID" ]; then
+              echo "::warning::Stale terraform state lock $LOCK_ID — force-unlocking (holder run timed out) and retrying plan."
+              terraform force-unlock -force "$LOCK_ID"
+              terraform plan "${ARGS[@]}"
+            else
+              echo "Lock error but could not parse lock ID."
+              exit 1
+            fi
+          elif [ "$PLAN_RC" -ne 0 ]; then
+            exit "$PLAN_RC"
+          fi
 
       - name: Terraform Apply
         working-directory: ${{ env.TF_WORKING_DIR }}
