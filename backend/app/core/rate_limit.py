@@ -64,6 +64,28 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     # but bursts up to 30 are fine (token-bucket semantics). Catches
     # runaway loops without obstructing interactive admin use.
     "admin": (30.0, 0.5),
+    # auth: login / signup / password-reset. Tight enough to blunt
+    # credential-stuffing from a single IP, loose enough for a human
+    # fat-fingering a password (burst 10, ~6/min sustained).
+    "auth": (10.0, 0.1),
+    # user: ordinary authenticated interactive actions. Generous —
+    # the auth caller is already bound; this only catches a runaway
+    # client loop (burst 60, 1/s sustained).
+    "user": (60.0, 1.0),
+    # public: unauthenticated public endpoints. Same shape as `user`;
+    # WAF/CloudFront handles volumetric abuse upstream.
+    "public": (60.0, 1.0),
+    # metrics: Prometheus scrape endpoint — scraped on a fixed interval,
+    # so a steady allowance with burst headroom for scaled-out scrapers.
+    "metrics": (60.0, 1.0),
+    # telemetry: crash-report / telemetry ingestion. Clients batch and
+    # may burst after an offline period.
+    "telemetry": (60.0, 1.0),
+    # account_export: GDPR data export — expensive, intentionally rare.
+    "account_export": (5.0, 0.05),
+    # account_delete: GDPR account deletion — destructive, intentionally
+    # rare.
+    "account_delete": (5.0, 0.05),
 }
 
 
