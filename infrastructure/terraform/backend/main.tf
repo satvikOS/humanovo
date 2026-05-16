@@ -815,7 +815,13 @@ resource "aws_lambda_function" "backend" {
       REDIS_SECRET_NAME    = aws_secretsmanager_secret.redis.name
       RDS_PROXY_HOST       = aws_db_proxy.main.endpoint
       REDIS_HOST           = aws_elasticache_serverless_cache.main.endpoint[0].address
-      AWS_REGION           = var.aws_region
+      # NB: AWS_REGION is NOT set here. It is a Lambda-reserved
+      # environment variable that the runtime injects automatically;
+      # supplying it in `variables` makes CreateFunction fail with
+      # "reserved keys ... not supported for modification: AWS_REGION"
+      # (observed on bootstrap run 25965302780). Application code can
+      # still read os.environ["AWS_REGION"] at runtime — Lambda
+      # populates it for free.
     }
   }
 
