@@ -113,6 +113,11 @@ structlog>=24.4.0
 # ModuleNotFoundError: No module named 'jose'.
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+# passlib 1.7.4 (its last release, 2020) reads bcrypt.__about__ for
+# backend version detection; bcrypt >= 4.1 removed that attribute,
+# which breaks backend loading on a fresh install. Pin to the 4.0.x
+# line passlib 1.7.4 was actually tested against.
+bcrypt>=4.0.1,<4.1
 email-validator>=2.2.0
 
 # ─── Billing (Stripe) ────────────────────────────────────────────

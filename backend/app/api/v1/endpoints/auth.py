@@ -127,9 +127,13 @@ async def register(
         raise
     except Exception as e:
         logger.error("Registration failed", error=str(e))
+        # TEMP DIAGNOSTIC (revert): surface the exception type+message
+        # so the live backend can be debugged via HTTP — CloudWatch is
+        # not reachable from the dev environment. Remove once the
+        # registration 500 root cause is confirmed fixed.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Registration failed",
+            detail=f"Registration failed: {type(e).__name__}: {e}",
         )
 
 
