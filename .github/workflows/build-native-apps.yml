@@ -521,6 +521,18 @@ jobs:
           # Either fix unblocks the build; the PAT path is preferable
           # because it survives org-level Workflow-permission resets.
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          # Backend URL the installed app calls. Read from the repo
+          # variable API_BASE_URL (Settings → Secrets and variables →
+          # Actions → Variables). Empty until the AWS backend bootstrap
+          # finishes — at which point set API_BASE_URL to the API
+          # Gateway URL (e.g. https://xxxx.execute-api.us-east-1.amazonaws.com
+          # or https://api.humanovo.net once the custom domain is
+          # wired). While empty, services/api.ts falls back to a
+          # relative '/api/v1' base — which has no server in the Tauri
+          # shell, so the app shows empty data. Setting this variable
+          # + one rebuild is the single step that connects the
+          # installed app to the live backend.
+          VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}
           # Mock-auth MUST stay enabled in the shipped installer for
           # now. The app gates every route behind a login (RequireAuth)
           # and there is no real auth backend live yet — so mock auth
