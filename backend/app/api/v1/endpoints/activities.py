@@ -127,43 +127,53 @@ async def list_activities(
     import json
 
     from fastapi.responses import JSONResponse
-    query = select(Activity).where(Activity.owner_id == current_user.id)
-    count_query = select(func.count(Activity.id)).where(
-        Activity.owner_id == current_user.id
-    )
+    try:
+        query = select(Activity).where(Activity.owner_id == current_user.id)
+        count_query = select(func.count(Activity.id)).where(
+            Activity.owner_id == current_user.id
+        )
 
-    if type:
-        query = query.where(Activity.type == type)
-        count_query = count_query.where(Activity.type == type)
-    if action:
-        query = query.where(Activity.action == action)
-        count_query = count_query.where(Activity.action == action)
-    if date_from:
-        query = query.where(Activity.created_at >= date_from)
-        count_query = count_query.where(Activity.created_at >= date_from)
-    if date_to:
-        query = query.where(Activity.created_at <= date_to)
-        count_query = count_query.where(Activity.created_at <= date_to)
+        if type:
+            query = query.where(Activity.type == type)
+            count_query = count_query.where(Activity.type == type)
+        if action:
+            query = query.where(Activity.action == action)
+            count_query = count_query.where(Activity.action == action)
+        if date_from:
+            query = query.where(Activity.created_at >= date_from)
+            count_query = count_query.where(Activity.created_at >= date_from)
+        if date_to:
+            query = query.where(Activity.created_at <= date_to)
+            count_query = count_query.where(Activity.created_at <= date_to)
 
-    total_result = await db.execute(count_query)
-    total = total_result.scalar_one()
+        total_result = await db.execute(count_query)
+        total = total_result.scalar_one()
 
-    query = (
-        query
-        .order_by(Activity.created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
-    result = await db.execute(query)
-    items = result.scalars().all()
+        query = (
+            query
+            .order_by(Activity.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        result = await db.execute(query)
+        items = result.scalars().all()
 
-    payload = {
-        "items": [a.to_dict() for a in items],
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
-    return JSONResponse(content=json.loads(json.dumps(payload, default=str)))
+        payload = {
+            "items": [a.to_dict() for a in items],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+        return JSONResponse(content=json.loads(json.dumps(payload, default=str)))
+    except Exception as e:  # TEMP DIAGNOSTIC (revert): surface error over HTTP
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={
+                "diag": f"{e.__class__.__name__}: {e}",
+                "tb": traceback.format_exc()[-1200:],
+            },
+        )
 
 
 @router.get("/{activity_id}")
