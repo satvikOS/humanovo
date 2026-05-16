@@ -1,4 +1,4 @@
-# humanovo Backend stack — VPC + Aurora + ElastiCache + Lambda + API GW
+# humanovo Backend stack - VPC + Aurora + ElastiCache + Lambda + API GW
 #
 # Single-file Terraform stack for the closed-beta production backend.
 # Kept flat (no modules) on purpose: every resource is referenced from
@@ -10,7 +10,7 @@
 #   - fck-nat t4g.nano (production_nat=false): ~$3/month
 #   - Aurora Serverless v2 (0.5 ACU min): ~$43/month idle
 #   - ElastiCache Serverless: ~$30/month minimum
-#   - Lambda: pay per request — effectively $0 pre-revenue
+#   - Lambda: pay per request - effectively $0 pre-revenue
 #   - API Gateway HTTP API: $1 per million requests
 #
 # State backend is hardcoded here (not via -backend-config) because
@@ -62,11 +62,11 @@ locals {
 
   # Two AZs, hardcoded suffixes (a, b). Aurora + ElastiCache subnet
   # groups need at least 2 AZs even if we only deploy a single writer
-  # — the cluster_subnet_group is part of the cluster's HA story even
+  # - the cluster_subnet_group is part of the cluster's HA story even
   # when we don't pre-provision a reader.
   azs = ["${var.aws_region}a", "${var.aws_region}b"]
 
-  # Subnet CIDRs — three layers per AZ (public/private/isolated):
+  # Subnet CIDRs - three layers per AZ (public/private/isolated):
   #   AZ-a: 10.20.0.0/24, 10.20.1.0/24, 10.20.2.0/24
   #   AZ-b: 10.20.10.0/24, 10.20.11.0/24, 10.20.12.0/24
   vpc_cidr       = "10.20.0.0/16"
@@ -74,13 +74,19 @@ locals {
   private_cidrs  = ["10.20.1.0/24", "10.20.11.0/24"]
   isolated_cidrs = ["10.20.2.0/24", "10.20.12.0/24"]
 
-  # Origins allowed to call the API. Tauri apps post from the magic
-  # `tauri://localhost` origin which the v2 CORS spec accepts as a
-  # literal string match (no wildcard tricks needed).
+  # Origins allowed to call the API. API Gateway v2's CORS
+  # AllowOrigins validates each entry as a standard http(s) origin -
+  # the bare tauri://localhost scheme is rejected with
+  # "Invalid format for origin" (observed on bootstrap run
+  # 25949374262). Tauri 2's webview reports an http-form origin
+  # anyway (http://tauri.localhost on Windows, https variant on the
+  # other platforms), so list both http-form variants instead of the
+  # custom scheme.
   cors_origins = [
     "https://www.humanovo.net",
     "https://d1l1516144ax30.cloudfront.net",
-    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
   ]
 }
 
@@ -160,7 +166,7 @@ data "aws_ami" "fck_nat" {
   }
 }
 
-# Security group for the fck-nat instance — allows all egress and
+# Security group for the fck-nat instance - allows all egress and
 # allows ingress from anywhere inside the VPC (so private subnets
 # can route through it).
 resource "aws_security_group" "fck_nat" {
@@ -216,7 +222,7 @@ resource "aws_instance" "fck_nat" {
   }
 }
 
-# Managed NAT Gateway — only when production_nat = true.
+# Managed NAT Gateway - only when production_nat = true.
 resource "aws_eip" "nat" {
   count  = var.production_nat ? 1 : 0
   domain = "vpc"
@@ -261,7 +267,7 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Single private route table — both AZs share it. We're saving the
+# Single private route table - both AZs share it. We're saving the
 # cost of a second NAT (gateway or instance) at the price of cross-AZ
 # egress traffic going through AZ-a. Acceptable for closed beta.
 resource "aws_route_table" "private" {
@@ -294,7 +300,7 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
-# Isolated subnets get a route table with no default route — they can
+# Isolated subnets get a route table with no default route - they can
 # only talk to other resources in the VPC. Aurora + ElastiCache live
 # here so a misconfigured SG can't accidentally let them reach the
 # public internet.
@@ -316,7 +322,7 @@ resource "aws_route_table_association" "isolated" {
 
 resource "aws_security_group" "lambda" {
   name        = "${local.full_name}-lambda-sg"
-  description = "Lambda function ENIs — egress only"
+  description = "Lambda function ENIs - egress only"
   vpc_id      = aws_vpc.this.id
 
   egress {
@@ -334,7 +340,7 @@ resource "aws_security_group" "lambda" {
 
 resource "aws_security_group" "rds_proxy" {
   name        = "${local.full_name}-rds-proxy-sg"
-  description = "RDS Proxy — accepts 5432 from Lambda"
+  description = "RDS Proxy - accepts 5432 from Lambda"
   vpc_id      = aws_vpc.this.id
 
   ingress {
@@ -360,7 +366,7 @@ resource "aws_security_group" "rds_proxy" {
 
 resource "aws_security_group" "db" {
   name        = "${local.full_name}-db-sg"
-  description = "Aurora cluster — accepts 5432 from Lambda + RDS Proxy"
+  description = "Aurora cluster - accepts 5432 from Lambda + RDS Proxy"
   vpc_id      = aws_vpc.this.id
 
   ingress {
@@ -394,7 +400,7 @@ resource "aws_security_group" "db" {
 
 resource "aws_security_group" "redis" {
   name        = "${local.full_name}-redis-sg"
-  description = "ElastiCache — accepts 6379 from Lambda"
+  description = "ElastiCache - accepts 6379 from Lambda"
   vpc_id      = aws_vpc.this.id
 
   ingress {
@@ -420,7 +426,7 @@ resource "aws_security_group" "redis" {
 
 # ─── Secrets Manager ────────────────────────────────────────────────
 
-# Aurora master password — generated, never typed by a human.
+# Aurora master password - generated, never typed by a human.
 resource "random_password" "db_master" {
   length  = 40
   special = true
@@ -454,7 +460,7 @@ resource "aws_secretsmanager_secret_version" "db" {
   depends_on = [aws_rds_cluster.main]
 }
 
-# Redis AUTH token — ElastiCache requires it for transit encryption.
+# Redis AUTH token - ElastiCache requires it for transit encryption.
 resource "random_password" "redis_auth" {
   length  = 64
   special = false # ElastiCache AUTH tokens reject most special chars
@@ -484,7 +490,7 @@ resource "random_id" "jwt_secret" {
 
 resource "aws_secretsmanager_secret" "app" {
   name                    = "humanovo/prod/app"
-  description             = "Application secrets — third-party API keys + JWT signing key"
+  description             = "Application secrets - third-party API keys + JWT signing key"
   recovery_window_in_days = 7
 }
 
@@ -512,14 +518,14 @@ resource "aws_secretsmanager_secret_version" "app" {
 
 resource "aws_db_subnet_group" "aurora" {
   name        = "${local.full_name}-aurora-subnets"
-  description = "Aurora cluster subnet group — isolated tier only"
+  description = "Aurora cluster subnet group - isolated tier only"
   subnet_ids  = aws_subnet.isolated[*].id
 }
 
 resource "aws_rds_cluster" "main" {
   cluster_identifier = "${local.full_name}-aurora"
   engine             = "aurora-postgresql"
-  # 16.x — major version is what AWS will minor-bump for us.
+  # 16.x - major version is what AWS will minor-bump for us.
   engine_version = "16.4"
 
   database_name   = "humanovo"
@@ -836,7 +842,7 @@ resource "aws_apigatewayv2_api" "main" {
     allow_credentials = true
     allow_origins     = local.cors_origins
     allow_methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    # Explicit allowlist — `["*"]` is incompatible with allow_credentials=true
+    # Explicit allowlist - `["*"]` is incompatible with allow_credentials=true
     # in modern browsers anyway and signals "we don't know what we accept" to
     # security scanners. Add new headers here as the API surface grows.
     allow_headers = [
@@ -898,12 +904,20 @@ resource "aws_lambda_permission" "apigw" {
 }
 
 # ─── ACM + Custom Domain ────────────────────────────────────────────
+# Entire block gated behind var.enable_custom_domain (default false).
+# The ACM DNS-validation only completes when humanovo.net's public
+# DNS delegation points at this account's Route53 zone; until that
+# registrar change is made the validation times out and fails the
+# whole bootstrap. With the gate off, the app uses the raw regional
+# invoke URL (output api_gateway_url) — fully functional.
 
 data "aws_route53_zone" "primary" {
-  name = "humanovo.net"
+  count = var.enable_custom_domain ? 1 : 0
+  name  = "humanovo.net"
 }
 
 resource "aws_acm_certificate" "api" {
+  count             = var.enable_custom_domain ? 1 : 0
   domain_name       = "api.humanovo.net"
   validation_method = "DNS"
 
@@ -913,63 +927,68 @@ resource "aws_acm_certificate" "api" {
 }
 
 resource "aws_route53_record" "api_validation" {
-  for_each = {
-    for dvo in aws_acm_certificate.api.domain_validation_options : dvo.domain_name => {
+  for_each = var.enable_custom_domain ? {
+    for dvo in aws_acm_certificate.api[0].domain_validation_options : dvo.domain_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
     }
-  }
+  } : {}
 
   allow_overwrite = true
   name            = each.value.name
   records         = [each.value.record]
   ttl             = 60
   type            = each.value.type
-  zone_id         = data.aws_route53_zone.primary.zone_id
+  zone_id         = data.aws_route53_zone.primary[0].zone_id
 }
 
 resource "aws_acm_certificate_validation" "api" {
-  certificate_arn         = aws_acm_certificate.api.arn
+  count                   = var.enable_custom_domain ? 1 : 0
+  certificate_arn         = aws_acm_certificate.api[0].arn
   validation_record_fqdns = [for r in aws_route53_record.api_validation : r.fqdn]
 }
 
 resource "aws_apigatewayv2_domain_name" "api" {
+  count       = var.enable_custom_domain ? 1 : 0
   domain_name = "api.humanovo.net"
 
   domain_name_configuration {
-    certificate_arn = aws_acm_certificate_validation.api.certificate_arn
+    certificate_arn = aws_acm_certificate_validation.api[0].certificate_arn
     endpoint_type   = "REGIONAL"
     security_policy = "TLS_1_2"
   }
 }
 
 resource "aws_apigatewayv2_api_mapping" "api" {
+  count       = var.enable_custom_domain ? 1 : 0
   api_id      = aws_apigatewayv2_api.main.id
-  domain_name = aws_apigatewayv2_domain_name.api.id
+  domain_name = aws_apigatewayv2_domain_name.api[0].id
   stage       = aws_apigatewayv2_stage.default.id
 }
 
 resource "aws_route53_record" "api_a" {
-  zone_id = data.aws_route53_zone.primary.zone_id
+  count   = var.enable_custom_domain ? 1 : 0
+  zone_id = data.aws_route53_zone.primary[0].zone_id
   name    = "api.humanovo.net"
   type    = "A"
 
   alias {
-    name                   = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
-    zone_id                = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].hosted_zone_id
+    name                   = aws_apigatewayv2_domain_name.api[0].domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.api[0].domain_name_configuration[0].hosted_zone_id
     evaluate_target_health = false
   }
 }
 
 resource "aws_route53_record" "api_aaaa" {
-  zone_id = data.aws_route53_zone.primary.zone_id
+  count   = var.enable_custom_domain ? 1 : 0
+  zone_id = data.aws_route53_zone.primary[0].zone_id
   name    = "api.humanovo.net"
   type    = "AAAA"
 
   alias {
-    name                   = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
-    zone_id                = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].hosted_zone_id
+    name                   = aws_apigatewayv2_domain_name.api[0].domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.api[0].domain_name_configuration[0].hosted_zone_id
     evaluate_target_health = false
   }
 }
@@ -982,12 +1001,16 @@ output "api_gateway_url" {
 }
 
 output "api_gateway_custom_domain" {
-  description = "Custom api.humanovo.net URL — what the frontend talks to in prod."
-  value       = "https://${aws_apigatewayv2_domain_name.api.domain_name}"
+  description = "Custom api.humanovo.net URL - empty until var.enable_custom_domain is set + DNS delegated. Use api_gateway_url meanwhile."
+  value = (
+    var.enable_custom_domain
+    ? "https://${aws_apigatewayv2_domain_name.api[0].domain_name}"
+    : ""
+  )
 }
 
 output "lambda_function_name" {
-  description = "Lambda function name — used by the deploy workflow's update-function-code call."
+  description = "Lambda function name - used by the deploy workflow's update-function-code call."
   value       = aws_lambda_function.backend.function_name
 }
 
@@ -1002,7 +1025,7 @@ output "ecr_repository_url" {
 }
 
 output "aurora_cluster_endpoint" {
-  description = "RDS Proxy endpoint — Lambda connects here, NOT directly to the Aurora cluster."
+  description = "RDS Proxy endpoint - Lambda connects here, NOT directly to the Aurora cluster."
   value       = aws_db_proxy.main.endpoint
 }
 
@@ -1012,16 +1035,16 @@ output "redis_endpoint" {
 }
 
 output "secrets_manager_app_name" {
-  description = "Application secrets blob — the operator edits this post-apply to fill REPLACE_ME values."
+  description = "Application secrets blob - the operator edits this post-apply to fill REPLACE_ME values."
   value       = aws_secretsmanager_secret.app.name
 }
 
 output "vpc_id" {
-  description = "VPC ID — surfaced for cross-stack references / debugging."
+  description = "VPC ID - surfaced for cross-stack references / debugging."
   value       = aws_vpc.this.id
 }
 
 output "lambda_security_group_id" {
-  description = "Lambda SG ID — useful when granting other resources ingress from Lambda."
+  description = "Lambda SG ID - useful when granting other resources ingress from Lambda."
   value       = aws_security_group.lambda.id
 }

@@ -45,3 +45,25 @@ variable "enable_jwt_authorizer" {
   type        = bool
   default     = false
 }
+
+variable "enable_custom_domain" {
+  description = <<-EOT
+    Whether to provision the api.humanovo.net custom domain — ACM
+    cert + DNS validation records + API Gateway domain mapping +
+    A/AAAA alias records.
+
+    Default false. The ACM DNS-validation step only succeeds when
+    humanovo.net's public DNS delegation points at this account's
+    Route53 zone. Until that registrar-level delegation is done the
+    cert sits PENDING_VALIDATION and the validation resource times
+    out after 75 min, failing the whole bootstrap (observed on run
+    25949374262).
+
+    With this false, the bootstrap completes and the app reaches the
+    backend via the raw regional invoke URL (the `api_gateway_url`
+    output, *.execute-api.<region>.amazonaws.com) — fully functional.
+    Flip to true once humanovo.net DNS is delegated to Route53.
+  EOT
+  type        = bool
+  default     = false
+}
