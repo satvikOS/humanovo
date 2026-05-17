@@ -74,20 +74,6 @@ locals {
   private_cidrs  = ["10.20.1.0/24", "10.20.11.0/24"]
   isolated_cidrs = ["10.20.2.0/24", "10.20.12.0/24"]
 
-  # Origins allowed to call the API. API Gateway v2's CORS
-  # AllowOrigins validates each entry as a standard http(s) origin -
-  # the bare tauri://localhost scheme is rejected with
-  # "Invalid format for origin" (observed on bootstrap run
-  # 25949374262). Tauri 2's webview reports an http-form origin
-  # anyway (http://tauri.localhost on Windows, https variant on the
-  # other platforms), so list both http-form variants instead of the
-  # custom scheme.
-  cors_origins = [
-    "https://www.humanovo.net",
-    "https://d1l1516144ax30.cloudfront.net",
-    "http://tauri.localhost",
-    "https://tauri.localhost",
-  ]
 }
 
 data "aws_caller_identity" "current" {}
@@ -909,12 +895,17 @@ resource "aws_apigatewayv2_api" "main" {
   protocol_type = "HTTP"
 
   cors_configuration {
-    allow_credentials = true
-    allow_origins     = local.cors_origins
-    allow_methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    # Explicit allowlist - `["*"]` is incompatible with allow_credentials=true
-    # in modern browsers anyway and signals "we don't know what we accept" to
-    # security scanners. Add new headers here as the API surface grows.
+    # Wildcard origin, no credentials. The desktop app and landing
+    # site both authenticate with a Bearer JWT header — no cookies —
+    # so credentialed CORS is unnecessary. `allow_credentials = true`
+    # forced exact origin-matching, and the Tauri WebView's origin is
+    # not a value we can reliably pin (it varies by OS/WebView2
+    # version), so every request from the installed app failed CORS
+    # preflight and surfaced to the UI as "Cannot reach server".
+    # Wildcard + no-credentials lets any webview origin through; the
+    # JWT in the Authorization header is what actually gates access.
+    allow_origins = ["*"]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     allow_headers = [
       "Accept",
       "Accept-Language",
