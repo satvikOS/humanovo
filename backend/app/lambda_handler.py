@@ -46,18 +46,48 @@ def _run_migrations() -> dict:
     return {"ok": True, "migrated": "head"}
 
 
+def _run_ingest(event: dict) -> dict:
+    """Bulk-ingest real literature for a batch of topics into the
+    global Evidence corpus + common KG.
+
+    The regular ingestion endpoints schedule work as FastAPI
+    BackgroundTasks, which don't survive on Lambda (the container
+    freezes once the HTTP response is returned). This out-of-band
+    invoke runs the ingestion synchronously inside one Lambda
+    execution so it actually completes and commits.
+    """
+    import asyncio
+
+    from app.services.bulk_ingest import run_ingest
+
+    topics = event.get("topics") or []
+    if not isinstance(topics, list) or not topics:
+        return {"ok": False, "error": "no topics supplied"}
+    max_per_source = int(event.get("max_per_source", 100))
+    logger.info("Bulk ingest: %d topics, max_per_source=%d",
+                len(topics), max_per_source)
+    return asyncio.run(run_ingest(topics, max_per_source))
+
+
 def handler(event, context):
-    """Lambda handler. Routes an out-of-band migration invoke
-    ({"action": "migrate"}) to the migration runner; everything else
-    is a normal API Gateway v2 request handled by Mangum.
+    """Lambda handler. Routes out-of-band maintenance invokes
+    ({"action": "migrate"} / {"action": "ingest"}) to their runners;
+    everything else is a normal API Gateway v2 request handled by
+    Mangum.
 
     API Gateway v2 HTTP events are dicts with keys like `version`,
-    `routeKey`, `rawPath` — never a top-level `action` — so the
-    branch can't be reached by ordinary traffic."""
+    `routeKey`, `rawPath` — never a top-level `action` — so these
+    branches can't be reached by ordinary traffic."""
     if isinstance(event, dict) and event.get("action") == "migrate":
         try:
             return _run_migrations()
         except Exception as e:  # noqa: BLE001 - report failure to the invoker
             logger.exception("Migration run failed")
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if isinstance(event, dict) and event.get("action") == "ingest":
+        try:
+            return _run_ingest(event)
+        except Exception as e:  # noqa: BLE001 - report failure to the invoker
+            logger.exception("Bulk ingest run failed")
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
     return _asgi_handler(event, context)

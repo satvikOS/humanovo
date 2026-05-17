@@ -1,0 +1,145 @@
+name: Bulk Ingest Literature + Common KG
+
+# Drives the real 62-source literature pipeline to populate the global
+# Evidence corpus + common Knowledge Graph. The Aurora DB is in an
+# isolated VPC subnet CI cannot reach, and the regular ingestion
+# endpoints schedule work as FastAPI BackgroundTasks that don't survive
+# on Lambda — so this loops `aws lambda invoke` with
+# {"action":"ingest", topics:[...]} (see app/lambda_handler.py +
+# app/services/bulk_ingest.py), which runs ingestion synchronously
+# inside the VPC and commits before returning.
+#
+# Manual trigger only. Idempotent: Evidence rows dedup on source_id,
+# so re-running skips already-ingested papers.
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: Topics per Lambda invoke
+        required: false
+        default: '25'
+      max_per_source:
+        description: Max records fetched per source per topic
+        required: false
+        default: '200'
+      start_batch:
+        description: Batch index to start from (0-based, for resuming)
+        required: false
+        default: '0'
+      max_batches:
+        description: Max batches to run this dispatch (0 = all remaining)
+        required: false
+        default: '0'
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  LAMBDA_NAME: humanovo-backend-prod
+
+jobs:
+  bulk-ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Configure AWS credentials (new account)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Raise Lambda timeout for long ingest invokes
+        run: |
+          # Ingest invokes fetch from rate-limited sources + write to
+          # Aurora; the default 30s timeout is far too short. 900s is
+          # the Lambda maximum. Harmless for HTTP traffic (API Gateway
+          # still caps responses at ~30s).
+          aws lambda update-function-configuration \
+            --function-name "$LAMBDA_NAME" \
+            --region "$AWS_REGION" \
+            --timeout 900 >/dev/null
+          aws lambda wait function-updated \
+            --function-name "$LAMBDA_NAME" --region "$AWS_REGION"
+          echo "Lambda timeout set to 900s."
+
+      - name: Bulk ingest loop
+        run: |
+          set -uo pipefail
+          BATCH_SIZE='${{ github.event.inputs.batch_size }}'
+          MPS='${{ github.event.inputs.max_per_source }}'
+          START='${{ github.event.inputs.start_batch }}'
+          MAXB='${{ github.event.inputs.max_batches }}'
+
+          # Load topics (strip comments + blank lines).
+          mapfile -t TOPICS < <(grep -vE '^\s*#' backend/scripts/ingest_topics.txt | grep -vE '^\s*$')
+          TOTAL=${#TOPICS[@]}
+          echo "Loaded $TOTAL topics; batch_size=$BATCH_SIZE max_per_source=$MPS"
+
+          tot_ev=0; tot_skip=0; tot_nodes=0; tot_edges=0; tot_done=0; tot_fail=0
+          batch_idx=0; ran=0
+
+          for ((i=0; i<TOTAL; i+=BATCH_SIZE)); do
+            if [ "$batch_idx" -lt "$START" ]; then batch_idx=$((batch_idx+1)); continue; fi
+            if [ "$MAXB" -ne 0 ] && [ "$ran" -ge "$MAXB" ]; then break; fi
+
+            BATCH=("${TOPICS[@]:i:BATCH_SIZE}")
+            # Build the JSON payload with jq so topics are safely quoted.
+            # The filter must precede --args; everything after --args is
+            # consumed as positional ($ARGS.positional).
+            jq -nc --arg mps "$MPS" \
+              '{action:"ingest", max_per_source:($mps|tonumber), topics:$ARGS.positional}' \
+              --args "${BATCH[@]}" > /tmp/payload.json
+
+            echo "::group::Batch $batch_idx (${#BATCH[@]} topics)"
+            if aws lambda invoke \
+                 --function-name "$LAMBDA_NAME" \
+                 --region "$AWS_REGION" \
+                 --cli-binary-format raw-in-base64-out \
+                 --payload file:///tmp/payload.json \
+                 --cli-read-timeout 900 \
+                 /tmp/out.json > /tmp/meta.json; then
+              if grep -q '"FunctionError"' /tmp/meta.json; then
+                echo "::warning::Batch $batch_idx hit a Lambda FunctionError"
+                cat /tmp/out.json
+                tot_fail=$((tot_fail+1))
+              else
+                ev=$(jq -r '.evidence_added // 0' /tmp/out.json)
+                sk=$(jq -r '.evidence_skipped // 0' /tmp/out.json)
+                nd=$(jq -r '.kg_nodes_added // 0' /tmp/out.json)
+                eg=$(jq -r '.kg_edges_added // 0' /tmp/out.json)
+                dn=$(jq -r '.topics_done // 0' /tmp/out.json)
+                tot_ev=$((tot_ev+ev)); tot_skip=$((tot_skip+sk))
+                tot_nodes=$((tot_nodes+nd)); tot_edges=$((tot_edges+eg))
+                tot_done=$((tot_done+dn))
+                echo "Batch $batch_idx: +${ev} evidence, +${nd} nodes, +${eg} edges (skipped ${sk})"
+                jq -r '.errors[]? | "  err: " + .' /tmp/out.json || true
+              fi
+            else
+              echo "::warning::Batch $batch_idx invoke failed"
+              cat /tmp/meta.json || true
+              tot_fail=$((tot_fail+1))
+            fi
+            echo "::endgroup::"
+            echo "Running totals: evidence=$tot_ev nodes=$tot_nodes edges=$tot_edges"
+            batch_idx=$((batch_idx+1)); ran=$((ran+1))
+          done
+
+          {
+            echo "## Bulk ingest results"
+            echo ""
+            echo "| Metric | Count |"
+            echo "|--------|-------|"
+            echo "| Evidence rows added | $tot_ev |"
+            echo "| Evidence skipped (dup) | $tot_skip |"
+            echo "| Common KG nodes added | $tot_nodes |"
+            echo "| Common KG edges added | $tot_edges |"
+            echo "| Topics ingested | $tot_done |"
+            echo "| Failed batches | $tot_fail |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "DONE: evidence=$tot_ev nodes=$tot_nodes edges=$tot_edges failed_batches=$tot_fail"

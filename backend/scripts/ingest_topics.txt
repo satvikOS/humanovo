@@ -1,0 +1,512 @@
+# Real biomedical search topics for bulk literature ingestion.
+# One topic per line; lines starting with # are ignored.
+# Each topic is queried against PubMed + Europe PMC + ClinicalTrials.gov.
+# ~500 broad+specific terms -> ~100k deduplicated Evidence rows.
+breast cancer
+lung cancer
+colorectal cancer
+prostate cancer
+pancreatic cancer
+ovarian cancer
+gastric cancer
+hepatocellular carcinoma
+melanoma
+glioblastoma
+acute myeloid leukemia
+chronic lymphocytic leukemia
+multiple myeloma
+non-Hodgkin lymphoma
+Hodgkin lymphoma
+renal cell carcinoma
+bladder cancer
+esophageal cancer
+head and neck cancer
+thyroid cancer
+cervical cancer
+endometrial cancer
+sarcoma
+neuroblastoma
+medulloblastoma
+mesothelioma
+cholangiocarcinoma
+small cell lung cancer
+non-small cell lung cancer
+triple negative breast cancer
+HER2 positive breast cancer
+KRAS mutation cancer
+EGFR mutation lung cancer
+BRAF melanoma
+tumor microenvironment
+cancer immunotherapy
+immune checkpoint inhibitor
+CAR-T cell therapy
+tumor angiogenesis
+cancer metastasis
+circulating tumor DNA
+cancer stem cells
+oncogene addiction
+DNA damage response
+PARP inhibitor
+tyrosine kinase inhibitor
+cancer epigenetics
+tumor suppressor gene
+Alzheimer disease
+Parkinson disease
+amyotrophic lateral sclerosis
+multiple sclerosis
+Huntington disease
+epilepsy
+stroke
+ischemic stroke
+traumatic brain injury
+spinal cord injury
+migraine
+chronic pain
+neuropathic pain
+peripheral neuropathy
+frontotemporal dementia
+Lewy body dementia
+vascular dementia
+mild cognitive impairment
+amyloid beta
+tau protein
+neuroinflammation
+blood brain barrier
+neurodegeneration
+synaptic plasticity
+neural stem cells
+deep brain stimulation
+glioma
+schizophrenia
+major depressive disorder
+bipolar disorder
+anxiety disorder
+post-traumatic stress disorder
+autism spectrum disorder
+attention deficit hyperactivity disorder
+obsessive compulsive disorder
+addiction
+opioid use disorder
+sleep disorders
+insomnia
+coronary artery disease
+myocardial infarction
+heart failure
+atrial fibrillation
+hypertension
+pulmonary hypertension
+cardiomyopathy
+hypertrophic cardiomyopathy
+dilated cardiomyopathy
+valvular heart disease
+aortic stenosis
+cardiac arrhythmia
+sudden cardiac death
+atherosclerosis
+peripheral artery disease
+venous thromboembolism
+deep vein thrombosis
+pulmonary embolism
+cardiac hypertrophy
+vascular calcification
+endothelial dysfunction
+cardiac fibrosis
+cardiac regeneration
+lipid metabolism
+cholesterol metabolism
+familial hypercholesterolemia
+type 1 diabetes
+type 2 diabetes
+gestational diabetes
+diabetic nephropathy
+diabetic retinopathy
+diabetic neuropathy
+insulin resistance
+metabolic syndrome
+obesity
+nonalcoholic fatty liver disease
+nonalcoholic steatohepatitis
+dyslipidemia
+hyperglycemia
+glucose homeostasis
+adipose tissue inflammation
+mitochondrial dysfunction
+oxidative stress
+gut microbiome
+microbiome dysbiosis
+short chain fatty acids
+asthma
+chronic obstructive pulmonary disease
+idiopathic pulmonary fibrosis
+cystic fibrosis
+acute respiratory distress syndrome
+pulmonary arterial hypertension
+sleep apnea
+pneumonia
+tuberculosis
+lung transplantation
+bronchiectasis
+interstitial lung disease
+rheumatoid arthritis
+systemic lupus erythematosus
+psoriasis
+psoriatic arthritis
+inflammatory bowel disease
+Crohn disease
+ulcerative colitis
+ankylosing spondylitis
+Sjogren syndrome
+systemic sclerosis
+vasculitis
+autoimmune disease
+immune tolerance
+regulatory T cells
+T cell exhaustion
+B cell development
+innate immunity
+adaptive immunity
+inflammasome
+cytokine storm
+complement system
+antigen presentation
+immune memory
+vaccine adjuvant
+mRNA vaccine
+COVID-19
+SARS-CoV-2
+influenza
+HIV infection
+hepatitis B
+hepatitis C
+malaria
+antimicrobial resistance
+sepsis
+bacterial infection
+viral infection
+fungal infection
+emerging infectious diseases
+antibiotic resistance
+host pathogen interaction
+chronic kidney disease
+acute kidney injury
+glomerulonephritis
+polycystic kidney disease
+nephrotic syndrome
+kidney transplantation
+end stage renal disease
+renal fibrosis
+liver cirrhosis
+liver fibrosis
+acute liver failure
+liver transplantation
+portal hypertension
+cholestasis
+osteoporosis
+osteoarthritis
+bone remodeling
+fracture healing
+muscular dystrophy
+sarcopenia
+muscle regeneration
+tendon injury
+cartilage repair
+intervertebral disc degeneration
+age-related macular degeneration
+glaucoma
+diabetic macular edema
+retinitis pigmentosa
+cataract
+dry eye disease
+corneal disease
+uveitis
+hearing loss
+tinnitus
+preeclampsia
+preterm birth
+fetal growth restriction
+recurrent pregnancy loss
+endometriosis
+polycystic ovary syndrome
+infertility
+in vitro fertilization
+menopause
+contraception
+sickle cell disease
+thalassemia
+hemophilia
+aplastic anemia
+myelodysplastic syndrome
+iron deficiency anemia
+thrombocytopenia
+hematopoietic stem cell transplantation
+graft versus host disease
+CRISPR gene editing
+gene therapy
+base editing
+prime editing
+RNA interference
+antisense oligonucleotide
+stem cell therapy
+induced pluripotent stem cells
+embryonic stem cells
+organoid models
+tissue engineering
+regenerative medicine
+3D bioprinting
+single cell RNA sequencing
+spatial transcriptomics
+whole genome sequencing
+whole exome sequencing
+genome wide association study
+polygenic risk score
+epigenome
+DNA methylation
+histone modification
+chromatin remodeling
+non-coding RNA
+microRNA
+long non-coding RNA
+circular RNA
+alternative splicing
+proteomics
+metabolomics
+lipidomics
+mass spectrometry
+structural biology
+cryo-electron microscopy
+protein folding
+protein aggregation
+protein degradation
+ubiquitin proteasome system
+autophagy
+apoptosis
+necroptosis
+ferroptosis
+pyroptosis
+cellular senescence
+cell cycle regulation
+DNA replication
+telomere biology
+mitochondrial biogenesis
+endoplasmic reticulum stress
+unfolded protein response
+calcium signaling
+G protein coupled receptor
+receptor tyrosine kinase
+MAPK signaling pathway
+PI3K AKT mTOR pathway
+Wnt signaling pathway
+Notch signaling pathway
+Hedgehog signaling pathway
+JAK STAT signaling pathway
+TGF beta signaling pathway
+NF-kB signaling pathway
+Hippo signaling pathway
+p53 pathway
+hypoxia signaling
+extracellular matrix remodeling
+fibrosis mechanisms
+epithelial mesenchymal transition
+angiogenesis
+vasculogenesis
+lymphangiogenesis
+wound healing
+inflammation resolution
+macrophage polarization
+neutrophil function
+dendritic cell biology
+natural killer cells
+mast cell activation
+eosinophil biology
+platelet function
+coagulation cascade
+circadian rhythm
+metabolic flux
+amino acid metabolism
+fatty acid oxidation
+glycolysis
+oxidative phosphorylation
+nucleotide metabolism
+one carbon metabolism
+redox signaling
+nitric oxide signaling
+reactive oxygen species
+drug delivery systems
+nanoparticle drug delivery
+lipid nanoparticles
+antibody drug conjugate
+bispecific antibody
+monoclonal antibody
+small molecule inhibitor
+proteolysis targeting chimera
+allosteric inhibitor
+covalent inhibitor
+drug repurposing
+pharmacokinetics
+pharmacodynamics
+drug metabolism
+cytochrome P450
+drug drug interaction
+drug resistance
+precision medicine
+pharmacogenomics
+biomarker discovery
+companion diagnostics
+liquid biopsy
+clinical trial design
+randomized controlled trial
+real world evidence
+adaptive clinical trial
+basket trial
+umbrella trial
+patient reported outcomes
+health economics
+machine learning healthcare
+deep learning medical imaging
+artificial intelligence diagnosis
+natural language processing clinical
+predictive modeling disease
+electronic health records
+digital health
+wearable sensors
+telemedicine
+radiomics
+medical image segmentation
+computational drug discovery
+molecular docking
+protein structure prediction
+systems biology
+network medicine
+multi-omics integration
+biostatistics
+epidemiology
+public health surveillance
+vaccine efficacy
+health disparities
+aging biology
+cellular reprogramming
+longevity
+caloric restriction
+senolytics
+exercise physiology
+nutrition science
+vitamin D
+omega-3 fatty acids
+dietary intervention
+obesity intervention
+gut brain axis
+enteric nervous system
+microbiota metabolites
+fecal microbiota transplantation
+probiotic therapy
+host immunity microbiome
+T cell receptor engineering
+tumor neoantigen
+cancer vaccine
+oncolytic virus
+radiation therapy
+proton therapy
+stereotactic radiosurgery
+chemotherapy resistance
+targeted cancer therapy
+hormone therapy cancer
+minimal residual disease
+cancer screening
+early cancer detection
+tumor heterogeneity
+clonal evolution cancer
+cancer genomics
+fusion gene cancer
+copy number variation
+structural variants genome
+mosaicism
+mendelian disorders
+rare genetic disease
+newborn screening
+prenatal diagnosis
+mitochondrial disease
+lysosomal storage disease
+inborn errors of metabolism
+connective tissue disorder
+Marfan syndrome
+Ehlers-Danlos syndrome
+Duchenne muscular dystrophy
+spinal muscular atrophy
+fragile X syndrome
+Rett syndrome
+Down syndrome
+neurofibromatosis
+tuberous sclerosis
+Wilson disease
+hemochromatosis
+alpha-1 antitrypsin deficiency
+phenylketonuria
+amyloidosis
+prion disease
+chronic fatigue syndrome
+fibromyalgia
+chronic inflammation
+metabolic bone disease
+thyroid dysfunction
+hypothyroidism
+hyperthyroidism
+adrenal insufficiency
+Cushing syndrome
+pituitary adenoma
+growth hormone deficiency
+puberty disorders
+sex hormone signaling
+estrogen receptor signaling
+androgen receptor signaling
+glucocorticoid signaling
+vitamin metabolism
+trace element biology
+iron metabolism
+copper metabolism
+calcium homeostasis
+electrolyte balance
+acid base balance
+fluid homeostasis
+thermoregulation
+pain mechanisms
+nociception
+analgesia
+anesthesia mechanisms
+neuromodulation
+brain connectivity
+functional MRI
+neuroimaging biomarkers
+cerebrospinal fluid biomarkers
+glymphatic system
+neurovascular coupling
+astrocyte function
+microglia activation
+oligodendrocyte biology
+myelination
+axon regeneration
+neurotransmitter systems
+dopamine signaling
+serotonin signaling
+glutamate signaling
+GABA signaling
+cholinergic signaling
+neuropeptide signaling
+neuroendocrine regulation
+stress response
+hypothalamic pituitary adrenal axis
+sleep regulation
+memory consolidation
+learning and memory
+neuroplasticity
+brain development
+cortical organization
+visual processing
+auditory processing
+motor control
+balance and posture
+gait analysis
+rehabilitation medicine
+physical therapy outcomes
+prosthetics
+brain computer interface
+assistive technology
