@@ -7,7 +7,7 @@ Login, registration, and user management.
 from datetime import timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import (
@@ -32,9 +32,11 @@ router = APIRouter()
 
 class RegisterRequest(BaseModel):
     """Registration request schema."""
-    email: EmailStr
-    password: str
-    full_name: str | None = None
+    # max_length mirrors the users table columns (VARCHAR(255)) so an
+    # over-length value is a clean 422, not a DB truncation 500.
+    email: EmailStr = Field(max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str | None = Field(default=None, max_length=255)
 
 
 class LoginRequest(BaseModel):
