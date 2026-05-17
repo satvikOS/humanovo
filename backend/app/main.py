@@ -98,11 +98,22 @@ def create_app() -> FastAPI:
         redirect_slashes=False,
     )
 
-    # Configure CORS
+    # Configure CORS.
+    #
+    # allow_origins=["*"] is deliberate. API Gateway routes the OPTIONS
+    # preflight to this Lambda (the $default route catches it), so
+    # Starlette's CORSMiddleware is what answers the preflight. With a
+    # fixed allowlist it returned `400 Disallowed CORS origin` for the
+    # desktop app's WebView origin (http://tauri.localhost) — which
+    # surfaced in the app as "Cannot reach server" on every POST and
+    # every authenticated GET. The app authenticates with a Bearer JWT
+    # header (no cookies), so credentialed CORS isn't needed, and
+    # API Gateway's own cors_configuration is what actually decorates
+    # the response headers the client sees.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
+        allow_origins=["*"],
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
