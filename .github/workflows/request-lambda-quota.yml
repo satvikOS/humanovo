@@ -1,0 +1,71 @@
+name: Request Lambda Concurrency Quota Increase
+
+# New AWS accounts cap the Lambda "Concurrent executions" quota at 10.
+# Provisioned concurrency reserves from that pool and AWS requires >=10
+# unreserved to remain, so provisioned concurrency cannot be enabled
+# until the quota is raised. This workflow files (or re-files) the
+# service-quota increase request and reports the current value.
+#
+# Approval is on AWS's side (often quick for Lambda concurrency, but
+# not guaranteed instant). Once the quota shows the raised value,
+# set terraform var provisioned_concurrency = 1 and re-run bootstrap.
+
+on:
+  workflow_dispatch:
+    inputs:
+      desired:
+        description: Desired concurrent-executions quota
+        required: false
+        default: '1000'
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  # Lambda "Concurrent executions" service quota.
+  QUOTA_CODE: L-B99A9384
+  SERVICE_CODE: lambda
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (new account)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Request quota increase
+        run: |
+          DESIRED='${{ github.event.inputs.desired }}'
+          echo "=== current quota ==="
+          aws service-quotas get-service-quota \
+            --service-code "$SERVICE_CODE" --quota-code "$QUOTA_CODE" \
+            --region "$AWS_REGION" \
+            --query '{Name:Quota.QuotaName,Value:Quota.Value}' \
+            --output json 2>&1 || echo "(get-service-quota failed)"
+          echo ""
+          echo "=== existing requested changes ==="
+          aws service-quotas list-requested-service-quota-change-history-by-quota \
+            --service-code "$SERVICE_CODE" --quota-code "$QUOTA_CODE" \
+            --region "$AWS_REGION" \
+            --query 'RequestedQuotas[].{Status:Status,Desired:DesiredValue}' \
+            --output json 2>&1 || echo "(none)"
+          echo ""
+          echo "=== filing request for $DESIRED ==="
+          aws service-quotas request-service-quota-increase \
+            --service-code "$SERVICE_CODE" --quota-code "$QUOTA_CODE" \
+            --desired-value "$DESIRED" --region "$AWS_REGION" \
+            --output json 2>&1 \
+            || echo "(request rejected — likely a pending/identical request already exists)"
+          {
+            echo "## Lambda concurrency quota request"
+            echo ""
+            echo "Filed an increase to **$DESIRED**. Approval is on AWS's side."
+            echo "Once \`aws service-quotas get-service-quota\` shows the raised"
+            echo "value, set terraform \`provisioned_concurrency = 1\` and re-run"
+            echo "the bootstrap workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
