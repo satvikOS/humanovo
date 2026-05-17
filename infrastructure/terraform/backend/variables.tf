@@ -59,16 +59,12 @@ variable "provisioned_concurrency" {
     beta's handful of named users; bump it if concurrent usage grows.
     Set to 0 to disable provisioned concurrency entirely.
 
-    NOTE: kept at 0 until the AWS account's Lambda "Concurrent
-    executions" service quota is raised above the new-account default
-    of 10. Provisioned concurrency reserves from the account pool and
-    AWS requires >=10 unreserved to remain, so ANY value > 0 is
-    rejected while the quota is 10 (InvalidParameterValueException).
-    Once the quota increase lands (see the request-lambda-quota
-    workflow), set this to 1 and re-run the bootstrap workflow.
+    The AWS account's Lambda "Concurrent executions" quota was raised
+    to 1000 (2026-05-17), so 1 provisioned unit leaves 999 unreserved
+    — well above the >=10 minimum. Enabled at 1.
   EOT
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "enable_custom_domain" {
