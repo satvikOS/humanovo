@@ -1,0 +1,67 @@
+name: Lambda HTTP Diagnostic
+
+# One-off diagnostic: invokes the backend Lambda with a synthetic
+# API Gateway v2 event for `GET /health` and dumps the raw return.
+# This shows exactly what the HTTP (Mangum) path produces, bypassing
+# API Gateway — used when the live endpoint 500s but the out-of-band
+# {"action":"migrate"} invoke succeeds.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  LAMBDA_NAME: humanovo-backend-prod
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (new account)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Invoke Lambda with synthetic GET /health event
+        run: |
+          cat > /tmp/health-event.json <<'EOF'
+          {
+            "version": "2.0",
+            "routeKey": "GET /health",
+            "rawPath": "/health",
+            "rawQueryString": "",
+            "headers": { "host": "diag.local", "accept": "*/*" },
+            "requestContext": {
+              "accountId": "diag",
+              "apiId": "diag",
+              "domainName": "diag.local",
+              "http": {
+                "method": "GET", "path": "/health",
+                "protocol": "HTTP/1.1", "sourceIp": "127.0.0.1",
+                "userAgent": "lambda-diag"
+              },
+              "requestId": "diag-req", "routeKey": "GET /health",
+              "stage": "$default", "time": "01/Jan/2026:00:00:00 +0000",
+              "timeEpoch": 1767225600000
+            },
+            "isBase64Encoded": false
+          }
+          EOF
+          aws lambda invoke \
+            --function-name "$LAMBDA_NAME" \
+            --region "$AWS_REGION" \
+            --cli-binary-format raw-in-base64-out \
+            --payload file:///tmp/health-event.json \
+            --cli-read-timeout 120 \
+            /tmp/health-out.json > /tmp/health-meta.json
+          echo "=== invoke metadata ==="
+          cat /tmp/health-meta.json
+          echo ""
+          echo "=== handler return (raw) ==="
+          cat /tmp/health-out.json
+          echo ""
