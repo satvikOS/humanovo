@@ -280,7 +280,17 @@ async def create_hypothesis(
 
     db.add(db_hypothesis)
     await db.commit()
-    await db.refresh(db_hypothesis)
+
+    # Re-fetch with evidence_refs eager-loaded: hypothesis_to_response
+    # iterates that relationship, and a lazy load on an async session
+    # (which a bare db.refresh leaves it as) raises MissingGreenlet.
+    # Every other handler here already selectinload's it.
+    result = await db.execute(
+        select(Hypothesis)
+        .options(selectinload(Hypothesis.evidence_refs))
+        .where(Hypothesis.id == db_hypothesis.id)
+    )
+    db_hypothesis = result.scalar_one()
 
     logger.info("Hypothesis created", hypothesis_id=str(db_hypothesis.id))
     return hypothesis_to_response(db_hypothesis)
