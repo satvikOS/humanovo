@@ -9,6 +9,7 @@ import createPlotlyComponent from 'react-plotly.js/factory'
 import Plotly from '../lib/plotlyMin'
 import type { Data, Layout } from 'plotly.js'
 import { plotlyConfig } from '../utils/plotlyConfig'
+import { THEMES, type PublicationTheme } from '../utils/publicationTheme'
 
 // 3D plot traces are heterogeneous (scatter3d / mesh3d / surface / cone /
 // streamtube / ...). Plotly's strict union narrowing on `Data` rejects
@@ -54,6 +55,47 @@ export interface PlotlyPlot3DProps {
   // Optional explicit categorical color array (used by Sankey nodes,
   // ignored by other chart types).
   colors?: string[]
+  // Publication theme. 'screen' keeps the dark-shell chrome; the
+  // journal themes (paper/nature/science/ieee) render dark text +
+  // dark gridlines on the light card so an exported 3D figure is
+  // journal-ready instead of grey-on-white with invisible white grid.
+  theme?: PublicationTheme
+}
+
+// Plotly renders to SVG/canvas where CSS custom properties don't
+// reliably resolve, so the 3D chrome (title/font/axis/grid/tick
+// colours) is a concrete-hex table keyed by publication theme.
+interface Plot3DChrome {
+  title: string; font: string; axis: string
+  grid: string; zero: string; tick: string
+  titleFamily: string; bodyFamily: string
+}
+const PLOT3D_CHROME: Record<PublicationTheme, Plot3DChrome> = {
+  screen: {
+    title: '#c8c8cc', font: '#8a8a92', axis: '#8a8a92',
+    grid: 'rgba(255,255,255,0.12)', zero: 'rgba(255,255,255,0.18)', tick: '#8a8a92',
+    titleFamily: THEMES.screen.titleFont, bodyFamily: THEMES.screen.bodyFont,
+  },
+  paper: {
+    title: '#111111', font: '#444444', axis: '#222222',
+    grid: 'rgba(0,0,0,0.10)', zero: 'rgba(0,0,0,0.22)', tick: '#333333',
+    titleFamily: THEMES.paper.titleFont, bodyFamily: THEMES.paper.bodyFont,
+  },
+  nature: {
+    title: '#000000', font: '#333333', axis: '#000000',
+    grid: 'rgba(0,0,0,0.09)', zero: 'rgba(0,0,0,0.20)', tick: '#222222',
+    titleFamily: THEMES.nature.titleFont, bodyFamily: THEMES.nature.bodyFont,
+  },
+  science: {
+    title: '#000000', font: '#222222', axis: '#000000',
+    grid: 'rgba(0,0,0,0.08)', zero: 'rgba(0,0,0,0.18)', tick: '#222222',
+    titleFamily: THEMES.science.titleFont, bodyFamily: THEMES.science.bodyFont,
+  },
+  ieee: {
+    title: '#000000', font: '#222222', axis: '#000000',
+    grid: 'rgba(0,0,0,0.10)', zero: 'rgba(0,0,0,0.20)', tick: '#222222',
+    titleFamily: THEMES.ieee.titleFont, bodyFamily: THEMES.ieee.bodyFont,
+  },
 }
 
 const CATEGORY_COLORS = [
@@ -121,10 +163,12 @@ export default function PlotlyPlot3D({
   sankeyNodes,
   sankeyLinks,
   colors,
+  theme = 'screen',
 }: PlotlyPlot3DProps) {
   // Resolve the chart type from either prop alias.
   const resolvedType: Chart3DType = chartType || type || 'scatter_3d'
   const { traces, layout } = useMemo(() => {
+    const chrome = PLOT3D_CHROME[theme] || PLOT3D_CHROME.screen
     const xs = data.map(d => d.x)
     const ys = data.map(d => d.y)
     const zs = data.map(d => d.z)
@@ -789,33 +833,37 @@ export default function PlotlyPlot3D({
 
     const is2D = resolvedType === 'pie_3d' || resolvedType === 'sankey'
     const baseLayout: Record<string, unknown> = {
-      title: title ? { text: title, font: { color: '#c8c8cc', size: 13, family: "'Inter', system-ui, sans-serif" } } : undefined,
+      title: title ? { text: title, font: { color: chrome.title, size: 13, family: chrome.titleFamily } } : undefined,
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: '#8a8a92', size: 10, family: "'Inter', system-ui, sans-serif" },
+      font: { color: chrome.font, size: 10, family: chrome.bodyFamily },
       // More generous margins give the 3D scene breathing room so axis
       // tick labels and the Z colorbar don't end up crammed together
       // in the corner.
       margin: { l: 20, r: 30, t: title ? 36 : 12, b: 20 },
       height,
       showlegend: hasCats || resolvedType === 'pie_3d',
-      legend: { font: { color: '#8a8a92', size: 10 }, bgcolor: 'rgba(0,0,0,0)', orientation: 'h' as const, y: -0.05 },
+      legend: { font: { color: chrome.font, size: 10, family: chrome.bodyFamily }, bgcolor: 'rgba(0,0,0,0)', orientation: 'h' as const, y: -0.05 },
     }
 
-    // Apply thin, curved colorbar to all traces with colorbars
+    // Thin curved colorbar, themed tick/title text, and a 4-significant-
+    // figure tick format so the scale doesn't print raw 15-digit floats.
+    const styleColorbar = (cb: Record<string, unknown>): Record<string, unknown> => ({
+      ...cb,
+      thickness: 10,
+      len: 0.6,
+      outlinewidth: 0,
+      borderwidth: 0,
+      tickfont: { size: 9, color: chrome.tick, family: chrome.bodyFamily },
+      titlefont: { size: 10, color: chrome.tick, family: chrome.bodyFamily },
+      tickformat: '.4~g',
+    })
     const applyColorbarStyle = (trace: Plot3DTrace): Plot3DTrace => {
       const marker = trace.marker as { colorbar?: Record<string, unknown> } | undefined
-      if (marker?.colorbar) {
-        marker.colorbar = {
-          ...marker.colorbar,
-          thickness: 10,
-          len: 0.6,
-          outlinewidth: 0,
-          borderwidth: 0,
-          tickfont: { size: 9, color: '#8a8a92' },
-          titlefont: { size: 10, color: '#8a8a92' },
-        }
-      }
+      if (marker?.colorbar) marker.colorbar = styleColorbar(marker.colorbar)
+      // surface / mesh3d / isosurface / cone carry the colorbar at the
+      // top level, not under marker — style those too.
+      if (trace.colorbar) trace.colorbar = styleColorbar(trace.colorbar as Record<string, unknown>)
       return trace
     }
 
@@ -827,12 +875,12 @@ export default function PlotlyPlot3D({
       // axis ticks against. Background stays transparent so the
       // chart card chrome dictates the surrounding bg, matching
       // every 2D chart's behaviour.
-      const axisFont = { size: 11, color: '#8a8a92' }
-      const tickFont = { size: 9, color: '#8a8a92' }
+      const axisFont = { size: 11, color: chrome.axis, family: chrome.bodyFamily }
+      const tickFont = { size: 9, color: chrome.tick, family: chrome.bodyFamily }
       const axisStyle = {
-        color: '#8a8a92',
-        gridcolor: 'rgba(255,255,255,0.12)',
-        zerolinecolor: 'rgba(255,255,255,0.18)',
+        color: chrome.axis,
+        gridcolor: chrome.grid,
+        zerolinecolor: chrome.zero,
         showbackground: true,
         backgroundcolor: 'rgba(0,0,0,0)',
         gridwidth: 1,
@@ -861,7 +909,7 @@ export default function PlotlyPlot3D({
     const styledTraces = buildTraces().map(applyColorbarStyle)
 
     return { traces: styledTraces, layout: baseLayout }
-  }, [data, resolvedType, title, xLabel, yLabel, zLabel, pointSize, colorScheme, height, surfaceFunction, sankeyNodes, sankeyLinks, colors])
+  }, [data, resolvedType, title, xLabel, yLabel, zLabel, pointSize, colorScheme, height, surfaceFunction, sankeyNodes, sankeyLinks, colors, theme])
 
   return (
     <div style={{ width: '100%', height }}>

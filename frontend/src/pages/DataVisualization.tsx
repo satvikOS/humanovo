@@ -2008,6 +2008,7 @@ export default function DataVisualization() {
             yLabel={o.yLabel || 'Y'}
             zLabel={o.zLabel || 'Z'}
             height={height}
+            theme={o.pubTheme || 'screen'}
             colorScheme={data.some(d => d.category) ? 'categorical' : 'viridis'}
             pointSize={o.markerSize || 3}
             surfaceFunction={type.includes('surface') || type === 'wireframe_3d' || type === 'contour_3d'
@@ -2383,6 +2384,7 @@ export default function DataVisualization() {
             // `sankeyNodes` and `sankeyLinks` directly.
             data={[]}
             height={height}
+            theme={o.pubTheme || 'screen'}
             xLabel={o.xLabel || 'Source'}
             yLabel={o.yLabel || 'Flow'}
             zLabel={o.zLabel || 'Target'}
