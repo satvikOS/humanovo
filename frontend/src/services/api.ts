@@ -53,6 +53,41 @@ apiClient.interceptors.request.use(
 // and the caller already handles the error).
 const SILENT_HEADER = 'X-Silent-Error'
 
+/**
+ * FastAPI / Pydantic v2 returns 422 validation errors as
+ * `detail: [{type, loc, msg, input, ctx}, ...]` — an array of objects.
+ * Multiple call sites do `setError(err.response.data.detail)`, and
+ * rendering that object as a React child crashes the app (minified
+ * React error #31). This flattens `detail` to a readable string in
+ * place, so every downstream consumer gets a safe string.
+ */
+export function normalizeErrorDetail(error: unknown): void {
+  const data = (error as { response?: { data?: unknown } })?.response?.data
+  if (!data || typeof data !== 'object') return
+  const rec = data as Record<string, unknown>
+  const d = rec.detail
+  if (d == null || typeof d === 'string') return
+  if (Array.isArray(d)) {
+    rec.detail = d
+      .map((item) => {
+        if (item && typeof item === 'object') {
+          const o = item as Record<string, unknown>
+          const msg = typeof o.msg === 'string' ? o.msg : ''
+          const loc = Array.isArray(o.loc) && o.loc.length
+            ? String(o.loc[o.loc.length - 1])
+            : ''
+          return loc && msg ? `${loc}: ${msg}` : msg || JSON.stringify(item)
+        }
+        return String(item)
+      })
+      .filter(Boolean)
+      .join('; ')
+  } else {
+    const o = d as Record<string, unknown>
+    rec.detail = typeof o.msg === 'string' ? o.msg : JSON.stringify(d)
+  }
+}
+
 function describeError(error: {
   response?: { status?: number; data?: unknown; config?: unknown }
   config?: { method?: string; url?: string; headers?: Record<string, unknown> }
@@ -100,6 +135,9 @@ apiClient.interceptors.response.use(
     return response
   },
   (error) => {
+    // Flatten any Pydantic 422 detail array to a string before it
+    // reaches a `setError(...)` call site (would crash React #31).
+    normalizeErrorDetail(error)
     const { message, silent } = describeError(error)
     if (error.response) {
       console.error(`[API] ${message}:`, error.response.data)

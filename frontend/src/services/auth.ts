@@ -14,6 +14,7 @@
  */
 
 import axios, { type AxiosInstance } from 'axios'
+import { normalizeErrorDetail } from './api'
 
 // ─── Types (mirror backend response shapes) ─────────────────────────
 
@@ -125,6 +126,19 @@ const authClient: AxiosInstance = axios.create({
   baseURL: authBase,
   timeout: 15_000,
 })
+
+// Flatten Pydantic 422 `detail` arrays to a string before the error
+// reaches the Login/Signup pages — they do `setError(detail)`, and a
+// raw {type,loc,msg,...} object rendered as a React child crashes the
+// app (minified React #31). Seen when a non-email value is submitted
+// to the login form.
+authClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    normalizeErrorDetail(error)
+    return Promise.reject(error)
+  },
+)
 
 // Mock-auth bypass for headed E2E + dev environments. When a caller
 // submits the literal credentials `1234 / 1234`, fabricate a token
