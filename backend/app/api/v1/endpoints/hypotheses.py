@@ -285,21 +285,15 @@ async def create_hypothesis(
     # iterates that relationship, and a lazy load on an async session
     # (which a bare db.refresh leaves it as) raises MissingGreenlet.
     # Every other handler here already selectinload's it.
-    try:
-        result = await db.execute(
-            select(Hypothesis)
-            .options(selectinload(Hypothesis.evidence_refs))
-            .where(Hypothesis.id == db_hypothesis.id)
-        )
-        db_hypothesis = result.scalar_one()
-        logger.info("Hypothesis created", hypothesis_id=str(db_hypothesis.id))
-        return hypothesis_to_response(db_hypothesis)
-    except Exception as e:  # TEMP DIAGNOSTIC (revert)
-        import traceback
-        raise HTTPException(
-            status_code=500,
-            detail=f"{type(e).__name__}: {e} | {traceback.format_exc()[-700:]}",
-        )
+    result = await db.execute(
+        select(Hypothesis)
+        .options(selectinload(Hypothesis.evidence_refs))
+        .where(Hypothesis.id == db_hypothesis.id)
+    )
+    db_hypothesis = result.scalar_one()
+
+    logger.info("Hypothesis created", hypothesis_id=str(db_hypothesis.id))
+    return hypothesis_to_response(db_hypothesis)
 
 
 @router.post("/generate", response_model=GenerationTaskResponse, status_code=202)
