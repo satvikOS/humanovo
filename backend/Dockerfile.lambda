@@ -31,6 +31,19 @@ RUN dnf install -y --setopt=install_weak_deps=0 \
 # code-only changes don't reinstall every dependency.
 COPY requirements.txt ${LAMBDA_TASK_ROOT}/
 
+# Install the CPU-only PyTorch wheel BEFORE the rest of requirements.
+# The default PyPI torch wheel bundles several GB of CUDA libraries
+# (nvidia-cublas, nvidia-cudnn, nvidia-cusparse, triton, ...) that a
+# GPU-less Lambda can never use. They bloat the image and slow the
+# cold-start container provisioning that caused intermittent
+# API-Gateway 500s on the first request after idle. The CPU wheel
+# from PyTorch's CPU index pulls none of them. Installed first so the
+# requirements.txt resolve below sees `torch` already satisfied and
+# does not pull the CUDA build.
+RUN pip install --no-cache-dir torch \
+        --index-url https://download.pytorch.org/whl/cpu \
+        -t ${LAMBDA_TASK_ROOT}
+
 # `-t ${LAMBDA_TASK_ROOT}` is the Lambda-recommended layout: deps
 # go next to the handler so `import app.main` Just Works without a
 # venv on PATH.
