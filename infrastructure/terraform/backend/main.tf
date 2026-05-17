@@ -873,6 +873,35 @@ resource "aws_lambda_provisioned_concurrency_config" "live" {
   provisioned_concurrent_executions = var.provisioned_concurrency
 }
 
+# ─── Cold-start warmer ──────────────────────────────────────────────
+# Provisioned concurrency is the real cold-start fix but is blocked on
+# the account's Lambda concurrency quota (see var.provisioned_concurrency).
+# Until that lands, a scheduled EventBridge ping invokes the `live`
+# alias every few minutes with {"action":"warmup"} so an execution
+# environment (with the app already imported) stays warm and beta HTTP
+# traffic dodges the large-image cold start. Costs are negligible
+# (~11k sub-second invokes/month).
+resource "aws_cloudwatch_event_rule" "warmer" {
+  name                = "${local.full_name}-lambda-warmer"
+  description         = "Keeps the backend Lambda warm to avoid cold-start 500s"
+  schedule_expression = "rate(4 minutes)"
+}
+
+resource "aws_cloudwatch_event_target" "warmer" {
+  rule  = aws_cloudwatch_event_rule.warmer.name
+  arn   = aws_lambda_alias.live.arn
+  input = jsonencode({ action = "warmup" })
+}
+
+resource "aws_lambda_permission" "warmer" {
+  statement_id  = "AllowEventBridgeWarmer"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.backend.function_name
+  qualifier     = aws_lambda_alias.live.name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.warmer.arn
+}
+
 # ─── API Gateway HTTP API v2 ────────────────────────────────────────
 
 resource "aws_apigatewayv2_api" "main" {

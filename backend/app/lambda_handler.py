@@ -70,14 +70,21 @@ def _run_ingest(event: dict) -> dict:
 
 
 def handler(event, context):
-    """Lambda handler. Routes out-of-band maintenance invokes
-    ({"action": "migrate"} / {"action": "ingest"}) to their runners;
+    """Lambda handler. Routes out-of-band invokes
+    ({"action": "warmup" | "migrate" | "ingest"}) to their handlers;
     everything else is a normal API Gateway v2 request handled by
     Mangum.
 
     API Gateway v2 HTTP events are dicts with keys like `version`,
     `routeKey`, `rawPath` — never a top-level `action` — so these
     branches can't be reached by ordinary traffic."""
+    if isinstance(event, dict) and event.get("action") == "warmup":
+        # Scheduled EventBridge ping that keeps an execution environment
+        # (with `app.main` already imported at module load) warm, so
+        # beta HTTP traffic doesn't pay the large-image cold start.
+        # Returns immediately — the container staying alive is the
+        # whole point.
+        return {"ok": True, "warm": True}
     if isinstance(event, dict) and event.get("action") == "migrate":
         try:
             return _run_migrations()
