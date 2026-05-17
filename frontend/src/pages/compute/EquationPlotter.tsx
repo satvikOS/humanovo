@@ -9,6 +9,7 @@ import {
 } from 'react-icons/fi'
 import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport'
 import PublicationFigure from '../../components/PublicationFigure'
+import { makeTickFormatter } from '../../utils/publicationTheme'
 import { toast } from '../../contexts/ToastContext'
 
 // ═══════════════════════════════════════════════════════════════════
@@ -824,35 +825,43 @@ export default function EquationPlotter() {
           subtitle={overlays.filter(o => o.enabled).length > 0 ? `with ${overlays.filter(o => o.enabled).length} overlay(s)` : undefined}
           exportName={`equation-${(expr || 'plot').replace(/[^\w-]+/g, '_')}`}
         >
-          {/* Chart styling pulls concrete hex (not CSS vars) so the
-              chart renders consistently in any host context — vars
-              like var(--color-text) resolve to white on the dark
-              shell, which became invisible if the chart was ever
-              dropped onto a white background (export, screenshot).
-              Same approach as DataVisualization's screen theme. */}
-          <ResponsiveContainer width="100%" height={Math.max(280, (chartHostRef.current?.clientHeight || 320) - 80)}>
-            <LineChart data={chartDataWithDerivative} margin={{ top: 12, right: 24, bottom: 32, left: 24 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(168, 176, 186, 0.18)" />
-              <XAxis dataKey="x" tick={{ fontSize: 10, fill: '#A8B0BA' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="#A8B0BA" />
-              <YAxis tick={{ fontSize: 10, fill: '#A8B0BA' }} tickFormatter={v => typeof v === 'number' ? (Math.abs(v) >= 1000 ? v.toExponential(0) : String(Math.round(v * 100) / 100)) : v} stroke="#A8B0BA" width={56} />
-              <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: '#E5E7EB' }} cursor={{ stroke: '#A8B0BA', strokeDasharray: '4 4' }} labelStyle={{ color: '#A8B0BA' }} formatter={(value: unknown, name: unknown) => { const n = typeof value === 'number' ? value : Number(value); return [isFinite(n) ? n.toFixed(4) : 'NaN', name === 'dy' ? "f'(x)" : ''] }} labelFormatter={(label: unknown) => `x = ${label}`} />
-              <Legend wrapperStyle={{ fontSize: 10, color: '#E5E7EB' }} />
-              {quadrantInfo.showXRef && <ReferenceLine y={0} stroke="#A8B0BA" strokeDasharray="4 4" strokeOpacity={0.5} />}
-              {quadrantInfo.showYRef && <ReferenceLine x={0} stroke="#A8B0BA" strokeDasharray="4 4" strokeOpacity={0.5} />}
-              {/* Primary curve — muted ocean blue (#5B8DB8) instead of
-                  var(--color-text) which inverted between dark/light
-                  hosts. Solid stroke for the function itself, dashed
-                  for the derivative, dotted for overlays — the
-                  publication convention to keep them disambiguatable
-                  in B&W reprints. */}
-              <Line type="monotone" dataKey="y" stroke="#5B8DB8" strokeWidth={2} dot={false} name={expr} isAnimationActive={false} />
-              {showDerivative && <Line type="monotone" dataKey="dy" stroke="#C4956A" strokeWidth={1.5} strokeDasharray="6 3" dot={false} name="f'(x)" isAnimationActive={false} connectNulls={false} />}
-              {overlays.map((o, idx) => o.enabled ? (
-                <Line key={idx} type="monotone" dataKey={`o${idx}`} stroke={OVERLAY_COLORS[idx]} strokeWidth={1.5} strokeDasharray="2 4" dot={false} name={o.expr} isAnimationActive={false} connectNulls={false} />
-              ) : null)}
-              <Brush dataKey="x" height={14} stroke="#A8B0BA" fill="rgba(168,176,186,0.06)" travellerWidth={6} />
-            </LineChart>
-          </ResponsiveContainer>
+          {(ctx) => {
+            // Axes/grid follow the live publication theme picked in the
+            // figure settings drawer. Screen theme keeps the legible
+            // grey tuned for the dark shell; journal themes use their
+            // own (light) axis colours so an exported figure is
+            // journal-ready. Curve colours stay fixed — they carry
+            // semantic roles (solid f, dashed f', dotted overlays).
+            const ts = ctx.themeStyle
+            const onScreen = ts.bg === 'transparent'
+            const axisCol = onScreen ? '#A8B0BA' : ts.axisColor
+            const gridCol = onScreen ? 'rgba(168, 176, 186, 0.18)' : ts.gridColor
+            const textCol = onScreen ? '#E5E7EB' : ts.textColor
+            const fmtX = makeTickFormatter(ctx.tickFormatX, 2)
+            const fmtY = makeTickFormatter(ctx.tickFormatY, 2)
+            return (
+              <ResponsiveContainer width="100%" height={Math.max(280, (chartHostRef.current?.clientHeight || 320) - 80)}>
+                <LineChart data={chartDataWithDerivative} margin={{ top: 12, right: 24, bottom: 32, left: 24 }}>
+                  <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} />
+                  <XAxis dataKey="x" tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtX} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} />
+                  <YAxis tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtY} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} width={56} />
+                  <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} labelStyle={{ color: axisCol }} formatter={(value: unknown, name: unknown) => { const n = typeof value === 'number' ? value : Number(value); return [isFinite(n) ? n.toFixed(4) : 'NaN', name === 'dy' ? "f'(x)" : ''] }} labelFormatter={(label: unknown) => `x = ${label}`} />
+                  <Legend wrapperStyle={{ fontSize: 10 * ctx.fs, color: textCol, fontFamily: ts.bodyFont }} />
+                  {quadrantInfo.showXRef && <ReferenceLine y={0} stroke={axisCol} strokeDasharray="4 4" strokeOpacity={0.5} />}
+                  {quadrantInfo.showYRef && <ReferenceLine x={0} stroke={axisCol} strokeDasharray="4 4" strokeOpacity={0.5} />}
+                  {/* Solid stroke for the function, dashed for the
+                      derivative, dotted for overlays — keeps them
+                      disambiguatable in B&W reprints. */}
+                  <Line type="monotone" dataKey="y" stroke="#5B8DB8" strokeWidth={2} dot={false} name={expr} isAnimationActive={false} />
+                  {showDerivative && <Line type="monotone" dataKey="dy" stroke="#C4956A" strokeWidth={1.5} strokeDasharray="6 3" dot={false} name="f'(x)" isAnimationActive={false} connectNulls={false} />}
+                  {overlays.map((o, idx) => o.enabled ? (
+                    <Line key={idx} type="monotone" dataKey={`o${idx}`} stroke={OVERLAY_COLORS[idx]} strokeWidth={1.5} strokeDasharray="2 4" dot={false} name={o.expr} isAnimationActive={false} connectNulls={false} />
+                  ) : null)}
+                  <Brush dataKey="x" height={14} stroke={axisCol} fill="rgba(168,176,186,0.06)" travellerWidth={6} />
+                </LineChart>
+              </ResponsiveContainer>
+            )
+          }}
         </PublicationFigure>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--color-text-muted)' }}>
@@ -989,19 +998,30 @@ export default function EquationPlotter() {
             caption={`Solved via Runge-Kutta-Fehlberg (RKF45). State trajectories for ${activeODE.vars.join(', ')}.`}
             exportName={`ode-${activeODE.id}`}
           >
-            <ResponsiveContainer width="100%" height={Math.max(280, (chartHostRef.current?.clientHeight || 320) - 80)}>
-              <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.5} />
-                <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" width={56} />
-                <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                {activeODE.vars.map((v, i) => (
-                  <Line key={v} type="monotone" dataKey={v} stroke={ODE_COLORS[i % ODE_COLORS.length]} strokeWidth={1.5} strokeOpacity={0.7} dot={false} name={v} isAnimationActive={false} />
-                ))}
-                <Brush dataKey="t" height={14} stroke="var(--color-text-muted)" fill="var(--glass-bg)" travellerWidth={6} />
-              </LineChart>
-            </ResponsiveContainer>
+            {(ctx) => {
+              const ts = ctx.themeStyle
+              const onScreen = ts.bg === 'transparent'
+              const axisCol = onScreen ? 'var(--color-text-muted)' : ts.axisColor
+              const gridCol = onScreen ? 'var(--glass-border)' : ts.gridColor
+              const textCol = onScreen ? 'var(--color-text)' : ts.textColor
+              const fmtX = makeTickFormatter(ctx.tickFormatX, 2)
+              const fmtY = makeTickFormatter(ctx.tickFormatY, 2)
+              return (
+                <ResponsiveContainer width="100%" height={Math.max(280, (chartHostRef.current?.clientHeight || 320) - 80)}>
+                  <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
+                    <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.5} />
+                    <XAxis dataKey="t" tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtX} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
+                    <YAxis tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtY} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} width={56} />
+                    <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} />
+                    <Legend wrapperStyle={{ fontSize: 10 * ctx.fs, color: textCol, fontFamily: ts.bodyFont }} />
+                    {activeODE.vars.map((v, i) => (
+                      <Line key={v} type="monotone" dataKey={v} stroke={ODE_COLORS[i % ODE_COLORS.length]} strokeWidth={1.5} strokeOpacity={0.7} dot={false} name={v} isAnimationActive={false} />
+                    ))}
+                    <Brush dataKey="t" height={14} stroke={axisCol} fill="var(--glass-bg)" travellerWidth={6} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )
+            }}
           </PublicationFigure>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--color-text-muted)' }}>

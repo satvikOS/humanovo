@@ -37,6 +37,7 @@ import ImagingPanel, { IMAGING_EVENT } from './ImagingPanel'
 import { getPlotBlob } from '../../utils/plotExport'
 import { plotlyConfig } from '../../utils/plotlyConfig'
 import PublicationFigure from '../../components/PublicationFigure'
+import { getPalette, makeTickFormatter } from '../../utils/publicationTheme'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
 const SCRIPT_KEY = 'compute-workstation-script'          // legacy single-script key
@@ -8397,22 +8398,6 @@ export default function Workstation() {
 // Monochrome palette — matches the rest of the Humanovo platform. Shades
 // step down so multiple series remain distinguishable without introducing
 // category colors.
-// Series palette uses Humanovo theme accent CSS vars so the colours
-// stay legible in both light and dark mode. The previous monochrome
-// grey palette (#ededed → #525252) was tuned for the dark theme and
-// became invisible on the Results overlay's white plot card under
-// light mode. Six distinct accents cover most multi-series biomedical
-// plots; deeper indices loop. Recharts forwards stroke/fill straight
-// into the SVG attribute so CSS vars resolve at render time.
-const SERIES_COLORS = [
-  'var(--color-accent-blue)',
-  'var(--color-accent-orange)',
-  'var(--color-accent-green)',
-  'var(--color-accent-purple)',
-  'var(--color-accent-pink)',
-  'var(--color-accent-cyan)',
-]
-
 // Per-figure render options surfaced through the figure-panel chips.
 interface PlotOpts {
   grid: boolean
@@ -8626,49 +8611,6 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
   // both the regular workstation surface AND the Results overlay's
   // dimmed scrim. Without this bump the chart effectively dissolves into
   // its container under the overlay — verified live in-browser.
-  const common = (
-    <>
-      {opts.grid && <CartesianGrid stroke="var(--color-border-strong)" strokeDasharray="3 3" />}
-      {/* 4-quadrant: draw prominent axis lines at x=0 and y=0 */}
-      {fourQuadrant && hasNegY && hasPosY && (
-        <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeWidth={1} strokeDasharray="" />
-      )}
-      {fourQuadrant && hasNegX && hasPosX && (
-        <ReferenceLine x={0} stroke="var(--color-text-muted)" strokeWidth={1} strokeDasharray="" />
-      )}
-      <XAxis
-        dataKey="x"
-        type="number"
-        scale={xScale}
-        domain={xDomain}
-        allowDataOverflow={opts.logX}
-        stroke="var(--color-border-strong)"
-        tick={{ fontSize: 11, fill: 'var(--color-text-secondary)' }}
-        label={plot.xLabel ? { value: plot.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--color-text-secondary)', fontSize: 11 } : undefined}
-      />
-      <YAxis
-        scale={yScale}
-        domain={yDomain}
-        allowDataOverflow={opts.logY}
-        stroke="var(--color-border-strong)"
-        tick={{ fontSize: 11, fill: 'var(--color-text-secondary)' }}
-        label={plot.yLabel ? { value: plot.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--color-text-secondary)', fontSize: 11 } : undefined}
-      />
-      <Tooltip
-        contentStyle={{
-          background: 'var(--color-bg-elevated)',
-          border: '1px solid var(--color-border-strong)',
-          borderRadius: 10,
-          fontSize: 11,
-          color: 'var(--color-text)',
-        }}
-      />
-      {showLegend && (
-        <Legend wrapperStyle={{ fontSize: 11, color: 'var(--color-text-secondary)' }} />
-      )}
-    </>
-  )
-
   return (
     <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
       <PublicationFigure
@@ -8676,46 +8618,124 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
         subtitle={plot.series.length > 1 ? `${plot.series.length} series` : undefined}
         exportName={(plot.title || `figure-${kind}`).replace(/[^\w-]+/g, '_')}
       >
-        <div style={{ width: '100%', height: Math.max(280, 420) }}>
-          <ResponsiveContainer width="100%" height="100%">
-            {kind === 'bar' ? (
-              <BarChart data={data}>
-                {common}
-                {plot.series.map((s, i) => (
-                  <Bar key={s.name} dataKey={s.name} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />
-                ))}
-              </BarChart>
-            ) : kind === 'scatter' ? (
-              <ScatterChart>
-                {common}
-                {plot.series.map((s, i) => (
-                  <Scatter
-                    key={s.name}
-                    name={s.name}
-                    data={s.x.map((x, j) => ({ x, [s.name]: s.y[j] }))}
-                    fill={SERIES_COLORS[i % SERIES_COLORS.length]}
-                    dataKey={s.name}
-                  />
-                ))}
-              </ScatterChart>
-            ) : (
-              <LineChart data={data}>
-                {common}
-                {plot.series.map((s, i) => (
-                  <Line
-                    key={s.name}
-                    type="monotone"
-                    dataKey={s.name}
-                    stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
-                    strokeWidth={1.8}
-                    dot={false}
-                    isAnimationActive={false}
-                  />
-                ))}
-              </LineChart>
-            )}
-          </ResponsiveContainer>
-        </div>
+        {(ctx) => {
+          // Series colours come from the live publication palette the
+          // user picked in the figure settings drawer (default is the
+          // muted CB-safe palette) — never raw chrome accents, so an
+          // exported figure is journal-ready.
+          const colors = ctx.customColors && ctx.customColors.length
+            ? ctx.customColors
+            : getPalette(ctx.palette)
+          const ts = ctx.themeStyle
+          // Screen theme renders on the dark Workstation surface / the
+          // dimmed Results overlay, so keep the high-contrast border
+          // tokens there; journal themes use their own (light) colours.
+          const onScreen = ts.bg === 'transparent'
+          const axisStroke = onScreen ? 'var(--color-border-strong)' : ts.axisColor
+          const gridStroke = onScreen ? 'var(--color-border-strong)' : ts.gridColor
+          const tickFill = onScreen ? 'var(--color-text-secondary)' : ts.mutedColor
+          const labelFill = onScreen ? 'var(--color-text-secondary)' : ts.textColor
+          const refStroke = onScreen ? 'var(--color-text-muted)' : ts.axisColor
+          const tickFontSize = 11 * ctx.fs
+          const fmtX = makeTickFormatter(ctx.tickFormatX, 2)
+          const fmtY = makeTickFormatter(ctx.tickFormatY, 2)
+          const common = (
+            <>
+              {opts.grid && (
+                <CartesianGrid
+                  stroke={gridStroke}
+                  strokeWidth={onScreen ? 1 : ts.gridStrokeWidth}
+                  strokeDasharray={ts.gridDash ?? ''}
+                />
+              )}
+              {/* 4-quadrant: draw prominent axis lines at x=0 and y=0 */}
+              {fourQuadrant && hasNegY && hasPosY && (
+                <ReferenceLine y={0} stroke={refStroke} strokeWidth={1} strokeDasharray="" />
+              )}
+              {fourQuadrant && hasNegX && hasPosX && (
+                <ReferenceLine x={0} stroke={refStroke} strokeWidth={1} strokeDasharray="" />
+              )}
+              <XAxis
+                dataKey="x"
+                type="number"
+                scale={xScale}
+                domain={xDomain}
+                allowDataOverflow={opts.logX}
+                stroke={axisStroke}
+                strokeWidth={ts.axisStrokeWidth}
+                tick={{ fontSize: tickFontSize, fill: tickFill, fontFamily: ts.bodyFont }}
+                tickFormatter={fmtX}
+                label={plot.xLabel ? { value: plot.xLabel, position: 'insideBottom', offset: -2, fill: labelFill, fontSize: tickFontSize, fontFamily: ts.bodyFont } : undefined}
+              />
+              <YAxis
+                scale={yScale}
+                domain={yDomain}
+                allowDataOverflow={opts.logY}
+                stroke={axisStroke}
+                strokeWidth={ts.axisStrokeWidth}
+                tick={{ fontSize: tickFontSize, fill: tickFill, fontFamily: ts.bodyFont }}
+                tickFormatter={fmtY}
+                label={plot.yLabel ? { value: plot.yLabel, angle: -90, position: 'insideLeft', fill: labelFill, fontSize: tickFontSize, fontFamily: ts.bodyFont } : undefined}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: ts.tooltipBg,
+                  border: '1px solid var(--color-border-strong)',
+                  borderRadius: 10,
+                  fontSize: tickFontSize,
+                  color: ts.textColor,
+                  fontFamily: ts.bodyFont,
+                }}
+              />
+              {showLegend && (
+                <Legend wrapperStyle={{ fontSize: tickFontSize, color: tickFill, fontFamily: ts.bodyFont }} />
+              )}
+            </>
+          )
+          return (
+            <div style={{ width: '100%', height: Math.max(280, 420) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                {kind === 'bar' ? (
+                  <BarChart data={data}>
+                    {common}
+                    {plot.series.map((s, i) => (
+                      <Bar key={s.name} dataKey={s.name} fill={colors[i % colors.length]} isAnimationActive={false} />
+                    ))}
+                  </BarChart>
+                ) : kind === 'scatter' ? (
+                  <ScatterChart>
+                    {common}
+                    {plot.series.map((s, i) => (
+                      <Scatter
+                        key={s.name}
+                        name={s.name}
+                        data={s.x.map((x, j) => ({ x, [s.name]: s.y[j] }))}
+                        fill={colors[i % colors.length]}
+                        dataKey={s.name}
+                        isAnimationActive={false}
+                      />
+                    ))}
+                  </ScatterChart>
+                ) : (
+                  <LineChart data={data}>
+                    {common}
+                    {plot.series.map((s, i) => (
+                      <Line
+                        key={s.name}
+                        type="monotone"
+                        dataKey={s.name}
+                        stroke={colors[i % colors.length]}
+                        strokeWidth={1.8}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                    ))}
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          )
+        }}
       </PublicationFigure>
     </div>
   )

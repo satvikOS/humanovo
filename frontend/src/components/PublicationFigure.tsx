@@ -26,15 +26,36 @@ import {
   THEMES, FONT_SCALE_MULT, ASPECT_RATIO, CB_SIM_FILTER,
   PALETTES, CB_SAFE_PALETTES, normalizeHex,
   type PublicationTheme, type FontScale, type AspectPreset, type CBlindSim,
-  type TickFormat,
+  type TickFormat, type ThemeStyle,
 } from '../utils/publicationTheme'
+
+// Render context handed to a function-as-children caller so the chart
+// inside can apply the live publication theme/palette/tick-format the
+// user picked in the settings drawer. Without this a chart wrapped in
+// PublicationFigure renders with its own hardcoded styling and the
+// drawer controls are dead UI.
+export interface PubFigureRenderContext {
+  theme: PublicationTheme
+  themeStyle: ThemeStyle
+  fs: number
+  palette: string
+  customColors: string[] | undefined
+  tickFormatX: TickFormat
+  tickFormatY: TickFormat
+  cbSim: CBlindSim
+  watermark: string
+  onChange: () => void
+}
 
 export interface PublicationFigureProps {
   title?: string
   subtitle?: string
   caption?: string
   source?: string
-  children: React.ReactNode
+  // Plain nodes render as-is; a function child receives the live
+  // publication context (theme/palette/tick-format) so the chart can
+  // style itself to match the settings drawer.
+  children: React.ReactNode | ((ctx: PubFigureRenderContext) => React.ReactNode)
   // Initial publication state (caller-controlled). Kept as state
   // inside the wrapper so authors can tweak the figure inline
   // without piping every option through a parent component.
@@ -210,7 +231,7 @@ export default function PublicationFigure({
   // the publication theme to their own axes/ticks/colors. Retrieved
   // via React's `cloneElement` pattern when caller wraps a known
   // component, OR ignored if caller renders plain SVG.
-  const ctx = {
+  const ctx: PubFigureRenderContext = {
     theme, themeStyle, fs, palette, customColors,
     tickFormatX, tickFormatY, cbSim, watermark,
     onChange: notify,
@@ -449,7 +470,7 @@ export default function PublicationFigure({
           '--pub-tooltip-bg': themeStyle.tooltipBg,
           '--pub-font-mult': fs,
         } as React.CSSProperties}>
-          {typeof children === 'function' ? (children as (c: typeof ctx) => React.ReactNode)(ctx) : children}
+          {typeof children === 'function' ? children(ctx) : children}
         </div>
 
         {/* Watermark */}

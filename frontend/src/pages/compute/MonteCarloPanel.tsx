@@ -1123,25 +1123,35 @@ export default function MonteCarloPanel() {
                         subtitle={`μ=${stats.mean.toFixed(3)} · 95% CI [${stats.ci95Low.toFixed(3)}, ${stats.ci95High.toFixed(3)}]`}
                         exportName={`mc-${activeSim?.id || 'distribution'}`}
                       >
-                      <ResponsiveContainer width="100%" height={420}>
+                      {(ctx) => {
+                        // Axes follow the live publication theme; the
+                        // statistical reference lines (Mean/Median/CI)
+                        // keep their semantic colours.
+                        const ts = ctx.themeStyle
+                        const onScreen = ts.bg === 'transparent'
+                        const axisCol = onScreen ? 'var(--color-text-muted)' : ts.axisColor
+                        const gridCol = onScreen ? 'var(--glass-border)' : ts.gridColor
+                        const textCol = onScreen ? 'var(--color-text)' : ts.textColor
+                        return (
+                        <ResponsiveContainer width="100%" height={420}>
                         {/* Generous margins so ReferenceLine labels
                             ("Mean", "Median", "2.5%", "97.5%") and the
-                            axis labels don't get clipped by the chart
-                            viewport — was 8/16/30/8 which cut off the
-                            top labels and the y-axis title on the left. */}
+                            axis labels don't get clipped. */}
                         <BarChart data={histogramEnriched} margin={{ top: 28, right: 36, bottom: 38, left: 36 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
-                          <XAxis dataKey="bin" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} interval="preserveStartEnd" stroke="var(--glass-border)" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                          <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                          <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
+                          <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.4} />
+                          <XAxis dataKey="bin" tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} interval="preserveStartEnd" stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
+                          <YAxis tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
+                          <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} />
                           {ciLoBin && <ReferenceLine x={ciLoBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '2.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />}
                           {ciHiBin && <ReferenceLine x={ciHiBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '97.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />}
                           {medianBin && <ReferenceLine x={medianBin} stroke="#8B7EAF" strokeWidth={1.5} strokeDasharray="3 3" label={{ value: 'Median', position: 'top', fontSize: 9, fill: '#8B7EAF' }} />}
                           {meanBin && <ReferenceLine x={meanBin} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#5B8DB8' }} />}
-                          <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+                          <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.35} radius={[2, 2, 0, 0]} isAnimationActive={false} />
                           {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#5B8DB8" fill="var(--glass-bg)" travellerWidth={6} />}
                         </BarChart>
                       </ResponsiveContainer>
+                        )
+                      }}
                       </PublicationFigure>
                     )
                   })()}
@@ -1153,50 +1163,71 @@ export default function MonteCarloPanel() {
                       caption="The shaded band shows the standard error of the running mean tapering as n grows — a flat envelope at large n indicates the simulation has stabilized."
                       exportName={`mc-convergence-${activeSim?.id || 'sim'}`}
                     >
+                    {(ctx) => {
+                      const ts = ctx.themeStyle
+                      const onScreen = ts.bg === 'transparent'
+                      const axisCol = onScreen ? 'var(--color-text-muted)' : ts.axisColor
+                      const gridCol = onScreen ? 'var(--glass-border)' : ts.gridColor
+                      const textCol = onScreen ? 'var(--color-text)' : ts.textColor
+                      // The CI-band mask Area is painted with the plot
+                      // background so it hides the lower band; that must
+                      // track the theme background, not the dark shell.
+                      const maskFill = onScreen ? 'var(--color-bg)' : ts.bg
+                      return (
                     <ResponsiveContainer width="100%" height={420}>
                       {/* ComposedChart so the ±1.96·SEM band renders
-                          behind the running-mean line. The band tapers
-                          as n grows, which is the "convergence" story
-                          — a flat running mean alone was too straight
-                          to be readable (user feedback). Generous
-                          margins keep the "Final: N.NN" right-side
-                          label and all axis titles on-screen. */}
+                          behind the running-mean line. */}
                       <ComposedChart data={results.convergence} margin={{ top: 28, right: 64, bottom: 38, left: 36 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
-                        <XAxis dataKey="iteration" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Iteration', position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} domain={['auto', 'auto']} />
-                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} />
-                        <Legend wrapperStyle={{ fontSize: 10 }} />
+                        <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.4} />
+                        <XAxis dataKey="iteration" tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: 'Iteration', position: 'insideBottom', offset: -12, fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
+                        <YAxis tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} domain={['auto', 'auto']} />
+                        <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} />
+                        <Legend wrapperStyle={{ fontSize: 10 * ctx.fs, color: textCol, fontFamily: ts.bodyFont }} />
                         <ReferenceLine y={stats.mean} stroke="#5B8DB8" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Final: ${fmt(stats.mean)}`, position: 'right', fontSize: 9, fill: '#5B8DB8' }} />
                         {/* 95% CI band — two stacked Areas. Recharts
                             doesn't have a native range area, so we paint
                             the high line with fillOpacity and mask the
-                            low line behind it with the same fill that
-                            matches the plot background. */}
+                            low line behind it with the plot background. */}
                         <Area type="monotone" dataKey="ciHigh" name="95% CI (upper)" stroke="none" fill="#8B7EAF" fillOpacity={0.18} activeDot={false} isAnimationActive={false} />
-                        <Area type="monotone" dataKey="ciLow"  name="95% CI (lower)" stroke="none" fill="var(--color-bg)" fillOpacity={1} activeDot={false} isAnimationActive={false} legendType="none" />
-                        <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8B7EAF" strokeWidth={2} dot={false} />
+                        <Area type="monotone" dataKey="ciLow"  name="95% CI (lower)" stroke="none" fill={maskFill} fillOpacity={1} activeDot={false} isAnimationActive={false} legendType="none" />
+                        <Line type="monotone" dataKey="runningMean" name="Running Mean" stroke="#8B7EAF" strokeWidth={2} dot={false} isAnimationActive={false} />
                         {results.convergence.length > 10 && <Brush dataKey="iteration" height={16} stroke="#8B7EAF" fill="var(--glass-bg)" travellerWidth={6} />}
                       </ComposedChart>
                     </ResponsiveContainer>
+                      )
+                    }}
                     </PublicationFigure>
                   )}
 
                   {activeChart === 'cdf' && (
-                    <ResponsiveContainer width="100%" height="100%">
-                      {/* Same generous margins as the histogram/convergence
-                          charts; the "Median" ReferenceLine label lives on
-                          the right side so we need ~60px there. */}
+                    <PublicationFigure
+                      title={`Cumulative distribution: ${activeSim?.name || 'Monte Carlo'}`}
+                      subtitle="Empirical cumulative distribution function"
+                      exportName={`mc-cdf-${activeSim?.id || 'sim'}`}
+                    >
+                    {(ctx) => {
+                      const ts = ctx.themeStyle
+                      const onScreen = ts.bg === 'transparent'
+                      const axisCol = onScreen ? 'var(--color-text-muted)' : ts.axisColor
+                      const gridCol = onScreen ? 'var(--glass-border)' : ts.gridColor
+                      const textCol = onScreen ? 'var(--color-text)' : ts.textColor
+                      return (
+                    <ResponsiveContainer width="100%" height={420}>
+                      {/* Generous right margin so the "Median"
+                          ReferenceLine label isn't clipped. */}
                       <AreaChart data={cdfData} margin={{ top: 28, right: 64, bottom: 38, left: 36 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" strokeOpacity={0.4} />
-                        <XAxis dataKey="value" tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <YAxis tick={{ fontSize: 9, fill: 'var(--color-text-muted)' }} stroke="var(--glass-border)" domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10, fill: 'var(--color-text-muted)' }} />
-                        <Tooltip contentStyle={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: 'var(--color-text)' }} cursor={{ stroke: 'var(--color-text-muted)', strokeDasharray: '4 4' }} formatter={(v) => `${Number(v ?? 0).toFixed(1)}%`} />
+                        <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.4} />
+                        <XAxis dataKey="value" tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
+                        <YAxis tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
+                        <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} formatter={(v) => `${Number(v ?? 0).toFixed(1)}%`} />
                         <ReferenceLine y={50} stroke="#C4956A" strokeDasharray="4 3" strokeWidth={1} label={{ value: 'Median', position: 'right', fontSize: 9, fill: '#C4956A' }} />
-                        <Area type="monotone" dataKey="percentile" stroke="#6BA594" fill="#6BA594" fillOpacity={0.15} strokeWidth={2} dot={false} />
+                        <Area type="monotone" dataKey="percentile" stroke="#6BA594" fill="#6BA594" fillOpacity={0.15} strokeWidth={2} dot={false} isAnimationActive={false} />
                         {cdfData.length > 10 && <Brush dataKey="value" height={16} stroke="#6BA594" fill="var(--glass-bg)" travellerWidth={6} />}
                       </AreaChart>
                     </ResponsiveContainer>
+                      )
+                    }}
+                    </PublicationFigure>
                   )}
                 </div>
               </div>
