@@ -46,6 +46,23 @@ variable "enable_jwt_authorizer" {
   default     = false
 }
 
+variable "provisioned_concurrency" {
+  description = <<-EOT
+    Number of always-warm Lambda execution environments held on the
+    `live` alias. The backend container image is large enough that a
+    cold start can exceed API Gateway's 30s integration timeout,
+    producing intermittent 500s after the function goes idle.
+    Provisioned concurrency keeps this many environments initialised
+    so beta traffic never hits a cold start.
+
+    Costs ~$22/month per unit at 2048 MB. 1 is enough for the private
+    beta's handful of named users; bump it if concurrent usage grows.
+    Set to 0 to disable provisioned concurrency entirely.
+  EOT
+  type        = number
+  default     = 1
+}
+
 variable "enable_custom_domain" {
   description = <<-EOT
     Whether to provision the api.humanovo.net custom domain — ACM

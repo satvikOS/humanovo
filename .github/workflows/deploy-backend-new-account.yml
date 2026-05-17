@@ -198,6 +198,34 @@ jobs:
             --region "${AWS_REGION}"
           echo "Lambda update complete."
 
+      - name: Publish version + move live alias
+        # API Gateway invokes the `live` alias (provisioned concurrency
+        # attaches there to avoid cold-start 500s). Each deploy must
+        # publish the freshly-updated $LATEST as a numbered version and
+        # repoint the alias; AWS re-warms the provisioned environments
+        # for the new version automatically. Skipped gracefully until
+        # the bootstrap terraform apply has created the alias.
+        if: steps.bootstrap_check.outputs.should_deploy == 'true'
+        run: |
+          LAMBDA_NAME="${{ steps.tf.outputs.lambda_name }}"
+          if ! aws lambda get-alias --function-name "$LAMBDA_NAME" \
+                 --name live --region "${AWS_REGION}" >/dev/null 2>&1; then
+            echo "live alias not present yet — run the bootstrap workflow"
+            echo "to create it (terraform). Skipping alias move."
+            exit 0
+          fi
+          NEW_VERSION=$(aws lambda publish-version \
+            --function-name "$LAMBDA_NAME" \
+            --region "${AWS_REGION}" \
+            --query Version --output text)
+          echo "Published version $NEW_VERSION"
+          aws lambda update-alias \
+            --function-name "$LAMBDA_NAME" \
+            --name live \
+            --function-version "$NEW_VERSION" \
+            --region "${AWS_REGION}" >/dev/null
+          echo "live alias -> version $NEW_VERSION"
+
       - name: Apply DB migrations (in-VPC Lambda invoke)
         # The Aurora cluster is in an isolated VPC subnet that CI
         # cannot reach. The Lambda IS in the VPC, so we apply schema

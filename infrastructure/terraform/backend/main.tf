@@ -799,6 +799,12 @@ resource "aws_lambda_function" "backend" {
   package_type  = "Image"
   image_uri     = local.lambda_image
 
+  # Publish a numbered version on apply so the `live` alias has a
+  # concrete version to point at — provisioned concurrency cannot be
+  # attached to $LATEST. The deploy workflow republishes + moves the
+  # alias on every backend deploy.
+  publish = true
+
   memory_size   = 2048
   timeout       = 30
   architectures = ["x86_64"]
@@ -836,6 +842,35 @@ resource "aws_lambda_function" "backend" {
     aws_iam_role_policy_attachment.lambda_vpc,
     aws_iam_role_policy.lambda_inline,
   ]
+}
+
+# ─── Lambda alias + provisioned concurrency ─────────────────────────
+# The `live` alias is the stable entrypoint API Gateway invokes.
+# Provisioned concurrency must attach to a version/alias (not
+# $LATEST), so HTTP traffic goes through this alias while the
+# out-of-band {"action":"migrate"|"ingest"} invokes still target the
+# unqualified function. The deploy workflow republishes the image and
+# moves this alias to the new version on every deploy.
+resource "aws_lambda_alias" "live" {
+  name             = "live"
+  function_name    = aws_lambda_function.backend.function_name
+  function_version = aws_lambda_function.backend.version
+
+  lifecycle {
+    # The deploy workflow owns the version pointer post-bootstrap.
+    ignore_changes = [function_version]
+  }
+}
+
+# Always-warm execution environments so beta traffic never pays the
+# large-image cold start (which can exceed API Gateway's 30s
+# integration timeout). Count is var.provisioned_concurrency; 0
+# disables it.
+resource "aws_lambda_provisioned_concurrency_config" "live" {
+  count                             = var.provisioned_concurrency > 0 ? 1 : 0
+  function_name                     = aws_lambda_function.backend.function_name
+  qualifier                         = aws_lambda_alias.live.name
+  provisioned_concurrent_executions = var.provisioned_concurrency
 }
 
 # ─── API Gateway HTTP API v2 ────────────────────────────────────────
@@ -877,9 +912,11 @@ resource "aws_apigatewayv2_api" "main" {
 }
 
 resource "aws_apigatewayv2_integration" "lambda" {
-  api_id                 = aws_apigatewayv2_api.main.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.backend.invoke_arn
+  api_id           = aws_apigatewayv2_api.main.id
+  integration_type = "AWS_PROXY"
+  # Invoke the `live` alias (not $LATEST) so requests land on the
+  # provisioned-concurrency-warmed environments.
+  integration_uri        = aws_lambda_alias.live.invoke_arn
   integration_method     = "POST"
   payload_format_version = "2.0"
 }
@@ -905,8 +942,11 @@ resource "aws_lambda_permission" "apigw" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.backend.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
+  # API Gateway invokes the `live` alias, so the invoke permission
+  # must be granted on the alias qualifier.
+  qualifier  = aws_lambda_alias.live.name
+  principal  = "apigateway.amazonaws.com"
+  source_arn = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
 }
 
 # ─── ACM + Custom Domain ────────────────────────────────────────────
