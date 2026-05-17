@@ -398,18 +398,19 @@ class Settings(BaseSettings):
 
     # A3 Phase 2 — dual-write toggle. When True, every Neo4j write in
     # GraphStore + neo4j_population_service is mirrored to the
-    # Postgres-backed PostgresGraphStore. Postgres failures log but do
-    # not fail the request; Neo4j stays authoritative for reads until
-    # Phase 3 flips KG_BACKEND. Set False to disable mirroring on a
-    # hot-path issue without redeploying.
-    KG_DUAL_WRITE: bool = True
+    # Postgres-backed PostgresGraphStore. Disabled in the AWS
+    # deployment: there is no Neo4j cluster, so a dual-write would
+    # fail on the (mandatory) Neo4j leg before the Postgres mirror
+    # ever runs.
+    KG_DUAL_WRITE: bool = False
 
-    # A3 Phase 3 hook — `KG_BACKEND` will route reads to either the
-    # Neo4j-backed GraphStore or the Postgres-backed PostgresGraphStore.
-    # Phase 2 doesn't read this; the setting lives here so the value can
-    # be flipped and observed (via the admin /kg/stats endpoint) before
-    # Phase 3 wires the factory in.
-    KG_BACKEND: str = "neo4j"  # neo4j | postgres
+    # Routes KG reads/writes to the Neo4j-backed GraphStore or the
+    # Postgres-backed PostgresGraphStore. The AWS deployment ships no
+    # Neo4j cluster and the knowledge graph lives entirely in the
+    # `knowledge_graph_nodes` / `_edges` Postgres tables, so this is
+    # `postgres`. (Routing through neo4j here 500s GET /knowledge/stats
+    # and the other graph_store-backed endpoints.)
+    KG_BACKEND: str = "postgres"  # neo4j | postgres
 
     # PubMed / Data Sources — NCBI requires a real contact email per
     # E-utilities ToU. Default is intentionally empty so dev callers get

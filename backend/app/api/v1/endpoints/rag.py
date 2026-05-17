@@ -454,7 +454,9 @@ async def get_rag_stats(
         graph_connector = get_graph_connector()
 
         return {
-            "rag_service": await rag_service.get_stats(),
+            # RAGService.get_stats() is synchronous — awaiting its dict
+            # result raised "object dict can't be used in 'await'".
+            "rag_service": rag_service.get_stats(),
             "vector_indexing": rag_connector.get_stats(),
             "graph_updates": graph_connector.get_stats(),
         }

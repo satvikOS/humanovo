@@ -58,22 +58,36 @@ async def _get_node_or_404(db: AsyncSession, node_id: UUID) -> KnowledgeGraphNod
 async def list_nodes(
     type: str | None = None,
     search: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
+    # Paginated — the common KG holds 150k+ nodes, and an unbounded
+    # dump blows past Lambda's 6 MB response limit (API Gateway 500).
     query = select(KnowledgeGraphNode)
+    count_query = select(func.count(KnowledgeGraphNode.id))
     if type:
         query = query.where(KnowledgeGraphNode.type == type)
+        count_query = count_query.where(KnowledgeGraphNode.type == type)
     if search:
         q = f"%{search.lower()}%"
-        query = query.where(
-            or_(
-                func.lower(KnowledgeGraphNode.name).like(q),
-                func.lower(KnowledgeGraphNode.description).like(q),
-            )
+        cond = or_(
+            func.lower(KnowledgeGraphNode.name).like(q),
+            func.lower(KnowledgeGraphNode.description).like(q),
         )
-    result = await db.execute(query)
-    items = result.scalars().all()
-    return {"items": [n.to_dict() for n in items], "total": len(items)}
+        query = query.where(cond)
+        count_query = count_query.where(cond)
+    total = (await db.execute(count_query)).scalar_one()
+    query = (
+        query.order_by(KnowledgeGraphNode.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = (await db.execute(query)).scalars().all()
+    return {
+        "items": [n.to_dict() for n in items],
+        "total": total, "page": page, "page_size": page_size,
+    }
 
 
 @router.post("/nodes")
@@ -122,10 +136,26 @@ async def delete_node(node_id: UUID, db: AsyncSession = Depends(get_db)):
 # ── Edge Endpoints ───────────────────────────────────────────────
 
 @router.get("/edges")
-async def list_edges(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(KnowledgeGraphEdge))
-    items = result.scalars().all()
-    return {"items": [e.to_dict() for e in items], "total": len(items)}
+async def list_edges(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    # Paginated — see list_nodes; the edge table is just as large.
+    total = (await db.execute(
+        select(func.count(KnowledgeGraphEdge.id))
+    )).scalar_one()
+    query = (
+        select(KnowledgeGraphEdge)
+        .order_by(KnowledgeGraphEdge.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = (await db.execute(query)).scalars().all()
+    return {
+        "items": [e.to_dict() for e in items],
+        "total": total, "page": page, "page_size": page_size,
+    }
 
 
 @router.post("/edges")
