@@ -92,17 +92,25 @@ async def register(
         async def _send_welcome_bg(
             user_id: str, user_email: str, full_name: str | None,
         ) -> None:
-            from app.core.database import async_session_factory
-            from app.services.welcome_email_service import (
-                send_welcome_email,
-            )
-            async with async_session_factory() as bg_db:
-                await send_welcome_email(
-                    bg_db,
-                    user_id=user_id,
-                    user_email=user_email,
-                    full_name=full_name,
+            # Fully self-contained: the welcome email is best-effort and
+            # must NEVER surface as a failure. On Lambda a background
+            # task runs after the response and on a warm container can
+            # hit cross-event-loop issues with the shared engine — all
+            # of which are swallowed here so registration stays 201.
+            try:
+                from app.core.database import async_session_factory
+                from app.services.welcome_email_service import (
+                    send_welcome_email,
                 )
+                async with async_session_factory() as bg_db:
+                    await send_welcome_email(
+                        bg_db,
+                        user_id=user_id,
+                        user_email=user_email,
+                        full_name=full_name,
+                    )
+            except Exception:  # noqa: BLE001 - best-effort, never fail
+                logger.warning("welcome email skipped", user_id=user_id)
 
         background_tasks.add_task(
             _send_welcome_bg,
@@ -126,10 +134,16 @@ async def register(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Registration failed", error=str(e))
+        import traceback
+        logger.error("Registration failed", error=str(e),
+                     trace=traceback.format_exc())
+        # TEMP DIAGNOSTIC (revert): the generic "Registration failed"
+        # gave no signal and the 500 isn't reproducible from outside.
+        # Surface the exception type + message so the failing signup
+        # shows the real cause. Reverted once the root cause is fixed.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Registration failed",
+            detail=f"Registration failed: {type(e).__name__}: {e}",
         )
 
 
