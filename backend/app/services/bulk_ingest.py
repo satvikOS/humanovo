@@ -27,8 +27,10 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-from app.core.database import async_session_factory
+from app.core.config import settings
 from app.models.evidence import Evidence, EvidenceSource
 from app.services.data_sources import (
     ClinicalTrialsSource,
@@ -272,6 +274,14 @@ async def run_ingest(topics: list[str], max_per_source: int = 100) -> dict:
     europepmc = EuropePMCSource()
     clinicaltrials = ClinicalTrialsSource()
 
+    # A fresh engine bound to THIS invoke's event loop. Lambda reuses
+    # the warm container across invokes and each invoke runs its own
+    # asyncio.run() loop, so the module-level engine's pooled asyncpg
+    # connections end up "attached to a different loop". NullPool +
+    # a per-invoke engine sidesteps that entirely; disposed below.
+    engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
     totals = {
         "topics_done": 0, "topics_failed": 0,
         "evidence_added": 0, "evidence_skipped": 0,
@@ -283,7 +293,7 @@ async def run_ingest(topics: list[str], max_per_source: int = 100) -> dict:
             try:
                 added = await _ingest_one_topic(
                     topic, max_per_source, pubmed, europepmc,
-                    clinicaltrials, totals,
+                    clinicaltrials, session_factory, totals,
                 )
                 totals["topics_done"] += 1
                 logger.info("bulk_ingest topic done topic=%s added=%s",
@@ -298,12 +308,13 @@ async def run_ingest(topics: list[str], max_per_source: int = 100) -> dict:
                 await src.close()
             except Exception:  # noqa: BLE001
                 pass
+        await engine.dispose()
     totals["errors"] = totals["errors"][:20]
     return {"ok": totals["topics_failed"] < len(topics), **totals}
 
 
 async def _ingest_one_topic(topic, max_per_source, pubmed, europepmc,
-                            clinicaltrials, totals) -> int:
+                            clinicaltrials, session_factory, totals) -> int:
     """Fetch + persist one topic. Each topic commits in its own
     transaction so a later failure can't roll back earlier topics."""
     records: list[dict] = []
@@ -324,7 +335,7 @@ async def _ingest_one_topic(topic, max_per_source, pubmed, europepmc,
         return 0
 
     added = 0
-    async with async_session_factory() as session:
+    async with session_factory() as session:
         # Dedup against rows already in the corpus — by source_id AND by
         # doi. `evidence.doi` is UNIQUE, and PubMed + Europe PMC routinely
         # return the same paper, so a same-batch doi collision would fail
