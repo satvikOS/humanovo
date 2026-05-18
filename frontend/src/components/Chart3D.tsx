@@ -398,23 +398,42 @@ interface RenderProps {
 // normalise a data-z to [0,1] for colour lookup
 function zNorm(d: DataPoint3D, b: Bounds): number {
   const span = (b.zMax - b.zMin) || 1
-  return (d.z - b.zMin) / span
+  const t = (d.z - b.zMin) / span
+  return Number.isFinite(t) ? t : 0
+}
+
+// Drop points with non-finite coordinates. Every renderer runs its
+// data through this so NaN/Infinity never reaches a BufferAttribute or
+// a mesh transform (three.js can throw on a NaN matrix).
+function finitePoints(data: DataPoint3D[]): DataPoint3D[] {
+  return data.filter(
+    d => d && Number.isFinite(d.x) && Number.isFinite(d.y) && Number.isFinite(d.z),
+  )
+}
+
+// (hi - lo) guaranteed to be a finite, non-zero, positive span.
+function safeSpan(lo: number, hi: number): number {
+  const s = hi - lo
+  return Number.isFinite(s) && s > 0 ? s : 1
 }
 
 // ── POINTS family: scatter / bubble / stem ──────────────────────────
 function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind }: RenderProps & { kind: 'scatter' | 'bubble' | 'stem' }) {
   const b = mapper.bounds
-  const cats = useMemo(() => [...new Set(data.map(d => d.category).filter(Boolean))] as string[], [data])
+  const pts = useMemo(() => finitePoints(data), [data])
+  const cats = useMemo(() => [...new Set(pts.map(d => d.category).filter(Boolean))] as string[], [pts])
   const catColor = (c?: string) => CATEGORY_COLORS[Math.max(0, cats.indexOf(c || '')) % CATEGORY_COLORS.length]
-  const baseR = 0.12 + pointSize * 0.03
+  const safePS = Number.isFinite(pointSize) && pointSize > 0 ? pointSize : 4
+  const baseR = 0.12 + safePS * 0.03
   return (
     <group>
-      {data.map((d, i) => {
+      {pts.map((d, i) => {
         const px = mapper.mx(d.x), py = mapper.mz(d.z), pz = mapper.my(d.y)
         const useCat = scheme === 'categorical' && cats.length > 1 && d.category
         const col = useCat ? new THREE.Color(catColor(d.category)) : colorFn(zNorm(d, b))
+        const rawSize = Number.isFinite(d.size as number) ? (d.size as number) : safePS
         const r = kind === 'bubble'
-          ? baseR * (0.6 + 1.6 * ((d.size ?? pointSize) / Math.max(pointSize, 1)))
+          ? baseR * (0.6 + 1.6 * (rawSize / Math.max(safePS, 1)))
           : baseR
         return (
           <group key={i}>
@@ -442,28 +461,18 @@ function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind
 function LineRenderer({ data, mapper, colorFn, pointSize, kind }: RenderProps & { kind: 'line' | 'streamline' }) {
   const b = mapper.bounds
   const pts = useMemo(
-    () => data.map(d => new THREE.Vector3(mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y))),
+    () => finitePoints(data).map(d => new THREE.Vector3(mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y))),
     [data, mapper],
   )
-  if (pts.length < 2) {
-    return (
-      <group>
-        {pts.map((p, i) => (
-          <mesh key={i} position={p}>
-            <sphereGeometry args={[0.15, 16, 16]} />
-            <meshStandardMaterial color={colorFn(0.5)} />
-          </mesh>
-        ))}
-      </group>
-    )
-  }
+  const tubeR = kind === 'streamline' ? 0.16 : 0.11
+  // ALL hooks run unconditionally (no early return before them) — the
+  // <2-point case is handled in the returned JSX, not by skipping hooks.
   // Catmull-Rom smoothing → a tube mesh (publication-grade vs a thin
   // polyline). streamline_3d gets a slightly fatter, glossier tube.
-  const curve = useMemo(() => new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5), [pts])
-  const tubeR = kind === 'streamline' ? 0.16 : 0.11
-  const segs = Math.min(400, Math.max(40, pts.length * 8))
-  // colour the tube vertices along the curve by parametric position
   const colors = useMemo(() => {
+    if (pts.length < 2) return null
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5)
+    const segs = Math.min(400, Math.max(40, pts.length * 8))
     const geo = new THREE.TubeGeometry(curve, segs, tubeR, 12, false)
     const pos = geo.attributes.position
     const arr = new Float32Array(pos.count * 3)
@@ -475,7 +484,20 @@ function LineRenderer({ data, mapper, colorFn, pointSize, kind }: RenderProps & 
     geo.setAttribute('color', new THREE.BufferAttribute(arr, 3))
     geo.computeVertexNormals()
     return geo
-  }, [curve, segs, tubeR, colorFn])
+  }, [pts, tubeR, colorFn])
+
+  if (pts.length < 2 || !colors) {
+    return (
+      <group>
+        {pts.map((p, i) => (
+          <mesh key={i} position={p}>
+            <sphereGeometry args={[0.15, 16, 16]} />
+            <meshStandardMaterial color={colorFn(0.5)} />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
   return (
     <group>
       <mesh geometry={colors}>
@@ -499,32 +521,37 @@ function LineRenderer({ data, mapper, colorFn, pointSize, kind }: RenderProps & 
 // ── BARS family: bar / voxel / waterfall ────────────────────────────
 function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind }: RenderProps & { kind: 'bar' | 'voxel' | 'waterfall' }) {
   const b = mapper.bounds
-  const cats = useMemo(() => [...new Set(data.map(d => d.category).filter(Boolean))] as string[], [data])
+  const pts = useMemo(() => finitePoints(data), [data])
+  const cats = useMemo(() => [...new Set(pts.map(d => d.category).filter(Boolean))] as string[], [pts])
   const catColor = (c?: string) => CATEGORY_COLORS[Math.max(0, cats.indexOf(c || '')) % CATEGORY_COLORS.length]
 
   // bar footprint sized to the typical x/y spacing
   const bw = useMemo(() => {
-    const xs = [...new Set(data.map(d => d.x))].sort((a, c) => a - c)
+    const xs = [...new Set(pts.map(d => d.x))].sort((a, c) => a - c)
     let minGap = Infinity
-    for (let i = 1; i < xs.length; i++) minGap = Math.min(minGap, xs[i] - xs[i - 1])
-    const span = (b.xMax - b.xMin) || 1
+    for (let i = 1; i < xs.length; i++) {
+      const g = xs[i] - xs[i - 1]
+      if (g > 0 && g < minGap) minGap = g
+    }
+    const span = safeSpan(b.xMin, b.xMax)
     const gapFrac = Number.isFinite(minGap) ? minGap / span : 0.12
-    return Math.max(0.35, gapFrac * CUBE * 0.6)
-  }, [data, b])
+    const w = gapFrac * CUBE * 0.6
+    return Number.isFinite(w) ? Math.max(0.35, w) : 0.35
+  }, [pts, b])
 
   if (kind === 'waterfall') {
     // running cumulative bars: each bar sits on top of the previous total
     let cum = 0
     return (
       <group>
-        {data.map((d, i) => {
+        {pts.map((d, i) => {
           const lo = cum
           cum += d.z
           const hi = cum
           const yLo = mapper.mz(Math.min(lo, hi))
           const yHi = mapper.mz(Math.max(lo, hi))
           const ch = Math.max(0.02, yHi - yLo)
-          const col = d.z < 0 ? new THREE.Color('#c97575') : colorFn(i / Math.max(1, data.length - 1))
+          const col = d.z < 0 ? new THREE.Color('#c97575') : colorFn(i / Math.max(1, pts.length - 1))
           return (
             <mesh key={i} position={[mapper.mx(d.x), yLo + ch / 2, mapper.my(d.y)]}>
               <boxGeometry args={[bw, ch, bw]} />
@@ -541,7 +568,7 @@ function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind }: RenderProp
     const vs = Math.max(0.4, bw * 0.85)
     return (
       <group>
-        {data.map((d, i) => {
+        {pts.map((d, i) => {
           const col = scheme === 'categorical' && d.category
             ? new THREE.Color(catColor(d.category))
             : colorFn(zNorm(d, b))
@@ -559,7 +586,7 @@ function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind }: RenderProp
   // standard 3D bar chart — column from the floor up to z
   return (
     <group>
-      {data.map((d, i) => {
+      {pts.map((d, i) => {
         const yTop = mapper.mz(d.z)
         const h = Math.max(0.02, yTop - mapper.floorY)
         const col = scheme === 'categorical' && d.category
@@ -587,22 +614,27 @@ interface SurfaceProps extends RenderProps {
 function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction }: SurfaceProps) {
   const b = mapper.bounds
   const res = 44
+  const pts = useMemo(() => finitePoints(data), [data])
 
-  // grid of data-space z values
+  // grid of data-space z values. Every cell is forced finite so a NaN
+  // never propagates into a BufferAttribute.
   const grid = useMemo(() => {
+    const clean = (v: number) => (Number.isFinite(v) ? v : 0)
     if (surfaceFunction) {
       const xR = Array.from({ length: res }, (_, i) => -3 + 6 * i / (res - 1))
       const yR = Array.from({ length: res }, (_, i) => -3 + 6 * i / (res - 1))
-      return { z: yR.map(yi => xR.map(xi => surfaceFunction(xi, yi))), useFn: true }
+      return { z: yR.map(yi => xR.map(xi => clean(surfaceFunction(xi, yi)))), useFn: true }
     }
-    return { z: idwGrid(data, res, b.xMin, b.xMax, b.yMin, b.yMax), useFn: false }
-  }, [data, b, surfaceFunction])
+    const raw = idwGrid(pts, res, b.xMin, b.xMax, b.yMin, b.yMax)
+    return { z: raw.map(row => row.map(clean)), useFn: false }
+  }, [pts, b, surfaceFunction])
 
   // recompute z-bounds when using surfaceFunction (so colour spans data)
   const zb = useMemo(() => {
     if (!grid.useFn) return { lo: b.zMin, hi: b.zMax }
     let lo = Infinity, hi = -Infinity
     for (const row of grid.z) for (const v of row) { if (v < lo) lo = v; if (v > hi) hi = v }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { lo: 0, hi: 1 }
     return { lo, hi }
   }, [grid, b])
 
@@ -610,7 +642,7 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
   const geo = useMemo(() => {
     const g = new THREE.PlaneGeometry(CUBE, CUBE, res - 1, res - 1)
     const pos = g.attributes.position
-    const span = (zb.hi - zb.lo) || 1
+    const span = safeSpan(zb.lo, zb.hi)
     const colArr = new Float32Array(pos.count * 3)
     for (let i = 0; i < pos.count; i++) {
       const col = i % res
@@ -635,7 +667,7 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
   const contourLines = useMemo(() => {
     if (kind !== 'contour') return []
     const lines: THREE.Vector3[][] = []
-    const span = (zb.hi - zb.lo) || 1
+    const span = safeSpan(zb.lo, zb.hi)
     const levels = 7
     // sample along grid rows at fixed scene-Y heights (level slabs)
     for (let l = 1; l < levels; l++) {
@@ -682,7 +714,7 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
           />
         </mesh>
         {/* source points peeking through */}
-        {data.map((d, i) => (
+        {pts.map((d, i) => (
           <mesh key={i} position={[mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y)]}>
             <sphereGeometry args={[0.12, 12, 12]} />
             <meshStandardMaterial color={chrome.text} />
@@ -720,18 +752,19 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
 // ── TRISURF — Delaunay-triangulated mesh of the actual scattered pts ─
 function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
   const b = mapper.bounds
+  const pts = useMemo(() => finitePoints(data), [data])
   // Surface + wireframe geometry computed together in ONE top-level
   // useMemo. (A prior version called useMemo inline inside the JSX for
   // the wireframe — a Rules-of-Hooks violation that crashed the chart.)
   const { surfGeo, wireGeo } = useMemo(() => {
-    const tris = delaunay(data.map(d => ({ x: d.x, y: d.y })))
+    const tris = delaunay(pts.map(d => ({ x: d.x, y: d.y })))
     const g = new THREE.BufferGeometry()
     const verts: number[] = []
     const cols: number[] = []
-    const span = (b.zMax - b.zMin) || 1
+    const span = safeSpan(b.zMin, b.zMax)
     for (const t of tris) {
       for (const idx of t) {
-        const p = data[idx]
+        const p = pts[idx]
         if (!p) continue
         verts.push(mapper.mx(p.x), mapper.mz(p.z), mapper.my(p.y))
         const col = colorFn((p.z - b.zMin) / span)
@@ -745,7 +778,7 @@ function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
       ? new THREE.WireframeGeometry(g)
       : new THREE.BufferGeometry()
     return { surfGeo: g, wireGeo: w }
-  }, [data, mapper, b, colorFn])
+  }, [pts, mapper, b, colorFn])
   return (
     <group>
       <mesh geometry={surfGeo}>
@@ -755,7 +788,7 @@ function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
         <lineBasicMaterial color="#000000" transparent opacity={0.2} />
       </lineSegments>
       {/* vertex markers */}
-      {data.map((d, i) => (
+      {pts.map((d, i) => (
         <mesh key={i} position={[mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y)]}>
           <sphereGeometry args={[0.08, 10, 10]} />
           <meshStandardMaterial color={chrome.text} />
@@ -768,49 +801,54 @@ function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
 // ── RIBBON — each y-row becomes a narrow surface strip ──────────────
 function RibbonRenderer({ data, mapper, colorFn }: RenderProps) {
   const b = mapper.bounds
-  const ribbons = useMemo(() => {
+  // All ribbon-strip geometries are built ONCE in a top-level useMemo
+  // (a prior shape created `new THREE.BufferGeometry()` inside the JSX
+  // `.map()`, churning GPU buffers every render).
+  const geos = useMemo(() => {
+    const pts = finitePoints(data)
     const rows: Record<string, DataPoint3D[]> = {}
-    for (const d of data) {
+    for (const d of pts) {
       const k = String(d.y)
       ;(rows[k] = rows[k] || []).push(d)
     }
-    return Object.keys(rows)
+    const ribbons = Object.keys(rows)
       .sort((a, c) => parseFloat(a) - parseFloat(c))
       .map(k => rows[k].slice().sort((a, c) => a.x - c.x))
-  }, [data])
-  const halfW = CUBE / Math.max(ribbons.length, 1) * 0.32
-  const span = (b.zMax - b.zMin) || 1
+    const halfW = CUBE / Math.max(ribbons.length, 1) * 0.32
+    const span = safeSpan(b.zMin, b.zMax)
+    return ribbons.map(row => {
+      if (row.length < 2) return null
+      const g = new THREE.BufferGeometry()
+      const verts: number[] = []
+      const cols: number[] = []
+      const yc = mapper.my(row[0].y)
+      for (let i = 0; i < row.length - 1; i++) {
+        const p0 = row[i], p1 = row[i + 1]
+        const x0 = mapper.mx(p0.x), x1 = mapper.mx(p1.x)
+        const z0 = mapper.mz(p0.z), z1 = mapper.mz(p1.z)
+        const c0 = colorFn((p0.z - b.zMin) / span)
+        const c1 = colorFn((p1.z - b.zMin) / span)
+        // quad: (x0,zNear) (x1,zNear) (x1,zFar) (x0,zFar)
+        const A: [number, number, number] = [x0, z0, yc - halfW]
+        const B: [number, number, number] = [x1, z1, yc - halfW]
+        const C: [number, number, number] = [x1, z1, yc + halfW]
+        const D: [number, number, number] = [x0, z0, yc + halfW]
+        verts.push(...A, ...B, ...C, ...A, ...C, ...D)
+        for (const c of [c0, c1, c1, c0, c1, c0]) cols.push(c.r, c.g, c.b)
+      }
+      g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+      g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+      g.computeVertexNormals()
+      return g
+    })
+  }, [data, mapper, b, colorFn])
   return (
     <group>
-      {ribbons.map((row, ri) => {
-        if (row.length < 2) return null
-        const g = new THREE.BufferGeometry()
-        const verts: number[] = []
-        const cols: number[] = []
-        const yc = mapper.my(row[0].y)
-        for (let i = 0; i < row.length - 1; i++) {
-          const p0 = row[i], p1 = row[i + 1]
-          const x0 = mapper.mx(p0.x), x1 = mapper.mx(p1.x)
-          const z0 = mapper.mz(p0.z), z1 = mapper.mz(p1.z)
-          const c0 = colorFn((p0.z - b.zMin) / span)
-          const c1 = colorFn((p1.z - b.zMin) / span)
-          // quad: (x0,zNear) (x1,zNear) (x1,zFar) (x0,zFar)
-          const A: [number, number, number] = [x0, z0, yc - halfW]
-          const B: [number, number, number] = [x1, z1, yc - halfW]
-          const C: [number, number, number] = [x1, z1, yc + halfW]
-          const D: [number, number, number] = [x0, z0, yc + halfW]
-          verts.push(...A, ...B, ...C, ...A, ...C, ...D)
-          for (const c of [c0, c1, c1, c0, c1, c0]) cols.push(c.r, c.g, c.b)
-        }
-        g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-        g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
-        g.computeVertexNormals()
-        return (
-          <mesh key={ri} geometry={g}>
-            <meshStandardMaterial vertexColors roughness={0.4} metalness={0.08} side={THREE.DoubleSide} />
-          </mesh>
-        )
-      })}
+      {geos.map((g, ri) => g && (
+        <mesh key={ri} geometry={g}>
+          <meshStandardMaterial vertexColors roughness={0.4} metalness={0.08} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
     </group>
   )
 }
@@ -820,18 +858,20 @@ function QuiverRenderer({ data, mapper, colorFn }: RenderProps) {
   const b = mapper.bounds
   // arrows: shaft (cylinder) + head (cone), oriented to the vector
   const arrows = useMemo(() => {
-    return data.map((d) => {
-      const vx = d.vx ?? -d.y * 0.5
-      const vy = d.vy ?? d.x * 0.5
-      const vz = d.vz ?? (d.z === 0 ? 0.3 : d.z * 0.25)
-      const mag = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1
+    const fin = (v: number, fallback: number) => (Number.isFinite(v) ? v : fallback)
+    return finitePoints(data).map((d) => {
+      const vx = fin(d.vx ?? -d.y * 0.5, 0)
+      const vy = fin(d.vy ?? d.x * 0.5, 0)
+      const vz = fin(d.vz ?? (d.z === 0 ? 0.3 : d.z * 0.25), 0)
+      const rawMag = Math.sqrt(vx * vx + vy * vy + vz * vz)
+      const mag = Number.isFinite(rawMag) && rawMag > 0 ? rawMag : 1
       // map vector into scene space (data x→sx, y→sz, z→sy)
       const dir = new THREE.Vector3(
-        vx / (b.xMax - b.xMin || 1),
-        vz / (b.zMax - b.zMin || 1),
-        vy / (b.yMax - b.yMin || 1),
+        vx / safeSpan(b.xMin, b.xMax),
+        vz / safeSpan(b.zMin, b.zMax),
+        vy / safeSpan(b.yMin, b.yMax),
       )
-      if (dir.lengthSq() < 1e-9) dir.set(0, 1, 0)
+      if (!Number.isFinite(dir.lengthSq()) || dir.lengthSq() < 1e-9) dir.set(0, 1, 0)
       dir.normalize()
       return {
         origin: new THREE.Vector3(mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y)),
@@ -840,7 +880,9 @@ function QuiverRenderer({ data, mapper, colorFn }: RenderProps) {
       }
     })
   }, [data, mapper, b])
-  const maxMag = Math.max(...arrows.map(a => a.mag), 1e-6)
+  // reduce (not spread) — spreading a large array into Math.max can
+  // overflow the call stack with RangeError.
+  const maxMag = arrows.reduce((m, a) => Math.max(m, a.mag), 1e-6)
   const len = 1.4
   return (
     <group>
@@ -870,8 +912,18 @@ function QuiverRenderer({ data, mapper, colorFn }: RenderProps) {
 
 // ── PIE3D — extruded pie wedges ─────────────────────────────────────
 function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
+  const R = CUBE * 0.42
+  const depth = CUBE * 0.18
+  // Slice metadata AND extruded geometry are built together in ONE
+  // top-level useMemo — geometry must not be rebuilt every render, and
+  // every value fed to it is forced finite (a NaN `z`/`size` would
+  // otherwise corrupt the wedge angles).
   const slices = useMemo(() => {
-    const vals = data.map(d => Math.max(0, d.z || d.size || 0))
+    const finVal = (v: unknown) => {
+      const n = typeof v === 'number' && Number.isFinite(v) ? v : 0
+      return Math.max(0, n)
+    }
+    const vals = data.map(d => finVal(d.z) || finVal(d.size))
     const total = vals.reduce((s, v) => s + v, 0) || 1
     let acc = 0
     return data.map((d, i) => {
@@ -879,35 +931,36 @@ function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
       const start = acc * Math.PI * 2
       acc += frac
       const end = acc * Math.PI * 2
-      return { start, end, frac, label: d.label || `Slice ${i + 1}`, color: d.color, idx: i }
+      // build a wedge shape and extrude it
+      const shape = new THREE.Shape()
+      shape.moveTo(0, 0)
+      const segs = Math.max(2, Math.ceil((end - start) / 0.15))
+      for (let j = 0; j <= segs; j++) {
+        const a = start + (end - start) * (j / segs)
+        shape.lineTo(Math.cos(a) * R, Math.sin(a) * R)
+      }
+      shape.lineTo(0, 0)
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.12, bevelSegments: 2,
+      })
+      geo.rotateX(-Math.PI / 2) // lay flat, extrude up
+      return {
+        start, end, frac, geo,
+        label: d.label || `Slice ${i + 1}`, color: d.color, idx: i,
+      }
     })
-  }, [data])
+  }, [data, R, depth])
 
-  const R = CUBE * 0.42
-  const depth = CUBE * 0.18
   return (
     <group rotation={[0, 0, 0]}>
       {slices.map((s) => {
-        // build a wedge shape and extrude it
-        const shape = new THREE.Shape()
-        shape.moveTo(0, 0)
-        const segs = Math.max(2, Math.ceil((s.end - s.start) / 0.15))
-        for (let j = 0; j <= segs; j++) {
-          const a = s.start + (s.end - s.start) * (j / segs)
-          shape.lineTo(Math.cos(a) * R, Math.sin(a) * R)
-        }
-        shape.lineTo(0, 0)
-        const geo = new THREE.ExtrudeGeometry(shape, {
-          depth, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.12, bevelSegments: 2,
-        })
-        geo.rotateX(-Math.PI / 2) // lay flat, extrude up
         const mid = (s.start + s.end) / 2
         const explode = 0.4
         const col = s.color ? new THREE.Color(s.color) : colorFn(s.idx / Math.max(1, slices.length - 1))
         const labelR = R + 1.0
         return (
           <group key={s.idx} position={[Math.cos(mid) * explode, 0, -Math.sin(mid) * explode]}>
-            <mesh geometry={geo} position={[0, -depth / 2, 0]}>
+            <mesh geometry={s.geo} position={[0, -depth / 2, 0]}>
               <meshStandardMaterial color={col} roughness={0.45} metalness={0.08} />
             </mesh>
             <Billboard position={[Math.cos(mid) * labelR, depth, -Math.sin(mid) * labelR]}>
