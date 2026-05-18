@@ -4,7 +4,7 @@ import ForceGraph3D from 'react-force-graph-3d'
 import type { ForceGraphMethods } from 'react-force-graph-3d'
 import {
   FiSearch, FiX, FiRefreshCw, FiMaximize, FiCrosshair,
-  FiInfo, FiShare2,
+  FiInfo, FiShare2, FiRotateCw,
 } from 'react-icons/fi'
 import { api, apiClient } from '../services/api'
 
@@ -24,6 +24,7 @@ const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
   mutation: { bg: '#F97316', text: 'Mutation' },
 }
 const DEFAULT_COLOR = '#64748b'
+const DIM_NODE = '#1b2430'
 
 const RELATION_COLORS: Record<string, string> = {
   treats: '#10B981', targets: '#3B82F6', inhibits: '#EF4444',
@@ -74,8 +75,12 @@ interface GLink {
 function colorOf(type: string | null | undefined): string {
   return ENTITY_COLORS[(type || '').toLowerCase()]?.bg || DEFAULT_COLOR
 }
+function linkEnd(v: string | GNode): string {
+  return typeof v === 'object' ? v.id : v
+}
 
 const NODE_LIMIT = 1200
+const EMPTY_HL = { nodes: new Set<string>(), links: new Set<GLink>() }
 
 export default function KnowledgeGraph() {
   const [scope, setScope] = useState<Scope>('all')
@@ -86,6 +91,13 @@ export default function KnowledgeGraph() {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<GNode | null>(null)
 
+  // Hover / selection highlight — a node + its 1-hop neighbourhood.
+  const [highlight, setHighlight] = useState<{ nodes: Set<string>; links: Set<GLink> }>(EMPTY_HL)
+  // Gentle idle orbit — pauses the moment the user touches the graph.
+  const [autoRotate, setAutoRotate] = useState(true)
+  const autoRotateRef = useRef(true)
+  useEffect(() => { autoRotateRef.current = autoRotate }, [autoRotate])
+
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [dims, setDims] = useState({ w: 800, h: 600 })
@@ -94,6 +106,8 @@ export default function KnowledgeGraph() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setSelected(null)
+    setHighlight(EMPTY_HL)
     try {
       const { data } = await apiClient.get<ScopePayload>(
         `/knowledge-graph/scope/${scope}`,
@@ -105,6 +119,7 @@ export default function KnowledgeGraph() {
         total_nodes: data.total_nodes,
         total_edges: data.total_edges,
       })
+      setAutoRotate(true)
     } catch (e) {
       const err = e as { message?: string }
       setError(err?.message || 'Failed to load knowledge graph')
@@ -135,6 +150,26 @@ export default function KnowledgeGraph() {
     ro.observe(el)
     setDims({ w: Math.max(320, el.clientWidth), h: Math.max(320, el.clientHeight) })
     return () => ro.disconnect()
+  }, [])
+
+  // ── Idle auto-orbit — re-syncs from the live camera each resume so
+  // toggling it never snaps the view. ──
+  useEffect(() => {
+    let raf = 0
+    let angle: number | null = null
+    const tick = () => {
+      raf = requestAnimationFrame(tick)
+      const fg = fgRef.current
+      if (!fg || !autoRotateRef.current) { angle = null; return }
+      const cam = fg.camera()
+      if (!cam) return
+      const dist = Math.hypot(cam.position.x, cam.position.z) || 300
+      if (angle === null) angle = Math.atan2(cam.position.x, cam.position.z)
+      angle += 0.0016
+      fg.cameraPosition({ x: dist * Math.sin(angle), z: dist * Math.cos(angle) })
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
   }, [])
 
   // ── Build graph data (filtered by entity-type toggles) ──
@@ -186,9 +221,28 @@ export default function KnowledgeGraph() {
     return [...s].sort()
   }, [payload])
 
+  // 1-hop neighbourhood of a node — node ids + the GLink refs touching it.
+  const computeHighlight = useCallback((node: GNode | null) => {
+    if (!node) return EMPTY_HL
+    const nodes = new Set<string>([node.id])
+    const links = new Set<GLink>()
+    for (const l of graphData.links) {
+      const s = linkEnd(l.source)
+      const t = linkEnd(l.target)
+      if (s === node.id || t === node.id) {
+        links.add(l)
+        nodes.add(s)
+        nodes.add(t)
+      }
+    }
+    return { nodes, links }
+  }, [graphData.links])
+
   // Fly the camera to a node and select it.
   const focusNode = useCallback((node: GNode) => {
     setSelected(node)
+    setHighlight(computeHighlight(node))
+    setAutoRotate(false)
     const fg = fgRef.current
     if (fg && node.x != null && node.y != null && node.z != null) {
       const dist = 90
@@ -199,7 +253,13 @@ export default function KnowledgeGraph() {
         1400,
       )
     }
-  }, [])
+  }, [computeHighlight])
+
+  const handleNodeHover = useCallback((n: unknown) => {
+    const node = (n as GNode) || null
+    if (node) setAutoRotate(false)
+    setHighlight(computeHighlight(node || selected))
+  }, [computeHighlight, selected])
 
   const toggleType = (t: string) =>
     setHiddenTypes(prev => {
@@ -224,6 +284,7 @@ export default function KnowledgeGraph() {
   }, [selected, payload])
 
   const searchActive = matchedIds.size > 0
+  const hlActive = highlight.nodes.size > 0
 
   return (
     <div className="h-full flex flex-col bg-[var(--color-bg)]">
@@ -296,6 +357,18 @@ export default function KnowledgeGraph() {
           </div>
 
           <button
+            onClick={() => setAutoRotate(r => !r)}
+            title={autoRotate ? 'Stop auto-rotate' : 'Auto-rotate'}
+            className="p-2 rounded-lg border transition-colors"
+            style={{
+              background: autoRotate ? 'var(--color-text)' : 'var(--glass-bg)',
+              color: autoRotate ? 'var(--color-bg)' : 'var(--color-text-muted)',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <FiRotateCw className={`w-4 h-4 ${autoRotate ? 'animate-spin-slow' : ''}`} />
+          </button>
+          <button
             onClick={() => fgRef.current?.zoomToFit(800, 60)}
             title="Fit to view"
             className="p-2 rounded-lg bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
@@ -339,7 +412,11 @@ export default function KnowledgeGraph() {
       </div>
 
       {/* ── 3D viewport ── */}
-      <div ref={wrapRef} className="flex-1 relative overflow-hidden">
+      <div
+        ref={wrapRef}
+        className="flex-1 relative overflow-hidden"
+        onPointerDown={() => setAutoRotate(false)}
+      >
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/40 backdrop-blur-sm">
             <div className="text-sm text-[var(--color-text-muted)] flex items-center gap-2">
@@ -379,17 +456,17 @@ export default function KnowledgeGraph() {
           backgroundColor="#070a0f"
           showNavInfo={false}
           nodeRelSize={4}
-          nodeResolution={12}
-          nodeOpacity={0.95}
+          nodeResolution={16}
+          nodeOpacity={0.96}
           nodeVal={(n) => {
             const node = n as GNode
-            return Math.min(14, 3 + node.degree * 0.7)
+            const base = Math.min(14, 3 + node.degree * 0.7)
+            return highlight.nodes.has(node.id) ? base * 1.45 : base
           }}
           nodeColor={(n) => {
             const node = n as GNode
-            if (searchActive) {
-              return matchedIds.has(node.id) ? colorOf(node.type) : '#1f2a38'
-            }
+            if (hlActive) return highlight.nodes.has(node.id) ? colorOf(node.type) : DIM_NODE
+            if (searchActive) return matchedIds.has(node.id) ? colorOf(node.type) : '#1f2a38'
             return colorOf(node.type)
           }}
           nodeLabel={(n) => {
@@ -402,21 +479,33 @@ export default function KnowledgeGraph() {
           }}
           linkColor={(l) => {
             const link = l as GLink
+            if (hlActive) {
+              return highlight.links.has(link)
+                ? (RELATION_COLORS[link.relationship] || '#9bb0c9')
+                : 'rgba(120,140,165,0.05)'
+            }
             if (searchActive) return 'rgba(120,140,165,0.10)'
             return RELATION_COLORS[link.relationship] || 'rgba(140,160,185,0.32)'
           }}
-          linkWidth={(l) => Math.max(0.4, ((l as GLink).strength || 0.5) * 1.6)}
-          linkOpacity={0.55}
-          linkDirectionalParticles={graphData.links.length < 500 ? 2 : 0}
-          linkDirectionalParticleWidth={1.4}
+          linkWidth={(l) => {
+            const link = l as GLink
+            const base = Math.max(0.4, (link.strength || 0.5) * 1.6)
+            return highlight.links.has(link) ? base * 2.6 : base
+          }}
+          linkOpacity={0.6}
+          linkDirectionalParticles={(l) =>
+            highlight.links.has(l as GLink) ? 4 : (graphData.links.length < 500 ? 2 : 0)
+          }
+          linkDirectionalParticleWidth={1.6}
           linkDirectionalParticleSpeed={0.006}
           enableNodeDrag={false}
           enableNavigationControls
           cooldownTicks={180}
           warmupTicks={40}
           onEngineStop={() => fgRef.current?.zoomToFit(700, 60)}
+          onNodeHover={handleNodeHover}
           onNodeClick={(n) => focusNode(n as GNode)}
-          onBackgroundClick={() => setSelected(null)}
+          onBackgroundClick={() => { setSelected(null); setHighlight(EMPTY_HL) }}
         />
 
         {/* Legend */}
@@ -468,7 +557,7 @@ export default function KnowledgeGraph() {
                 </div>
               </div>
               <button
-                onClick={() => setSelected(null)}
+                onClick={() => { setSelected(null); setHighlight(EMPTY_HL) }}
                 className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex-shrink-0"
               >
                 <FiX className="w-4 h-4" />

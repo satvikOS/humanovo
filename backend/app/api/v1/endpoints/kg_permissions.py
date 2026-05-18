@@ -56,6 +56,25 @@ def _ensure_self_or_admin(target_user_id: str | UUID, current_user: User) -> Non
     if role_value == "admin":
         return
     raise HTTPException(status_code=404, detail="Not found")
+
+
+def _resolve_user_id(raw: str, current_user: User) -> UUID:
+    """Resolve a path `user_id`, accepting the `self` / `me` aliases.
+
+    The Settings page sends the literal string `self` — the JWT already
+    identifies the caller. Anything else must be a real UUID.
+    """
+    if raw.lower() in ("self", "me", "current"):
+        return UUID(str(current_user.id))
+    try:
+        return UUID(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="user_id must be a UUID or 'self'",
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
@@ -167,20 +186,21 @@ async def get_document_permission(
 
 @router.get("/user/{user_id}/royalties", response_model=RoyaltyResponse)
 async def get_user_royalties(
-    user_id: UUID = Path(..., min_length=1, max_length=128),
+    user_id: str = Path(..., min_length=1, max_length=128),
     days: int = Query(default=30, ge=1, le=365),
     current_user: User = Depends(get_current_active_user),
 ):
-    _ensure_self_or_admin(user_id, current_user)
+    uid = _resolve_user_id(user_id, current_user)
+    _ensure_self_or_admin(uid, current_user)
     svc = get_kg_first_service()
     try:
-        summary = await svc.royalty_summary(user_id=user_id, days=days)
+        summary = await svc.royalty_summary(user_id=uid, days=days)
     except Exception as e:
         logger.debug(f"royalty_summary failed (non-fatal): {e}")
-        summary = {"user_id": user_id, "window_days": days, "by_kind": [], "total_weight": 0.0}
+        summary = {"user_id": str(uid), "window_days": days, "by_kind": [], "total_weight": 0.0}
 
     return RoyaltyResponse(
-        user_id=summary["user_id"],
+        user_id=str(summary["user_id"]),
         window_days=summary["window_days"],
         by_kind=summary["by_kind"],
         total_weight=float(summary["total_weight"]),
@@ -199,32 +219,33 @@ async def get_user_royalties(
 
 @router.get("/user/{user_id}/kg/overview", response_model=KGOverview)
 async def get_user_kg_overview(
-    user_id: UUID = Path(..., min_length=1, max_length=128),
+    user_id: str = Path(..., min_length=1, max_length=128),
     current_user: User = Depends(get_current_active_user),
 ):
-    _ensure_self_or_admin(user_id, current_user)
+    uid = _resolve_user_id(user_id, current_user)
+    _ensure_self_or_admin(uid, current_user)
     svc = get_kg_first_service()
     await svc.ensure_schema()
 
     async with async_session_factory() as session:
         priv_nodes = await session.execute(
             text("SELECT COUNT(*) FROM kg_nodes WHERE scope='private' AND owner_user_id=:uid"),
-            {"uid": user_id},
+            {"uid": uid},
         )
         priv_edges = await session.execute(
             text("SELECT COUNT(*) FROM kg_edges WHERE scope='private' AND owner_user_id=:uid"),
-            {"uid": user_id},
+            {"uid": uid},
         )
         contrib = await session.execute(
             text("SELECT COUNT(*) FROM kg_nodes WHERE scope='common' AND owner_user_id=:uid"),
-            {"uid": user_id},
+            {"uid": uid},
         )
         royalty = await session.execute(
             text("""
                 SELECT COALESCE(SUM(multiplier),0)
                 FROM kg_royalty_events WHERE contributor_user_id=:uid
             """),
-            {"uid": user_id},
+            {"uid": uid},
         )
 
         def _scalar(row):
@@ -235,7 +256,7 @@ async def get_user_kg_overview(
             return int(v) if isinstance(v, int) else float(v or 0)
 
         return KGOverview(
-            user_id=user_id,
+            user_id=str(uid),
             private_nodes=_scalar(priv_nodes),
             private_edges=_scalar(priv_edges),
             common_contributions=_scalar(contrib),

@@ -732,20 +732,12 @@ function DataRightsPanel() {
 // reached the backend blocks new discovery runs with an explanatory
 // notification (UserBudgetBlocked).
 //
-// The user-id is read from the profile stored in localStorage (same
-// convention AccountSettings uses). When no profile exists we fall
-// back to the email; both are string-keyed on the server.
+// The /user/{id}/... endpoints accept the literal `self` alias and
+// resolve it to the caller via the JWT — no need to dig a real UUID
+// out of localStorage (the stored profile holds an email, which is
+// NOT a UUID and 422s the path validator).
 
 function _currentUserId(): string {
-  try {
-    const stored = localStorage.getItem('humanovo-user-profile')
-    if (stored) {
-      const p = JSON.parse(stored)
-      return p.email || p.name || 'self'
-    }
-  } catch {
-    // localStorage unavailable / parse failure — fall through to default.
-  }
   return 'self'
 }
 

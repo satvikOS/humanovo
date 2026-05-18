@@ -51,6 +51,26 @@ def _ensure_self_or_admin(path_user_id: UUID, current_user: User) -> None:
     if role_value == "admin":
         return
     raise HTTPException(status_code=404, detail="Not found")
+
+
+def _resolve_user_id(raw: str, current_user: User) -> UUID:
+    """Resolve a path `user_id`, accepting the `self` / `me` aliases.
+
+    The Settings page sends the literal string `self` — the JWT already
+    identifies the caller, so the path id is redundant for own-account
+    reads. Anything other than the aliases must be a real UUID.
+    """
+    if raw.lower() in ("self", "me", "current"):
+        return UUID(str(current_user.id))
+    try:
+        return UUID(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="user_id must be a UUID or 'self'",
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
@@ -111,7 +131,7 @@ class UsageBreakdown(BaseModel):
 
 @router.get("/{user_id}/budget", response_model=BudgetResponse)
 async def get_user_budget(
-    user_id: UUID = Path(..., min_length=1, max_length=128),
+    user_id: str = Path(..., min_length=1, max_length=128),
     current_user: User = Depends(get_current_active_user),
 ):
     """Return the user's monthly budget config + current spend state.
@@ -122,13 +142,14 @@ async def get_user_budget(
     Cross-tenant access (user_id != current_user.id) returns 404 unless
     the caller is an admin.
     """
-    _ensure_self_or_admin(user_id, current_user)
+    uid = _resolve_user_id(user_id, current_user)
+    _ensure_self_or_admin(uid, current_user)
     svc = get_user_budget_service()
-    cfg = await svc.get_or_create(user_id)
-    status = await svc.check(user_id)
+    cfg = await svc.get_or_create(uid)
+    status = await svc.check(uid)
 
     return BudgetResponse(
-        user_id=user_id,
+        user_id=str(uid),
         monthly_budget_usd=round(cfg["monthly_budget_cents"] / 100, 2),
         current_spend_usd=round(cfg["current_month_spend_cents"] / 100, 4),
         remaining_usd=round(status.remaining_cents / 100, 4),
@@ -153,11 +174,12 @@ async def get_user_budget(
 @router.put("/{user_id}/budget", response_model=BudgetResponse)
 async def update_user_budget(
     payload: BudgetUpdateRequest,
-    user_id: UUID = Path(..., min_length=1, max_length=128),
+    user_id: str = Path(..., min_length=1, max_length=128),
     current_user: User = Depends(get_current_active_user),
 ):
     """Update the user's monthly cap + threshold + hard-limit flag."""
-    _ensure_self_or_admin(user_id, current_user)
+    uid = _resolve_user_id(user_id, current_user)
+    _ensure_self_or_admin(uid, current_user)
     svc = get_user_budget_service()
     await svc.ensure_schema()
 
@@ -177,14 +199,14 @@ async def update_user_budget(
                     notification_email   = EXCLUDED.notification_email,
                     updated_at           = NOW()
             """), {
-                "uid": user_id,
+                "uid": uid,
                 "cap": payload.monthly_budget_cents,
                 "threshold": payload.alert_threshold_pct,
                 "hard": payload.hard_limit,
                 "email": payload.notification_email,
             })
 
-    return await get_user_budget(user_id, current_user)
+    return await get_user_budget(str(uid), current_user)
 
 
 # ---------------------------------------------------------------------------
@@ -194,12 +216,13 @@ async def update_user_budget(
 
 @router.get("/{user_id}/budget/usage", response_model=UsageBreakdown)
 async def get_user_budget_usage(
-    user_id: UUID = Path(..., min_length=1, max_length=128),
+    user_id: str = Path(..., min_length=1, max_length=128),
     days: int = Query(default=30, ge=1, le=365),
     current_user: User = Depends(get_current_active_user),
 ):
     """Return a breakdown of the user's real usage for the last N days."""
-    _ensure_self_or_admin(user_id, current_user)
+    uid = _resolve_user_id(user_id, current_user)
+    _ensure_self_or_admin(uid, current_user)
     start = date.today() - timedelta(days=days - 1)
     end = date.today()
 

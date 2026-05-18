@@ -10,6 +10,7 @@ import Plotly from '../lib/plotlyMin'
 import type { Data, Layout } from 'plotly.js'
 import { plotlyConfig } from '../utils/plotlyConfig'
 import { THEMES, type PublicationTheme } from '../utils/publicationTheme'
+import ChartErrorBoundary from './ChartErrorBoundary'
 
 // 3D plot traces are heterogeneous (scatter3d / mesh3d / surface / cone /
 // streamtube / ...). Plotly's strict union narrowing on `Data` rejects
@@ -841,7 +842,16 @@ export default function PlotlyPlot3D({
       // tick labels and the Z colorbar don't end up crammed together
       // in the corner.
       margin: { l: 20, r: 30, t: title ? 36 : 12, b: 20 },
-      height,
+      // `autosize` + NO explicit width/height in the layout: Plotly then
+      // measures the host <div> and sizes the plot — including the gl3d
+      // WebGL canvas — to the real container. A fixed layout.height with
+      // no layout.width made Plotly fall back to its hardcoded 700px
+      // default width; the gl3d `.gl-container` was then positioned for a
+      // 700px-wide plot area and rendered outside the (narrower) visible
+      // box, so the 3D scene showed as a blank region. 2D SVG traces
+      // (e.g. the pie) survive the mismatch because their content
+      // re-centres, which is why 2D rendered but 3D did not.
+      autosize: true,
       showlegend: hasCats || resolvedType === 'pie_3d',
       legend: { font: { color: chrome.font, size: 10, family: chrome.bodyFamily }, bgcolor: 'rgba(0,0,0,0)', orientation: 'h' as const, y: -0.05 },
     }
@@ -929,22 +939,24 @@ export default function PlotlyPlot3D({
         }
       `}</style>
       <div className="plotly-plot3d-wrapper" style={{ width: '100%', height: '100%' }}>
-        <Plot
-          data={traces as unknown as Data[]}
-          layout={layout as Partial<Layout>}
-          config={{
-            ...plotlyConfig({ hide: true }),
-            toImageButtonOptions: {
-              format: 'svg',
-              filename: title || '3d-visualization',
-              width: 3840,
-              height: 2160,
-            },
-            scrollZoom: true,
-          }}
-          style={{ width: '100%', height: '100%' }}
-          useResizeHandler
-        />
+        <ChartErrorBoundary resetKey={`${title}:${traces.length}:${resolvedType}`}>
+          <Plot
+            data={traces as unknown as Data[]}
+            layout={layout as Partial<Layout>}
+            config={{
+              ...plotlyConfig({ hide: true }),
+              toImageButtonOptions: {
+                format: 'svg',
+                filename: title || '3d-visualization',
+                width: 3840,
+                height: 2160,
+              },
+              scrollZoom: true,
+            }}
+            style={{ width: '100%', height: '100%' }}
+            useResizeHandler
+          />
+        </ChartErrorBoundary>
       </div>
     </div>
   )

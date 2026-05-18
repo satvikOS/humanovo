@@ -37,6 +37,7 @@ import ImagingPanel, { IMAGING_EVENT } from './ImagingPanel'
 import { getPlotBlob } from '../../utils/plotExport'
 import { plotlyConfig } from '../../utils/plotlyConfig'
 import PublicationFigure from '../../components/PublicationFigure'
+import ChartErrorBoundary from '../../components/ChartErrorBoundary'
 import { getPalette, makeTickFormatter } from '../../utils/publicationTheme'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
@@ -197,7 +198,10 @@ function serializeMValue(v: MValue): SerialMValue | null {
     case 'str':  return { kind: 'str',  v: v.v }
     case 'mat':  return { kind: 'mat',  rows: v.rows, cols: v.cols, data: Array.from(v.data) }
     case 'fn':
-    case 'void': return null
+    case 'void':
+    // Multi-output tuples are transient (returned by a multi-return call,
+    // collapsed at the assignment site) — never persisted to the workspace.
+    case 'tuple': return null
   }
 }
 
@@ -265,20 +269,22 @@ interface VarSnapshot {
 // to one monochrome character so the badges line up at the start of
 // each row without pulling focus away from the variable name.
 const VAR_KIND_LABEL: Record<MValue['kind'], string> = {
-  num:  'N',
-  bool: 'B',
-  str:  'S',
-  mat:  'M',
-  fn:   'ƒ',
-  void: '·',
+  num:   'N',
+  bool:  'B',
+  str:   'S',
+  mat:   'M',
+  fn:    'ƒ',
+  void:  '·',
+  tuple: 'T',
 }
 const VAR_KIND_TITLE: Record<MValue['kind'], string> = {
-  num:  'number',
-  bool: 'logical',
-  str:  'string',
-  mat:  'matrix',
-  fn:   'function handle',
-  void: 'void',
+  num:   'number',
+  bool:  'logical',
+  str:   'string',
+  mat:   'matrix',
+  fn:    'function handle',
+  void:  'void',
+  tuple: 'multi-output tuple',
 }
 
 function snapshotWorkspace(ws: Workspace): VarSnapshot[] {
@@ -310,6 +316,8 @@ function describeVar(name: string, v: MValue): VarSnapshot {
       return { name, kind: 'fn', shape: `arity ${v.arity}`, summary: `@${v.name}`, value: v }
     case 'void':
       return { name, kind: 'void', shape: '—', summary: '—', value: v }
+    case 'tuple':
+      return { name, kind: 'tuple', shape: `1x${v.values.length}`, summary: `{${v.values.length} values}`, value: v }
   }
 }
 
@@ -1998,6 +2006,12 @@ export default function Workstation() {
         }
       case 'void': return fmt === 'python' ? '[]' : fmt === 'json' ? '[]' : '[]'
       case 'fn':   return `@${v.name}`
+      // A multi-output tuple formats as its element list — recurse on each
+      // member so matrices/scalars inside still honour the target format.
+      case 'tuple': {
+        const parts = v.values.map(inner => formatVariableAs(inner, fmt))
+        return fmt === 'json' || fmt === 'python' ? `[${parts.join(', ')}]` : parts.join(', ')
+      }
       case 'mat': {
         const { rows, cols, data } = v
         const row = (r: number) => Array.from({ length: cols }, (_, c) => num(data[r * cols + c]))
@@ -2021,6 +2035,8 @@ export default function Workstation() {
           case 'csv': {
             return Array.from({ length: rows }, (_, r) => row(r).join(',')).join('\n')
           }
+          default:
+            return Array.from({ length: rows }, (_, r) => row(r).join(', ')).join('; ')
         }
       }
     }
@@ -8503,7 +8519,9 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
           exportName={(plot.title || `figure-${mode}`).replace(/[^\w-]+/g, '_')}
         >
           <div style={{ width: '100%', height: 480 }}>
-            <PlotlyChart data={traces as unknown as Data[]} layout={layout as Partial<Layout>} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
+            <ChartErrorBoundary resetKey={`${plot.title}:${traces.length}:${mode}`}>
+              <PlotlyChart data={traces as unknown as Data[]} layout={layout as Partial<Layout>} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
+            </ChartErrorBoundary>
           </div>
         </PublicationFigure>
       </div>

@@ -8,14 +8,17 @@
 // -----------------------------------------------------------------------------
 
 /** Runtime value tag. */
-export type MKind = 'num' | 'mat' | 'str' | 'bool' | 'fn' | 'void'
+export type MKind = 'num' | 'mat' | 'str' | 'bool' | 'fn' | 'void' | 'tuple'
 
 /** A scalar number. Internally scalars are technically 1x1 matrices,
  *  but we keep a fast path to avoid allocation churn. */
 export interface MNum { kind: 'num'; v: number }
 
-/** Row-major real matrix. `data.length === rows * cols`. */
-export interface MMat { kind: 'mat'; rows: number; cols: number; data: Float64Array }
+/** Row-major real matrix. `data.length === rows * cols`.
+ *  `logical` marks a matrix produced by a comparison / logical operator —
+ *  MATLAB uses this to distinguish `v(mask)` (select where true) from
+ *  `v(idx)` (positional indexing). */
+export interface MMat { kind: 'mat'; rows: number; cols: number; data: Float64Array; logical?: boolean }
 
 /** Character row vector (strings are rows of chars). */
 export interface MStr { kind: 'str'; v: string }
@@ -28,15 +31,29 @@ export interface MFn {
   kind: 'fn'
   name: string
   arity: number // -1 = variadic
-  builtin?: (args: MValue[]) => MValue
+  /** `nargout` is the number of outputs the caller requested (1 by default,
+   *  >1 inside a `[a,b,...] = f(...)` destructure). MATLAB builtins behave
+   *  differently depending on it — e.g. `size`, `min`, `max`, `sort`. */
+  builtin?: (args: MValue[], nargout?: number) => MValue
   params?: string[]
+  /** Declared output variable names for user functions (MATLAB
+   *  `function [a,b] = f(...)`). Empty for builtins / expression-bodied
+   *  anonymous functions. */
+  outputs?: string[]
   body?: Stmt[]
 }
 
 /** Unit value used by statements that do not return anything. */
 export interface MVoid { kind: 'void' }
 
-export type MValue = MNum | MMat | MStr | MBool | MFn | MVoid
+/** Multiple return values from a builtin / user function. Produced by
+ *  functions like `meshgrid`, `fft`, `lu`, `qr`, `eig`, `size`, `min`,
+ *  `max`, `sort`, `find` when MATLAB returns more than one output. A
+ *  multi-assignment `[a,b] = f(...)` destructures it; in any single-value
+ *  context the first element is used (matching MATLAB's `nargout==1`). */
+export interface MTuple { kind: 'tuple'; values: MValue[] }
+
+export type MValue = MNum | MMat | MStr | MBool | MFn | MVoid | MTuple
 
 // -----------------------------------------------------------------------------
 // Workspace
@@ -78,6 +95,10 @@ export interface Token {
   pos: number
   line: number
   col: number
+  /** True if whitespace immediately precedes this token. MATLAB matrix
+   *  literals are whitespace-sensitive: `[1 -2]` is two elements but
+   *  `[1 - 2]` / `[1- 2]` is one. */
+  spaceBefore?: boolean
 }
 
 const KEYWORDS: Record<string, TokType> = {
@@ -116,8 +137,10 @@ export function tokenize(src: string): Token[] {
   let col = 1
   const n = src.length
 
+  let pendingSpace = false
   const push = (type: TokType, value: string, pos: number, l: number, c: number) => {
-    out.push({ type, value, pos, line: l, col: c })
+    out.push({ type, value, pos, line: l, col: c, spaceBefore: pendingSpace })
+    pendingSpace = false
   }
 
   const peek = (k = 0) => (i + k < n ? src[i + k] : '')
@@ -134,7 +157,7 @@ export function tokenize(src: string): Token[] {
     const ch = peek()
 
     // Skip spaces and tabs (newlines are significant)
-    if (ch === ' ' || ch === '\t' || ch === '\r') { advance(); continue }
+    if (ch === ' ' || ch === '\t' || ch === '\r') { advance(); pendingSpace = true; continue }
 
     // Line continuation: ... or \ at end of line
     if (ch === '.' && peek(1) === '.' && peek(2) === '.') {
@@ -361,6 +384,12 @@ class Parser {
   private i = 0
   /** Depth of nested indexing expressions — inside these, `end` is a sentinel. */
   private indexDepth = 0
+  /** Depth of matrix/cell literal nesting. Inside a literal, a space-
+   *  separated `+`/`-` that hugs the following token (`[1 -2]`) starts a
+   *  NEW element rather than continuing the current expression. Bracket/
+   *  paren groups inside the literal reset this so `[(1 - 2)]` still works. */
+  private matrixDepth = 0
+  private parenDepth = 0
 
   constructor(private toks: Token[]) {}
 
@@ -535,9 +564,15 @@ class Parser {
       let ok = true
       try {
         while (this.peek().type !== ']') {
-          // Targets must be plain identifiers or indexed identifiers
-          const t = this.parseUnary()
-          targets.push(t)
+          // Targets must be plain identifiers or indexed identifiers.
+          // A bare '~' is the "ignore this output" placeholder.
+          if (this.peek().type === '~' &&
+              (this.peek(1).type === ',' || this.peek(1).type === ']')) {
+            this.i++
+            targets.push({ type: 'ident', name: '~' })
+          } else {
+            targets.push(this.parseUnary())
+          }
           if (!this.match(',')) break
         }
         if (this.peek().type !== ']') { ok = false }
@@ -628,10 +663,24 @@ class Parser {
   private parseAdditive(): Expr {
     let l = this.parseMultiplicative()
     while (true) {
-      const t = this.peek().type
-      if (t === '+' || t === '-' || t === '.+' || t === '.-') {
-        this.i++; const r = this.parseMultiplicative()
-        l = { type: 'bin', op: t, l, r }
+      const t = this.peek()
+      if (t.type === '+' || t.type === '-' || t.type === '.+' || t.type === '.-') {
+        // Whitespace-sensitive matrix-literal rule: inside a [..] / {..}
+        // literal (and not inside a nested paren group), `[1 -2]` is two
+        // elements. Detect: operator has a space before it but the token
+        // that follows does not — that hugging sign opens a new element.
+        if (this.matrixDepth > 0 && this.parenDepth === 0 &&
+            t.spaceBefore && !this.peek(1).spaceBefore) {
+          const after = this.peek(1).type
+          // Only treat as a boundary when a value can actually follow.
+          if (after === 'num' || after === 'ident' || after === '(' ||
+              after === '[' || after === 'str' || after === '@') {
+            break
+          }
+        }
+        this.i++
+        const r = this.parseMultiplicative()
+        l = { type: 'bin', op: t.type, l, r }
       } else break
     }
     return l
@@ -677,23 +726,33 @@ class Parser {
         // Call / index
         this.i++
         this.indexDepth++
+        this.parenDepth++
         const args: Expr[] = []
-        while (this.peek().type !== ')') {
-          args.push(this.parseIndexArg())
-          if (!this.match(',')) break
+        try {
+          while (this.peek().type !== ')') {
+            args.push(this.parseIndexArg())
+            if (!this.match(',')) break
+          }
+        } finally {
+          this.indexDepth--
+          this.parenDepth--
         }
-        this.indexDepth--
         this.expect(')')
         e = { type: 'call', callee: e, args }
       } else if (t === '{' && (e.type === 'ident' || e.type === 'call' || e.type === 'index')) {
         this.i++
         this.indexDepth++
+        this.parenDepth++
         const args: Expr[] = []
-        while (this.peek().type !== '}') {
-          args.push(this.parseIndexArg())
-          if (!this.match(',')) break
+        try {
+          while (this.peek().type !== '}') {
+            args.push(this.parseIndexArg())
+            if (!this.match(',')) break
+          }
+        } finally {
+          this.indexDepth--
+          this.parenDepth--
         }
-        this.indexDepth--
         this.expect('}')
         e = { type: 'index', target: e, args }
       } else break
@@ -721,7 +780,10 @@ class Parser {
         throw new ParseError(`unexpected 'end'`, t.line, t.col)
       case '(': {
         this.i++
-        const e = this.parseExpr()
+        this.parenDepth++
+        let e: Expr
+        try { e = this.parseExpr() }
+        finally { this.parenDepth-- }
         this.expect(')')
         return e
       }
@@ -735,14 +797,22 @@ class Parser {
     this.expect('[')
     const rows: Expr[][] = []
     let current: Expr[] = []
-    while (this.peek().type !== ']') {
-      if (this.peek().type === ';' || this.peek().type === 'nl') {
-        this.i++
-        if (current.length > 0) { rows.push(current); current = [] }
-        continue
+    this.matrixDepth++
+    const savedParen = this.parenDepth
+    this.parenDepth = 0
+    try {
+      while (this.peek().type !== ']') {
+        if (this.peek().type === ';' || this.peek().type === 'nl') {
+          this.i++
+          if (current.length > 0) { rows.push(current); current = [] }
+          continue
+        }
+        current.push(this.parseExpr())
+        if (this.peek().type === ',') { this.i++; continue }
       }
-      current.push(this.parseExpr())
-      if (this.peek().type === ',') { this.i++; continue }
+    } finally {
+      this.matrixDepth--
+      this.parenDepth = savedParen
     }
     if (current.length > 0) rows.push(current)
     this.expect(']')
@@ -752,14 +822,22 @@ class Parser {
     this.expect('{')
     const rows: Expr[][] = []
     let current: Expr[] = []
-    while (this.peek().type !== '}') {
-      if (this.peek().type === ';' || this.peek().type === 'nl') {
-        this.i++
-        if (current.length > 0) { rows.push(current); current = [] }
-        continue
+    this.matrixDepth++
+    const savedParen = this.parenDepth
+    this.parenDepth = 0
+    try {
+      while (this.peek().type !== '}') {
+        if (this.peek().type === ';' || this.peek().type === 'nl') {
+          this.i++
+          if (current.length > 0) { rows.push(current); current = [] }
+          continue
+        }
+        current.push(this.parseExpr())
+        if (this.peek().type === ',') { this.i++; continue }
       }
-      current.push(this.parseExpr())
-      if (this.peek().type === ',') { this.i++; continue }
+    } finally {
+      this.matrixDepth--
+      this.parenDepth = savedParen
     }
     if (current.length > 0) rows.push(current)
     this.expect('}')
@@ -824,28 +902,47 @@ export function mmat(rows: number, cols: number, data: Float64Array | number[]):
 }
 export function mscalar(v: number): MMat { return mmat(1, 1, [v]) }
 export const MVOID: MVoid = { kind: 'void' }
+export function mtuple(values: MValue[]): MTuple { return { kind: 'tuple', values } }
+
+/** Collapse a multi-output tuple to its first element. Any value that is
+ *  not a tuple is returned unchanged. Applied wherever a single value is
+ *  expected — matching MATLAB's `nargout == 1` behaviour. */
+export function firstVal(v: MValue): MValue {
+  if (v.kind === 'tuple') return v.values.length ? firstVal(v.values[0]) : MVOID
+  return v
+}
 
 export function toNumber(v: MValue): number {
+  v = firstVal(v)
   if (v.kind === 'num') return v.v
   if (v.kind === 'bool') return v.v ? 1 : 0
   if (v.kind === 'mat' && v.rows === 1 && v.cols === 1) return v.data[0]
+  if (v.kind === 'mat' && v.data.length >= 1) return v.data[0]
   throw new RuntimeError(`cannot convert ${v.kind} to scalar`)
 }
 export function toBool(v: MValue): boolean {
+  v = firstVal(v)
   if (v.kind === 'bool') return v.v
   if (v.kind === 'num') return v.v !== 0
   if (v.kind === 'mat') {
     if (v.data.length === 0) return false
-    for (let i = 0; i < v.data.length; i++) if (v.data[i] === 0) return false
+    for (let i = 0; i < v.data.length; i++) if (v.data[i] === 0 || Number.isNaN(v.data[i])) return false
     return true
   }
   if (v.kind === 'str') return v.v.length > 0
   return false
 }
 export function toMat(v: MValue): MMat {
+  v = firstVal(v)
   if (v.kind === 'mat') return v
   if (v.kind === 'num') return mscalar(v.v)
   if (v.kind === 'bool') return mscalar(v.v ? 1 : 0)
+  if (v.kind === 'str') {
+    // Char row vector — treat as numeric codepoints (MATLAB semantics).
+    const d = new Float64Array(v.v.length)
+    for (let i = 0; i < v.v.length; i++) d[i] = v.v.charCodeAt(i)
+    return mmat(v.v.length ? 1 : 0, v.v.length, d)
+  }
   throw new RuntimeError(`cannot convert ${v.kind} to matrix`)
 }
 
@@ -855,8 +952,21 @@ function isScalar(v: MValue): boolean {
 
 // ---- Arithmetic ------------------------------------------------------------
 
+/**
+ * Element-wise binary op with MATLAB-style implicit expansion (broadcasting).
+ * A dimension is compatible if the two sizes are equal OR one of them is 1;
+ * a size-1 dimension is virtually expanded to match the other operand.
+ * This is the behaviour MATLAB has had since R2016b, e.g. a 40x2 matrix
+ * plus a 1x2 row vector broadcasts the row across all 40 rows.
+ */
 function elemBinary(a: MMat, b: MMat, fn: (x: number, y: number) => number, op: string): MMat {
-  // Scalar broadcasting
+  // Fast path: identical shapes.
+  if (a.rows === b.rows && a.cols === b.cols) {
+    const out = new Float64Array(a.data.length)
+    for (let i = 0; i < a.data.length; i++) out[i] = fn(a.data[i], b.data[i])
+    return { kind: 'mat', rows: a.rows, cols: a.cols, data: out }
+  }
+  // Fast path: scalar on either side.
   if (a.rows === 1 && a.cols === 1) {
     const s = a.data[0]
     const out = new Float64Array(b.data.length)
@@ -869,13 +979,29 @@ function elemBinary(a: MMat, b: MMat, fn: (x: number, y: number) => number, op: 
     for (let i = 0; i < a.data.length; i++) out[i] = fn(a.data[i], s)
     return { kind: 'mat', rows: a.rows, cols: a.cols, data: out }
   }
-  if (a.rows !== b.rows || a.cols !== b.cols) {
+  // General implicit expansion: each dimension must match or be 1.
+  const rowsOk = a.rows === b.rows || a.rows === 1 || b.rows === 1
+  const colsOk = a.cols === b.cols || a.cols === 1 || b.cols === 1
+  if (!rowsOk || !colsOk) {
     throw new RuntimeError(`${op}: nonconformant arguments (${a.rows}x${a.cols} vs ${b.rows}x${b.cols})`)
   }
-  const out = new Float64Array(a.data.length)
-  for (let i = 0; i < a.data.length; i++) out[i] = fn(a.data[i], b.data[i])
-  return { kind: 'mat', rows: a.rows, cols: a.cols, data: out }
+  const rows = Math.max(a.rows, b.rows)
+  const cols = Math.max(a.cols, b.cols)
+  const out = new Float64Array(rows * cols)
+  for (let r = 0; r < rows; r++) {
+    const ar = a.rows === 1 ? 0 : r
+    const br = b.rows === 1 ? 0 : r
+    for (let c = 0; c < cols; c++) {
+      const ac = a.cols === 1 ? 0 : c
+      const bc = b.cols === 1 ? 0 : c
+      out[r * cols + c] = fn(a.data[ar * a.cols + ac], b.data[br * b.cols + bc])
+    }
+  }
+  return { kind: 'mat', rows, cols, data: out }
 }
+
+/** Tag a matrix as logical (result of a comparison / logical operator). */
+function asLogical(m: MMat): MMat { m.logical = true; return m }
 
 function matMul(a: MMat, b: MMat): MMat {
   if (a.rows === 1 && a.cols === 1) return elemBinary(a, b, (x, y) => x * y, '*')
@@ -1010,6 +1136,98 @@ function matPow(a: MMat, p: number): MMat {
   return result
 }
 
+/** QR decomposition via the Gram–Schmidt process. Returns Q (m×n,
+ *  orthonormal columns) and R (n×n, upper triangular) such that A = Q*R.
+ *  Modified Gram–Schmidt is used for numerical stability. */
+function qrDecompose(a: MMat): { Q: MMat; R: MMat } {
+  const m = a.rows, n = a.cols
+  // Column-major working copy of A's columns.
+  const cols: Float64Array[] = []
+  for (let j = 0; j < n; j++) {
+    const col = new Float64Array(m)
+    for (let i = 0; i < m; i++) col[i] = a.data[i * n + j]
+    cols.push(col)
+  }
+  const Q: Float64Array[] = []
+  const R = new Float64Array(n * n)
+  for (let j = 0; j < n; j++) {
+    const v = Float64Array.from(cols[j])
+    for (let k = 0; k < j; k++) {
+      let dot = 0
+      for (let i = 0; i < m; i++) dot += Q[k][i] * cols[j][i]
+      R[k * n + j] = dot
+      for (let i = 0; i < m; i++) v[i] -= dot * Q[k][i]
+    }
+    let norm = 0
+    for (let i = 0; i < m; i++) norm += v[i] * v[i]
+    norm = Math.sqrt(norm)
+    R[j * n + j] = norm
+    const q = new Float64Array(m)
+    if (norm > 1e-300) for (let i = 0; i < m; i++) q[i] = v[i] / norm
+    Q.push(q)
+  }
+  const Qdata = new Float64Array(m * n)
+  for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) Qdata[i * n + j] = Q[j][i]
+  return { Q: mmat(m, n, Qdata), R: mmat(n, n, R) }
+}
+
+/** Eigenvalues of a square matrix via the unshifted QR algorithm.
+ *  Converges for matrices with real eigenvalues (covers the symmetric
+ *  case exactly and most well-conditioned general matrices). Returns the
+ *  eigenvalues sorted descending by magnitude. */
+function eigenvalues(a: MMat): number[] {
+  const n = a.rows
+  let A = new Float64Array(a.data)
+  for (let iter = 0; iter < 500; iter++) {
+    const Am: MMat = { kind: 'mat', rows: n, cols: n, data: A }
+    const { Q, R } = qrDecompose(Am)
+    // A_next = R * Q
+    const next = new Float64Array(n * n)
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        let s = 0
+        for (let k = 0; k < n; k++) s += R.data[i * n + k] * Q.data[k * n + j]
+        next[i * n + j] = s
+      }
+    }
+    // Convergence: sub-diagonal mass below tolerance.
+    let off = 0
+    for (let i = 1; i < n; i++) for (let j = 0; j < i; j++) off += Math.abs(next[i * n + j])
+    A = next
+    if (off < 1e-12) break
+  }
+  const evals: number[] = []
+  for (let i = 0; i < n; i++) evals.push(A[i * n + i])
+  evals.sort((x, y) => Math.abs(y) - Math.abs(x))
+  return evals
+}
+
+/** Singular values of an m×n matrix: the square roots of the eigenvalues
+ *  of A^T·A (or A·A^T, whichever is smaller). */
+function singularValues(a: MMat): number[] {
+  const m = a.rows, n = a.cols
+  const dim = Math.min(m, n)
+  // Build the smaller Gram matrix.
+  const useAtA = n <= m
+  const k = useAtA ? n : m
+  const G = new Float64Array(k * k)
+  for (let i = 0; i < k; i++) {
+    for (let j = 0; j < k; j++) {
+      let s = 0
+      if (useAtA) {
+        for (let r = 0; r < m; r++) s += a.data[r * n + i] * a.data[r * n + j]
+      } else {
+        for (let c = 0; c < n; c++) s += a.data[i * n + c] * a.data[j * n + c]
+      }
+      G[i * k + j] = s
+    }
+  }
+  const ev = eigenvalues({ kind: 'mat', rows: k, cols: k, data: G })
+  const sv = ev.map(e => Math.sqrt(Math.max(0, e)))
+  sv.sort((x, y) => y - x)
+  return sv.slice(0, dim)
+}
+
 // ---- Binary op dispatch ----------------------------------------------------
 
 function applyBinOp(op: string, l: MValue, r: MValue): MValue {
@@ -1046,14 +1264,14 @@ function applyBinOp(op: string, l: MValue, r: MValue): MValue {
       if (isScalar(B)) return matPow(A, B.data[0])
       throw new RuntimeError('^: exponent must be scalar')
     }
-    case '==': return elemBinary(A, B, (x, y) => x === y ? 1 : 0, op)
-    case '~=': case '!=': return elemBinary(A, B, (x, y) => x !== y ? 1 : 0, op)
-    case '<': return elemBinary(A, B, (x, y) => x < y ? 1 : 0, op)
-    case '<=': return elemBinary(A, B, (x, y) => x <= y ? 1 : 0, op)
-    case '>': return elemBinary(A, B, (x, y) => x > y ? 1 : 0, op)
-    case '>=': return elemBinary(A, B, (x, y) => x >= y ? 1 : 0, op)
-    case '&': return elemBinary(A, B, (x, y) => (x !== 0 && y !== 0) ? 1 : 0, op)
-    case '|': return elemBinary(A, B, (x, y) => (x !== 0 || y !== 0) ? 1 : 0, op)
+    case '==': return asLogical(elemBinary(A, B, (x, y) => x === y ? 1 : 0, op))
+    case '~=': case '!=': return asLogical(elemBinary(A, B, (x, y) => x !== y ? 1 : 0, op))
+    case '<': return asLogical(elemBinary(A, B, (x, y) => x < y ? 1 : 0, op))
+    case '<=': return asLogical(elemBinary(A, B, (x, y) => x <= y ? 1 : 0, op))
+    case '>': return asLogical(elemBinary(A, B, (x, y) => x > y ? 1 : 0, op))
+    case '>=': return asLogical(elemBinary(A, B, (x, y) => x >= y ? 1 : 0, op))
+    case '&': return asLogical(elemBinary(A, B, (x, y) => (x !== 0 && y !== 0) ? 1 : 0, op))
+    case '|': return asLogical(elemBinary(A, B, (x, y) => (x !== 0 || y !== 0) ? 1 : 0, op))
   }
   throw new RuntimeError(`unsupported operator ${op}`)
 }
@@ -1071,7 +1289,7 @@ function applyUnaryOp(op: string, v: MValue): MValue {
       const m = toMat(v)
       const out = new Float64Array(m.data.length)
       for (let i = 0; i < m.data.length; i++) out[i] = m.data[i] === 0 ? 1 : 0
-      return { kind: 'mat', rows: m.rows, cols: m.cols, data: out }
+      return { kind: 'mat', rows: m.rows, cols: m.cols, data: out, logical: true }
     }
     case "'": case ".'": return matTranspose(toMat(v))
   }
@@ -1143,6 +1361,19 @@ function resolveIndices(arg: MValue | 'colon', size: number): number[] {
     return out
   }
   const m = toMat(arg)
+  // Logical-mask indexing: select the positions where the mask is true.
+  // MATLAB distinguishes `v(mask)` (mask) from `v(idx)` (positional) by
+  // the logical type, which the engine tracks via `MMat.logical`.
+  if (m.logical) {
+    const out: number[] = []
+    for (let i = 0; i < m.data.length; i++) {
+      if (m.data[i] !== 0) {
+        if (i >= size) throw new RuntimeError(`logical index out of bounds: ${i + 1} (size ${size})`)
+        out.push(i)
+      }
+    }
+    return out
+  }
   const out = new Array(m.data.length)
   for (let i = 0; i < m.data.length; i++) {
     const v = Math.round(m.data[i])
@@ -1205,8 +1436,61 @@ function getIndexed(target: MValue, args: (MValue | 'colon')[]): MValue {
   throw new RuntimeError(`indexing with ${args.length} subscripts not supported`)
 }
 
+// Numeric (1-based) indices a subscript asks for, or null when the
+// subscript can't drive auto-growth (colon spans the existing dim;
+// a logical mask is bounded by the existing size).
+function _requestedIndices(arg: MValue | 'colon'): number[] | null {
+  if (arg === 'colon') return null
+  const m = toMat(arg)
+  if (m.logical) return null
+  return Array.from(m.data, x => Math.round(x))
+}
+
+// MATLAB implicit growth: `v(8) = x` on a length-3 vector extends it
+// (zero-filling the gap); `A(i,j) = x` extends rows/cols. Mutates the
+// target in place so the assignment loops below see the grown shape.
+function _growForAssignment(target: MMat, args: (MValue | 'colon')[]): void {
+  if (args.length === 1) {
+    const req = _requestedIndices(args[0])
+    if (!req || req.length === 0) return
+    const maxIdx = Math.max(...req)
+    const cur = target.rows * target.cols
+    if (maxIdx <= cur) return
+    const isRow = target.rows <= 1
+    const isCol = target.cols <= 1
+    if (!isRow && !isCol) {
+      throw new RuntimeError(
+        `cannot grow a ${target.rows}x${target.cols} matrix with a single linear index`,
+      )
+    }
+    const grown = new Float64Array(maxIdx)
+    grown.set(target.data.subarray(0, cur))
+    target.data = grown
+    if (isRow) { target.rows = 1; target.cols = maxIdx }
+    else { target.rows = maxIdx; target.cols = 1 }
+    return
+  }
+  if (args.length === 2) {
+    const reqR = _requestedIndices(args[0])
+    const reqC = _requestedIndices(args[1])
+    const newRows = Math.max(target.rows, reqR && reqR.length ? Math.max(...reqR) : 0)
+    const newCols = Math.max(target.cols, reqC && reqC.length ? Math.max(...reqC) : 0)
+    if (newRows === target.rows && newCols === target.cols) return
+    const grown = new Float64Array(newRows * newCols)
+    for (let r = 0; r < target.rows; r++) {
+      for (let c = 0; c < target.cols; c++) {
+        grown[r * newCols + c] = target.data[r * target.cols + c]
+      }
+    }
+    target.data = grown
+    target.rows = newRows
+    target.cols = newCols
+  }
+}
+
 function setIndexed(target: MMat, args: (MValue | 'colon')[], value: MValue): MMat {
   const v = toMat(value)
+  _growForAssignment(target, args)
   if (args.length === 1) {
     const idx = resolveIndices(args[0], target.rows * target.cols)
     const src = v.data
@@ -1241,7 +1525,7 @@ function setIndexed(target: MMat, args: (MValue | 'colon')[], value: MValue): MM
 
 // ---- Core eval --------------------------------------------------------------
 
-function evalExpr(e: Expr, ctx: EvalContext): MValue {
+function evalExpr(e: Expr, ctx: EvalContext, nargout = 1): MValue {
   switch (e.type) {
     case 'num': return mnum(e.value)
     case 'str': return mstr(e.value)
@@ -1305,7 +1589,7 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
         const userFn = ctx.ws.fns.get(name) ?? (vv && vv.kind === 'fn' ? vv : undefined) ?? ctx.builtins.get(name)
         if (userFn) {
           const args = e.args.map(a => evalExpr(a, ctx))
-          return callFn(userFn, args, ctx)
+          return callFn(userFn, args, ctx, nargout)
         }
         throw new RuntimeError(`'${name}' is undefined`)
       }
@@ -1313,7 +1597,7 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
       const callee = evalExpr(e.callee, ctx)
       if (callee.kind === 'fn') {
         const args = e.args.map(a => evalExpr(a, ctx))
-        return callFn(callee, args, ctx)
+        return callFn(callee, args, ctx, nargout)
       }
       return getIndexed(callee, evalIndexArgs(callee, e.args, ctx))
     }
@@ -1345,23 +1629,32 @@ function evalExpr(e: Expr, ctx: EvalContext): MValue {
   throw new RuntimeError(`unknown expression`)
 }
 
-function callFn(fn: MFn, args: MValue[], ctx: EvalContext): MValue {
-  if (fn.builtin) return fn.builtin(args)
-  if (!fn.body || !fn.params) throw new RuntimeError(`function '${fn.name}' has no body`)
+function callFn(fn: MFn, args: MValue[], ctx: EvalContext, nargout = 1): MValue {
+  if (fn.builtin) return fn.builtin(args.map(firstVal), nargout)
+  if (!fn.body) throw new RuntimeError(`function '${fn.name}' has no body`)
   const savedVars = ctx.ws.vars
   const scope = new Map<string, MValue>()
-  for (let i = 0; i < fn.params.length; i++) scope.set(fn.params[i], args[i] ?? MVOID)
+  const params = fn.params ?? []
+  for (let i = 0; i < params.length; i++) scope.set(params[i], firstVal(args[i] ?? MVOID))
   ctx.ws.vars = scope
   try {
     evalBlock(fn.body, ctx)
   } catch (sig) {
     if (!(sig instanceof ReturnSignal)) throw sig
   }
-  // First output variable, or 'ans'
-  // (User-defined output variables are handled in Batch 3d when we parse them fully.)
-  const ans = ctx.ws.vars.get('ans') ?? MVOID
+  // Resolve declared output variables. The function AST is stored on the
+  // workspace; if the function declares named outputs, return them as a
+  // tuple, otherwise fall back to 'ans'.
+  const outs = fn.outputs ?? []
+  let result: MValue
+  if (outs.length > 0) {
+    const vals = outs.map(o => ctx.ws.vars.get(o) ?? MVOID)
+    result = vals.length === 1 ? vals[0] : mtuple(vals)
+  } else {
+    result = ctx.ws.vars.get('ans') ?? MVOID
+  }
   ctx.ws.vars = savedVars
-  return ans
+  return result
 }
 
 function evalBlock(stmts: Stmt[], ctx: EvalContext): void {
@@ -1396,7 +1689,7 @@ function assignTo(target: Expr, value: MValue, ctx: EvalContext): void {
 function evalStmt(s: Stmt, ctx: EvalContext): void {
   switch (s.type) {
     case 'expr': {
-      const v = evalExpr(s.expr, ctx)
+      const v = firstVal(evalExpr(s.expr, ctx))
       if (v.kind !== 'void') {
         ctx.ws.vars.set('ans', v)
         if (!s.silent) ctx.outputs.push({ kind: 'text', text: formatValue('ans', v) })
@@ -1404,7 +1697,7 @@ function evalStmt(s: Stmt, ctx: EvalContext): void {
       return
     }
     case 'assign': {
-      const v = evalExpr(s.value, ctx)
+      const v = firstVal(evalExpr(s.value, ctx))
       assignTo(s.target, v, ctx)
       if (!s.silent && s.target.type === 'ident') {
         ctx.outputs.push({ kind: 'text', text: formatValue(s.target.name, v) })
@@ -1412,20 +1705,32 @@ function evalStmt(s: Stmt, ctx: EvalContext): void {
       return
     }
     case 'multiassign': {
-      // Best-effort: evaluate RHS once, unpack into identifiers.
-      const v = evalExpr(s.value, ctx)
+      // Evaluate RHS once. A function that produces multiple outputs returns
+      // an MTuple — destructure it position-for-position. A bare value goes
+      // to the first target (MATLAB allows [a] = f() and [a,~] = f()).
+      const v = evalExpr(s.value, ctx, s.targets.length)
+      const parts: MValue[] = v.kind === 'tuple' ? v.values : [v]
       for (let i = 0; i < s.targets.length; i++) {
         const t = s.targets[i]
-        if (t.type !== 'ident') throw new RuntimeError('multi-assign targets must be identifiers')
-        // If value is a matrix, distribute columns; otherwise same value to first target
-        if (v.kind === 'mat' && v.cols >= s.targets.length) {
-          const col = new Float64Array(v.rows)
-          for (let r = 0; r < v.rows; r++) col[r] = v.data[r * v.cols + i]
-          ctx.ws.vars.set(t.name, v.rows === 1 ? mnum(col[0]) : mmat(v.rows, 1, col))
-        } else if (i === 0) {
-          ctx.ws.vars.set(t.name, v)
+        const piece = i < parts.length ? firstVal(parts[i]) : MVOID
+        // `~` placeholder discards the output.
+        if (t.type === 'ident' && t.name === '~') continue
+        if (t.type === 'ident') {
+          ctx.ws.vars.set(t.name, piece)
+        } else if (t.type === 'call' && t.callee.type === 'ident') {
+          // Indexed multi-assign target, e.g. [m(1), m(2)] = f().
+          assignTo(t, piece, ctx)
         } else {
-          ctx.ws.vars.set(t.name, MVOID)
+          throw new RuntimeError('multi-assign targets must be identifiers')
+        }
+      }
+      if (!s.silent && s.targets.length) {
+        for (let i = 0; i < s.targets.length; i++) {
+          const t = s.targets[i]
+          if (t.type === 'ident' && t.name !== '~') {
+            const cur = ctx.ws.vars.get(t.name)
+            if (cur) ctx.outputs.push({ kind: 'text', text: formatValue(t.name, cur) })
+          }
         }
       }
       return
@@ -1495,6 +1800,7 @@ function evalStmt(s: Stmt, ctx: EvalContext): void {
         name: s.name,
         arity: s.params.length,
         params: s.params,
+        outputs: s.outputs,
         body: s.body,
       })
       return
@@ -1505,6 +1811,7 @@ function evalStmt(s: Stmt, ctx: EvalContext): void {
 // ---- Pretty printing -------------------------------------------------------
 
 export function formatValue(name: string, v: MValue): string {
+  if (v.kind === 'tuple') return formatValue(name, firstVal(v))
   if (v.kind === 'void') return ''
   if (v.kind === 'num') return `${name} = ${formatNum(v.v)}`
   if (v.kind === 'bool') return `${name} = ${v.v ? '1' : '0'}`
@@ -1543,6 +1850,7 @@ function formatNum(n: number): string {
 
 /** Convert any MValue to a flat JS array of numbers for mathLib calls. */
 function toArray(v: MValue): number[] {
+  v = firstVal(v)
   if (v.kind === 'num') return [v.v]
   if (v.kind === 'bool') return [v.v ? 1 : 0]
   if (v.kind === 'mat') return Array.from(v.data)
@@ -1693,12 +2001,14 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   })
 
   // ---- Queries ---------------------------------------------------------
-  def('size', -1, args => {
+  // size(M) → 1x2 row [rows cols], or [r,c] = size(M). size(M, dim) → scalar.
+  def('size', -1, (args, nargout = 1) => {
     const m = toMat(args[0])
     if (args.length === 2) {
       const dim = Math.round(toNumber(args[1]))
-      return mnum(dim === 1 ? m.rows : m.cols)
+      return mnum(dim === 1 ? m.rows : dim === 2 ? m.cols : 1)
     }
+    if (nargout >= 2) return mtuple([mnum(m.rows), mnum(m.cols)])
     return mmat(1, 2, [m.rows, m.cols])
   })
   def('length', 1, args => {
@@ -1712,46 +2022,95 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   def('isnumeric', 1, args => mbool(args[0].kind === 'num' || args[0].kind === 'mat'))
 
   // ---- Reductions ------------------------------------------------------
-  // Reductions: vector -> scalar, matrix -> row vector of
-  // per-column reductions (dim=1). We fall back to flattening for 1-D input.
-  const reduceVecOrMat = (v: MValue, fn: (a: number[]) => number): MValue => {
+  // Reductions: vector -> scalar, matrix -> per-column reduction (dim=1,
+  // a row vector) by default. A `dim` argument (1 = down columns, 2 =
+  // across rows) overrides. This matches MATLAB's reduction semantics.
+  const reduceVecOrMat = (v: MValue, fn: (a: number[]) => number, dimArg?: MValue): MValue => {
     const m = toMat(v)
-    if (m.rows === 1 || m.cols === 1) {
-      return mnum(fn(Array.from(m.data)))
+    if (m.data.length === 0) return mnum(fn([]))
+    // Explicit dim overrides the vector fast-path.
+    let dim = dimArg !== undefined ? Math.round(toNumber(dimArg)) : 0
+    if (dim === 0) {
+      // Default: vectors collapse to a scalar; matrices reduce down columns.
+      if (m.rows === 1 || m.cols === 1) return mnum(fn(Array.from(m.data)))
+      dim = 1
     }
-    const out = new Float64Array(m.cols)
-    for (let c = 0; c < m.cols; c++) {
-      const col = new Array(m.rows)
-      for (let r = 0; r < m.rows; r++) col[r] = m.data[r * m.cols + c]
-      out[c] = fn(col)
+    if (dim === 1) {
+      const out = new Float64Array(m.cols)
+      for (let c = 0; c < m.cols; c++) {
+        const col = new Array(m.rows)
+        for (let r = 0; r < m.rows; r++) col[r] = m.data[r * m.cols + c]
+        out[c] = fn(col)
+      }
+      return mmat(1, m.cols, out)
     }
-    return mmat(1, m.cols, out)
+    // dim === 2: reduce across rows -> column vector.
+    const out = new Float64Array(m.rows)
+    for (let r = 0; r < m.rows; r++) {
+      const row = new Array(m.cols)
+      for (let c = 0; c < m.cols; c++) row[c] = m.data[r * m.cols + c]
+      out[r] = fn(row)
+    }
+    return mmat(m.rows, 1, out)
   }
-  def('sum', 1, args => reduceVecOrMat(args[0], ML.sum))
-  def('prod', 1, args => reduceVecOrMat(args[0], a => a.reduce((p, v) => p * v, 1)))
-  def('mean', 1, args => reduceVecOrMat(args[0], ML.mean))
-  def('median', 1, args => reduceVecOrMat(args[0], ML.median))
-  def('std', 1, args => reduceVecOrMat(args[0], ML.std))
-  def('var', 1, args => reduceVecOrMat(args[0], ML.variance))
+  def('sum', -1, args => reduceVecOrMat(args[0], ML.sum, args[1]))
+  def('prod', -1, args => reduceVecOrMat(args[0], a => a.reduce((p, v) => p * v, 1), args[1]))
+  def('mean', -1, args => reduceVecOrMat(args[0], ML.mean, args[1]))
+  def('median', -1, args => reduceVecOrMat(args[0], ML.median, args[1]))
+  def('std', -1, args => reduceVecOrMat(args[0], ML.std, args[1]))
+  def('var', -1, args => reduceVecOrMat(args[0], ML.variance, args[1]))
   // Single-pass min/max over arrays — Math.min/max.apply/spread blows the
   // argument-list stack for vectors with >~100k elements, which shows up
   // as mystery "Maximum call stack size exceeded" when users run the
   // compute engine against real dataset exports.
   const arrMin = (a: number[]): number => { let m = Infinity; for (const v of a) if (v < m) m = v; return m }
   const arrMax = (a: number[]): number => { let m = -Infinity; for (const v of a) if (v > m) m = v; return m }
-  def('min', -1, args => {
-    if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.min, 'min')
-    return reduceVecOrMat(args[0], arrMin)
-  })
-  def('max', -1, args => {
-    if (args.length === 2) return elemBinary(toMat(args[0]), toMat(args[1]), Math.max, 'max')
-    return reduceVecOrMat(args[0], arrMax)
-  })
-  def('range', 1, args => { const a = toArray(args[0]); return mnum(arrMax(a) - arrMin(a)) })
+  // argIdx: index (1-based) of the first extreme value in `a`.
+  const argExtreme = (a: number[], wantMax: boolean): number => {
+    let best = 0
+    for (let i = 1; i < a.length; i++) {
+      if (wantMax ? a[i] > a[best] : a[i] < a[best]) best = i
+    }
+    return best + 1
+  }
+  // min/max: min(a,b) is element-wise; min(X) / min(X,[],dim) reduces.
+  // [m, i] = min(X) also returns the index of the extreme element.
+  const minmax = (args: MValue[], nargout: number, wantMax: boolean): MValue => {
+    const fnName = wantMax ? 'max' : 'min'
+    const ext = wantMax ? arrMax : arrMin
+    // Two-argument element-wise form: min(A, B). The MATLAB idiom
+    // min(X, [], dim) passes an empty [] as the 2nd arg — detect & skip it.
+    if (args.length >= 2) {
+      const second = args[1]
+      const isEmpty = second.kind === 'mat' && second.data.length === 0
+      if (!isEmpty) {
+        return elemBinary(toMat(args[0]), toMat(second),
+          wantMax ? Math.max : Math.min, fnName)
+      }
+    }
+    const dimArg = args.length >= 3 ? args[2] : undefined
+    const value = reduceVecOrMat(args[0], ext, dimArg)
+    if (nargout < 2) return value
+    const idx = reduceVecOrMat(args[0], a => argExtreme(a, wantMax), dimArg)
+    return mtuple([value, idx])
+  }
+  def('min', -1, (args, nargout = 1) => minmax(args, nargout, false))
+  def('max', -1, (args, nargout = 1) => minmax(args, nargout, true))
+  def('range', -1, args => reduceVecOrMat(args[0], a => arrMax(a) - arrMin(a), args[1]))
   def('quantile', 2, args => mnum(ML.quantile(toArray(args[0]), toNumber(args[1]))))
-  def('sort', 1, args => {
-    const a = [...toArray(args[0])].sort((x, y) => x - y)
-    return mmat(1, a.length, a)
+  // sort(v) ascending; sort(v, 'descend') descending. [s, idx] = sort(v)
+  // also returns the permutation that produces the sorted order.
+  def('sort', -1, (args, nargout = 1) => {
+    const m = toMat(args[0])
+    const descend = args.some(a => a.kind === 'str' && a.v === 'descend')
+    const idxd = Array.from(m.data).map((v, i) => ({ v, i }))
+    idxd.sort((x, y) => descend ? y.v - x.v : x.v - y.v)
+    const sorted = idxd.map(d => d.v)
+    const rows = m.rows === 1 ? 1 : sorted.length
+    const cols = m.rows === 1 ? sorted.length : 1
+    const sm = mmat(rows, cols, sorted)
+    if (nargout < 2) return sm
+    return mtuple([sm, mmat(rows, cols, idxd.map(d => d.i + 1))])
   })
   def('unique', 1, args => {
     const a = Array.from(new Set(toArray(args[0]))).sort((x, y) => x - y)
@@ -1869,11 +2228,19 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
   def('gammaln', 1, args => elemMap(args[0], ML.lnGamma))
 
   // ---- Signal processing ----------------------------------------------
-  def('fft', -1, args => {
+  // fft(x, fs?) → in single-output context returns the magnitude spectrum;
+  // [mag, freq, phase] = fft(x, fs) destructures all three.
+  def('fft', -1, (args, nargout = 1) => {
     const sig = toArray(args[0])
     const fs = args[1] ? toNumber(args[1]) : 1
     const r = ML.fft(sig, fs)
-    return mmat(1, r.magnitude.length, r.magnitude)
+    const mag = mmat(1, r.magnitude.length, r.magnitude)
+    if (nargout <= 1) return mag
+    return mtuple([
+      mag,
+      mmat(1, r.frequency.length, r.frequency),
+      mmat(1, r.phase.length, r.phase),
+    ])
   })
   def('butter', -1, args => {
     need(args, 3, 'butter')
@@ -2100,6 +2467,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
 
   // ---- Printing --------------------------------------------------------
   const valueToText = (v: MValue): string => {
+    v = firstVal(v)
     if (v.kind === 'str') return v.v
     if (v.kind === 'num') return formatNum(v.v)
     if (v.kind === 'bool') return v.v ? '1' : '0'
@@ -2529,9 +2897,11 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
 
   def('colorscale', 1, args => { ensurePlot().colorscale = args[0].kind === 'str' ? args[0].v : 'Viridis'; return MVOID })
 
-  // Convenience: meshgrid(x, y) → generates two matrices X, Y
-  def('meshgrid', 2, args => {
-    const x = toArray(args[0]), y = toArray(args[1])
+  // meshgrid(x, y) → [X, Y]. With one arg, meshgrid(x) == meshgrid(x, x).
+  def('meshgrid', -1, args => {
+    need(args, 1, 'meshgrid')
+    const x = toArray(args[0])
+    const y = args[1] ? toArray(args[1]) : x
     const X = new Float64Array(y.length * x.length)
     const Y = new Float64Array(y.length * x.length)
     for (let r = 0; r < y.length; r++) {
@@ -2540,10 +2910,10 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
         Y[r * x.length + c] = y[r]
       }
     }
-    // Return X (first out) — user calls meshgrid twice or uses [X,Y]=meshgrid(x,y)
-    // For simplicity, store Y in workspace as __meshY__ for next call
-    ctx.ws.vars.set('__meshY__', mmat(y.length, x.length, Y))
-    return mmat(y.length, x.length, X)
+    const Xm = mmat(y.length, x.length, X)
+    const Ym = mmat(y.length, x.length, Y)
+    ctx.ws.vars.set('__meshY__', Ym) // legacy: kept for older scripts
+    return mtuple([Xm, Ym])
   })
 
   // ---- Statistical tests -----------------------------------------------
@@ -2715,7 +3085,7 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     const iqrVal = q3 - q1
     const lo = q1 - k * iqrVal, hi = q3 + k * iqrVal
     const out = a.map(v => (v < lo || v > hi) ? 1 : 0)
-    return mmat(1, out.length, out)
+    return { kind: 'mat', rows: 1, cols: out.length, data: Float64Array.from(out), logical: true }
   })
 
   // Bland-Altman analysis: returns [mean_diff, sd_diff, lower_loa, upper_loa]
@@ -3119,11 +3489,26 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     for (let i = 0; i < a.length; i++) if (a[i] === 0 || Number.isNaN(a[i])) return mbool(false)
     return mbool(true)
   })
-  def('find', 1, args => {
-    const a = toArray(args[0])
-    const out: number[] = []
-    for (let i = 0; i < a.length; i++) if (a[i] !== 0 && !Number.isNaN(a[i])) out.push(i + 1)
-    return mmat(1, out.length, out)
+  // find(v) → linear indices of non-zero elements. [r,c] = find(M) returns
+  // row/column subscripts; [r,c,val] = find(M) also returns the values.
+  def('find', -1, (args, nargout = 1) => {
+    const m = toMat(args[0])
+    const lin: number[] = [], rows: number[] = [], cols: number[] = [], vals: number[] = []
+    // MATLAB uses column-major linear indices.
+    for (let c = 0; c < m.cols; c++) {
+      for (let r = 0; r < m.rows; r++) {
+        const v = m.data[r * m.cols + c]
+        if (v !== 0 && !Number.isNaN(v)) {
+          lin.push(c * m.rows + r + 1)
+          rows.push(r + 1); cols.push(c + 1); vals.push(v)
+        }
+      }
+    }
+    const isRow = m.rows === 1
+    const wrap = (a: number[]) => isRow ? mmat(1, a.length, a) : mmat(a.length, 1, a)
+    if (nargout < 2) return wrap(lin)
+    if (nargout === 2) return mtuple([wrap(rows), wrap(cols)])
+    return mtuple([wrap(rows), wrap(cols), wrap(vals)])
   })
   def('nnz', 1, args => {
     const a = toArray(args[0])
@@ -3131,9 +3516,14 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     for (let i = 0; i < a.length; i++) if (a[i] !== 0) n++
     return mnum(n)
   })
-  def('isnan', 1, args => elemMap(args[0], x => Number.isNaN(x) ? 1 : 0))
-  def('isinf', 1, args => elemMap(args[0], x => !Number.isFinite(x) && !Number.isNaN(x) ? 1 : 0))
-  def('isfinite', 1, args => elemMap(args[0], x => Number.isFinite(x) ? 1 : 0))
+  const logicalMap = (v: MValue, fn: (x: number) => number): MMat => {
+    const m = elemMap(v, fn) as MMat
+    m.logical = true
+    return m
+  }
+  def('isnan', 1, args => logicalMap(args[0], x => Number.isNaN(x) ? 1 : 0))
+  def('isinf', 1, args => logicalMap(args[0], x => !Number.isFinite(x) && !Number.isNaN(x) ? 1 : 0))
+  def('isfinite', 1, args => logicalMap(args[0], x => Number.isFinite(x) ? 1 : 0))
   def('isreal', 1, () => mbool(true))
   def('isequal', -1, args => {
     if (args.length < 2) return mbool(true)
@@ -3629,28 +4019,15 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     return mmat(1, 2, [xvals[minIdx], yvals[minIdx]])
   })
 
-  // svd — singular value decomposition (returns singular values)
+  // svd — singular values of an m×n matrix (column vector, descending).
   def('svd', 1, args => {
     const m = toMat(args[0])
-    // Compute A^T * A eigenvalues via power iteration for singular values
-    const rows = m.rows, cols = m.cols
-    const minDim = Math.min(rows, cols)
-    const AtA = new Float64Array(cols * cols)
-    for (let i = 0; i < cols; i++) {
-      for (let j = 0; j < cols; j++) {
-        let s = 0
-        for (let k = 0; k < rows; k++) s += m.data[k * cols + i] * m.data[k * cols + j]
-        AtA[i * cols + j] = s
-      }
-    }
-    // Extract diagonal for approximate singular values (simplified)
-    const sv = new Float64Array(minDim)
-    for (let i = 0; i < minDim; i++) sv[i] = Math.sqrt(Math.max(0, AtA[i * cols + i]))
-    sv.sort((a, b) => b - a)
-    return mmat(minDim, 1, sv)
+    const sv = singularValues(m)
+    return mmat(sv.length, 1, sv)
   })
 
-  // eig — eigenvalues of a square matrix (QR algorithm simplified for small matrices)
+  // eig — eigenvalues of a square matrix. 2×2 uses the closed-form
+  // characteristic equation; larger matrices use the QR algorithm.
   def('eig', 1, args => {
     const m = toMat(args[0])
     if (m.rows !== m.cols) throw new RuntimeError('eig: matrix must be square')
@@ -3662,18 +4039,47 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
       const tr = a + d, det = a * d - b * c
       const disc = tr * tr - 4 * det
       if (disc >= 0) {
-        return mmat(2, 1, [(tr + Math.sqrt(disc)) / 2, (tr - Math.sqrt(disc)) / 2])
+        const e = [(tr - Math.sqrt(disc)) / 2, (tr + Math.sqrt(disc)) / 2]
+        return mmat(2, 1, e)
       }
       return mmat(2, 1, [tr / 2, tr / 2]) // complex eigenvalues — return real parts
     }
-    // For larger: diagonal entries are the cheapest reasonable estimate.
-    // (An earlier draft also computed Gershgorin radii but didn't use
-    // them; full eigendecomposition for n>4 needs a real solver.)
-    const evals = new Float64Array(n)
-    for (let i = 0; i < n; i++) {
-      evals[i] = m.data[i * n + i]
-    }
+    // QR algorithm — converges for real-spectrum matrices.
+    const evals = eigenvalues(m)
+    // MATLAB returns eigenvalues ascending for symmetric input; sort
+    // ascending which is the most useful default.
+    evals.sort((x, y) => x - y)
     return mmat(n, 1, evals)
+  })
+
+  // lu — LU decomposition with partial pivoting. [L,U,P] = lu(A) gives
+  // P*A = L*U. Single-output lu(A) returns the combined LU factors.
+  def('lu', 1, (args, nargout = 1) => {
+    const A = toMat(args[0])
+    if (A.rows !== A.cols) throw new RuntimeError('lu: matrix must be square')
+    const n = A.rows
+    const { LU, piv } = luDecompose(A)
+    if (nargout < 2) return mmat(n, n, new Float64Array(LU))
+    const L = new Float64Array(n * n)
+    const U = new Float64Array(n * n)
+    for (let i = 0; i < n; i++) {
+      L[i * n + i] = 1
+      for (let j = 0; j < n; j++) {
+        if (j < i) L[i * n + j] = LU[i * n + j]
+        else U[i * n + j] = LU[i * n + j]
+      }
+    }
+    const P = new Float64Array(n * n)
+    for (let i = 0; i < n; i++) P[i * n + piv[i]] = 1
+    return mtuple([mmat(n, n, L), mmat(n, n, U), mmat(n, n, P)])
+  })
+
+  // qr — QR decomposition. [Q,R] = qr(A) gives A = Q*R with Q orthonormal.
+  def('qr', 1, (args, nargout = 1) => {
+    const A = toMat(args[0])
+    const { Q, R } = qrDecompose(A)
+    if (nargout < 2) return R
+    return mtuple([Q, R])
   })
 
   // pinv — pseudoinverse (Moore-Penrose via A^T(AA^T)^-1 for overdetermined)
@@ -3709,11 +4115,11 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
 
   // ---- Set operations --------------------------------------------------
   def('ismember', 2, args => {
-    const a = toArray(args[0])
+    const m = toMat(args[0])
     const set = new Set(toArray(args[1]))
-    const out = new Float64Array(a.length)
-    for (let i = 0; i < a.length; i++) out[i] = set.has(a[i]) ? 1 : 0
-    return mmat(1, a.length, out)
+    const out = new Float64Array(m.data.length)
+    for (let i = 0; i < m.data.length; i++) out[i] = set.has(m.data[i]) ? 1 : 0
+    return { kind: 'mat', rows: m.rows, cols: m.cols, data: out, logical: true }
   })
   def('union', 2, args => {
     const merged = new Set([...toArray(args[0]), ...toArray(args[1])])
@@ -4069,6 +4475,308 @@ function makeBuiltins(ctx: EvalContext): Map<string, MFn> {
     const data: number[] = []
     regions.forEach(r => { data.push(r.area, r.sumI / r.area, r.sumJ / r.area) })
     return data.length > 0 ? mmat(regions.size, 3, new Float64Array(data)) : mmat(0, 3, new Float64Array(0))
+  })
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Builtins documented in builtinDocs.ts that were never wired up.
+  //  These are surfaced in the Workstation library sidebar, so clicking
+  //  the snippet and running it must not error with "undefined".
+  // ═══════════════════════════════════════════════════════════════════
+
+  // normalize(v) — min-max normalize to [0, 1] (alias of rescale).
+  def('normalize', 1, args => {
+    const a = toArray(args[0])
+    const mn = arrMin(a), mx = arrMax(a)
+    const r = mx - mn
+    const out = r === 0 ? a.map(() => 0.5) : a.map(v => (v - mn) / r)
+    return mmat(1, out.length, out)
+  })
+
+  // Moving-window statistics (centred window of width k).
+  const movWindow = (a: number[], k: number, fn: (w: number[]) => number): number[] => {
+    const half = Math.floor(k / 2)
+    const out = new Array<number>(a.length)
+    for (let i = 0; i < a.length; i++) {
+      const w: number[] = []
+      for (let j = i - half; j <= i + half; j++) if (j >= 0 && j < a.length) w.push(a[j])
+      out[i] = w.length ? fn(w) : 0
+    }
+    return out
+  }
+  def('movstd', 2, args => {
+    const out = movWindow(toArray(args[0]), Math.round(toNumber(args[1])), ML.std)
+    return mmat(1, out.length, out)
+  })
+  def('movmax', 2, args => {
+    const out = movWindow(toArray(args[0]), Math.round(toNumber(args[1])), arrMax)
+    return mmat(1, out.length, out)
+  })
+  def('movmin', 2, args => {
+    const out = movWindow(toArray(args[0]), Math.round(toNumber(args[1])), arrMin)
+    return mmat(1, out.length, out)
+  })
+  def('movsum', 2, args => {
+    const out = movWindow(toArray(args[0]), Math.round(toNumber(args[1])), ML.sum)
+    return mmat(1, out.length, out)
+  })
+
+  // bandpower(x, fs, [flo fhi]) — average power inside a frequency band.
+  def('bandpower', -1, args => {
+    need(args, 1, 'bandpower')
+    const x = toArray(args[0])
+    const fs = args[1] ? toNumber(args[1]) : 1
+    const r = ML.fft(x, fs)
+    let lo = 0, hi = Infinity
+    if (args[2]) {
+      const band = toArray(args[2])
+      lo = band[0] ?? 0
+      hi = band[1] ?? Infinity
+    }
+    let p = 0, n = 0
+    for (let k = 0; k < r.frequency.length; k++) {
+      if (r.frequency[k] >= lo && r.frequency[k] <= hi) {
+        p += r.magnitude[k] * r.magnitude[k]
+        n++
+      }
+    }
+    return mnum(n > 0 ? p / n : 0)
+  })
+
+  // resample(x, p, q) — change sample rate by the rational factor p/q
+  // using linear interpolation.
+  def('resample', 3, args => {
+    const x = toArray(args[0])
+    const p = Math.round(toNumber(args[1]))
+    const q = Math.round(toNumber(args[2]))
+    if (p <= 0 || q <= 0) throw new RuntimeError('resample: p and q must be positive')
+    const newLen = Math.max(1, Math.round((x.length * p) / q))
+    const out = new Float64Array(newLen)
+    for (let i = 0; i < newLen; i++) {
+      const srcPos = (i * (x.length - 1)) / Math.max(1, newLen - 1)
+      const lo = Math.floor(srcPos)
+      const hi = Math.min(lo + 1, x.length - 1)
+      const t = srcPos - lo
+      out[i] = x[lo] * (1 - t) + x[hi] * t
+    }
+    return mmat(1, newLen, out)
+  })
+
+  // anova1(groups) — one-way ANOVA. `groups` is a matrix whose columns are
+  // the groups. Returns [F, p, dfBetween, dfWithin].
+  def('anova1', 1, args => {
+    const m = toMat(args[0])
+    const groups: number[][] = []
+    if (m.rows === 1 || m.cols === 1) {
+      groups.push(Array.from(m.data))
+    } else {
+      for (let c = 0; c < m.cols; c++) {
+        const col: number[] = []
+        for (let r = 0; r < m.rows; r++) col.push(m.data[r * m.cols + c])
+        groups.push(col)
+      }
+    }
+    const r = ML.anovaOneWay(groups)
+    return mmat(1, 4, [r.f, r.p, r.dfBetween, r.dfWithin])
+  })
+
+  // chi2test(observed, expected) — chi-squared goodness-of-fit.
+  // Returns [chi2, df, p].
+  def('chi2test', 2, args => {
+    const obs = toArray(args[0])
+    const exp = toArray(args[1])
+    let chi2 = 0
+    for (let i = 0; i < obs.length; i++) {
+      if (exp[i] > 0) chi2 += ((obs[i] - exp[i]) ** 2) / exp[i]
+    }
+    const df = Math.max(1, obs.length - 1)
+    const p = 1 - ML.chiCDF(chi2, df)
+    return mmat(1, 3, [chi2, df, p])
+  })
+
+  // kaplanmeier(times, events) — survival probabilities at each event time.
+  // Returns an n×2 matrix of [time, survival].
+  def('kaplanmeier', 2, args => {
+    const times = toArray(args[0])
+    const events = toArray(args[1]).map(v => (v ? 1 : 0) as 0 | 1)
+    const r = ML.kaplanMeier(times, events)
+    const curve = r.curves[0] ?? []
+    const out = new Float64Array(curve.length * 2)
+    for (let i = 0; i < curve.length; i++) {
+      out[i * 2] = curve[i].time
+      out[i * 2 + 1] = curve[i].survival
+    }
+    return mmat(curve.length, 2, out)
+  })
+
+  // hazard(times, events) — discrete hazard rate at each event time.
+  def('hazard', 2, args => {
+    const times = toArray(args[0])
+    const events = toArray(args[1]).map(v => (v ? 1 : 0) as 0 | 1)
+    const order = times.map((_, i) => i).sort((a, b) => times[a] - times[b])
+    let atRisk = times.length
+    const h: number[] = []
+    let i = 0
+    while (i < order.length) {
+      let j = i
+      while (j + 1 < order.length && times[order[j + 1]] === times[order[i]]) j++
+      let evs = 0
+      for (let k = i; k <= j; k++) evs += events[order[k]]
+      h.push(atRisk > 0 ? evs / atRisk : 0)
+      atRisk -= j - i + 1
+      i = j + 1
+    }
+    return mmat(1, h.length, h)
+  })
+
+  // roc(labels, scores) — ROC curve. Returns an n×2 matrix [fpr, tpr] plus
+  // the AUC as the final 1×2 row [auc auc].
+  def('roc', 2, args => {
+    const labels = toArray(args[0])
+    const scores = toArray(args[1])
+    const pos = labels.filter(l => l !== 0).length
+    const neg = labels.length - pos
+    const order = scores.map((_, i) => i).sort((a, b) => scores[b] - scores[a])
+    const pts: number[] = []
+    let tp = 0, fp = 0, auc = 0, prevFpr = 0, prevTpr = 0
+    for (const idx of order) {
+      if (labels[idx] !== 0) tp++
+      else fp++
+      const tpr = pos > 0 ? tp / pos : 0
+      const fpr = neg > 0 ? fp / neg : 0
+      auc += (fpr - prevFpr) * (tpr + prevTpr) / 2
+      prevFpr = fpr; prevTpr = tpr
+      pts.push(fpr, tpr)
+    }
+    pts.push(auc, auc)
+    return mmat(order.length + 1, 2, pts)
+  })
+
+  // confusion(actual, predicted) — 2×2 confusion matrix [TP FP; FN TN]
+  // assuming binary 0/1 labels.
+  def('confusion', 2, args => {
+    const actual = toArray(args[0])
+    const predicted = toArray(args[1])
+    let tp = 0, fp = 0, fn = 0, tn = 0
+    for (let i = 0; i < actual.length; i++) {
+      const a = actual[i] !== 0, p = predicted[i] !== 0
+      if (a && p) tp++
+      else if (!a && p) fp++
+      else if (a && !p) fn++
+      else tn++
+    }
+    return mmat(2, 2, [tp, fp, fn, tn])
+  })
+
+  // bland_altman(x, y) — Bland-Altman agreement [bias, loaLo, loaHi].
+  def('bland_altman', 2, args => {
+    const a = toArray(args[0]), b = toArray(args[1])
+    const diffs = a.map((v, i) => v - b[i])
+    const md = ML.mean(diffs), sd = ML.std(diffs)
+    return mmat(1, 3, [md, md - 1.96 * sd, md + 1.96 * sd])
+  })
+
+  // bootstrap(v, n) — bootstrap 95% CI of the mean [mean, lo, hi].
+  def('bootstrap', -1, args => {
+    need(args, 1, 'bootstrap')
+    const data = toArray(args[0])
+    const nBoot = args[1] ? Math.round(toNumber(args[1])) : 1000
+    const n = data.length
+    const means: number[] = []
+    for (let b = 0; b < nBoot; b++) {
+      let s = 0
+      for (let i = 0; i < n; i++) s += data[Math.floor(Math.random() * n)]
+      means.push(s / n)
+    }
+    means.sort((x, y) => x - y)
+    return mmat(1, 3, [
+      ML.mean(means),
+      means[Math.floor(nBoot * 0.025)],
+      means[Math.floor(nBoot * 0.975)],
+    ])
+  })
+
+  // Morphological opening / closing on a (binary) image.
+  const morph = (img: MMat, se: MMat, op: 'dilate' | 'erode'): MMat => {
+    const hr = Math.floor(se.rows / 2), hc = Math.floor(se.cols / 2)
+    const out = new Float64Array(img.rows * img.cols)
+    for (let i = 0; i < img.rows; i++) {
+      for (let j = 0; j < img.cols; j++) {
+        let acc = op === 'dilate' ? -Infinity : Infinity
+        for (let ki = 0; ki < se.rows; ki++) {
+          for (let kj = 0; kj < se.cols; kj++) {
+            if (se.data[ki * se.cols + kj] === 0) continue
+            const ii = i + ki - hr, jj = j + kj - hc
+            if (ii >= 0 && ii < img.rows && jj >= 0 && jj < img.cols) {
+              const v = img.data[ii * img.cols + jj]
+              acc = op === 'dilate' ? Math.max(acc, v) : Math.min(acc, v)
+            }
+          }
+        }
+        out[i * img.cols + j] = Number.isFinite(acc) ? acc : 0
+      }
+    }
+    return mmat(img.rows, img.cols, out)
+  }
+  def('imopen', -1, args => {
+    need(args, 1, 'imopen')
+    const img = toMat(args[0])
+    const se = args[1] ? toMat(args[1]) : mmat(3, 3, new Float64Array(9).fill(1))
+    return morph(morph(img, se, 'erode'), se, 'dilate')
+  })
+  def('imclose', -1, args => {
+    need(args, 1, 'imclose')
+    const img = toMat(args[0])
+    const se = args[1] ? toMat(args[1]) : mmat(3, 3, new Float64Array(9).fill(1))
+    return morph(morph(img, se, 'dilate'), se, 'erode')
+  })
+
+  // bwlabel(bw) — label connected components (4-connectivity). Returns a
+  // matrix the same size as the input with integer region labels.
+  def('bwlabel', 1, args => {
+    const img = toMat(args[0])
+    const labels = new Int32Array(img.rows * img.cols)
+    let next = 1
+    const parent = [0]
+    const find = (x: number): number => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x] } return x }
+    const union = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb }
+    for (let i = 0; i < img.rows; i++) for (let j = 0; j < img.cols; j++) {
+      if (img.data[i * img.cols + j] === 0) continue
+      const up = i > 0 ? labels[(i - 1) * img.cols + j] : 0
+      const left = j > 0 ? labels[i * img.cols + j - 1] : 0
+      if (up === 0 && left === 0) { labels[i * img.cols + j] = next; parent.push(next); next++ }
+      else if (up !== 0 && left === 0) labels[i * img.cols + j] = up
+      else if (up === 0 && left !== 0) labels[i * img.cols + j] = left
+      else { labels[i * img.cols + j] = up; if (up !== left) union(up, left) }
+    }
+    // Compact labels into 1..k.
+    const remap = new Map<number, number>()
+    const out = new Float64Array(labels.length)
+    for (let i = 0; i < labels.length; i++) {
+      if (labels[i] === 0) continue
+      const root = find(labels[i])
+      let id = remap.get(root)
+      if (id === undefined) { id = remap.size + 1; remap.set(root, id) }
+      out[i] = id
+    }
+    return mmat(img.rows, img.cols, out)
+  })
+
+  // imcrop(img, [r c h w]) — crop a rectangular region (1-based r,c).
+  def('imcrop', 2, args => {
+    const img = toMat(args[0])
+    const rect = toArray(args[1])
+    const r0 = Math.max(0, Math.round(rect[0] ?? 1) - 1)
+    const c0 = Math.max(0, Math.round(rect[1] ?? 1) - 1)
+    const h = Math.min(img.rows - r0, Math.round(rect[2] ?? img.rows))
+    const w = Math.min(img.cols - c0, Math.round(rect[3] ?? img.cols))
+    if (h <= 0 || w <= 0) return mmat(0, 0, new Float64Array(0))
+    const out = new Float64Array(h * w)
+    for (let i = 0; i < h; i++) {
+      for (let j = 0; j < w; j++) {
+        out[i * w + j] = img.data[(r0 + i) * img.cols + (c0 + j)]
+      }
+    }
+    return mmat(h, w, out)
   })
 
   return B

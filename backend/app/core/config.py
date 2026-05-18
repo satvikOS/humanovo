@@ -486,7 +486,12 @@ class Settings(BaseSettings):
     # Security — see _validate_security_secrets() below; non-dev envs
     # block startup if SECRET_KEY is left at the placeholder.
     SECRET_KEY: SecretStr = SecretStr("change-this-in-production")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # 30 days. The desktop app is a long-lived single-user session; a
+    # short TTL just bounces the researcher to /login mid-work ("auto
+    # sign-out"). A 30-day token keeps them signed in across normal use;
+    # a genuinely invalid/revoked token still 401s → /login as a recovery
+    # path. There is no refresh-token flow yet (Sprint-2 follow-up).
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30
 
     # ─── Stripe billing ─────────────────────────────────────────────
     # All five values come from the Stripe dashboard. STRIPE_SECRET_KEY
