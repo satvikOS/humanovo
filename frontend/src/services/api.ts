@@ -135,6 +135,14 @@ apiClient.interceptors.response.use(
     return response
   },
   (error) => {
+    // A canceled/aborted request is NOT a failure — it happens whenever
+    // a component unmounts mid-flight or a query is superseded. It has
+    // no `error.response`, so without this guard it fell through to the
+    // `!error.response` branch below and fired a spurious "API offline"
+    // toast on every navigation. Reject quietly, no toast, no log.
+    if (axios.isCancel?.(error) || error?.code === 'ERR_CANCELED') {
+      return Promise.reject(error)
+    }
     // Flatten any Pydantic 422 detail array to a string before it
     // reaches a `setError(...)` call site (would crash React #31).
     normalizeErrorDetail(error)
@@ -2563,7 +2571,13 @@ export const api = {
     seed_available: boolean
     corpus_seeded?: boolean
   }> {
-    const { data } = await apiClient.get('/admin/kg-stats')
+    // Admin-only endpoint used here only as a best-effort fallback for
+    // KG counts; a non-admin caller gets a 403 that the call site
+    // already swallows. Mark it silent so that expected 403 doesn't
+    // raise a "Request failed" toast.
+    const { data } = await apiClient.get('/admin/kg-stats', {
+      headers: { [SILENT_HEADER]: '1' },
+    })
     return data
   },
   async seedKg(force = false): Promise<{ ok: boolean; message: string; nodes_after: number; edges_after: number; embeddings_written: number }> {

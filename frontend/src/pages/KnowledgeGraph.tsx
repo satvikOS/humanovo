@@ -93,13 +93,19 @@ export default function KnowledgeGraph() {
 
   // Hover / selection highlight — a node + its 1-hop neighbourhood.
   const [highlight, setHighlight] = useState<{ nodes: Set<string>; links: Set<GLink> }>(EMPTY_HL)
-  // Gentle idle orbit — pauses the moment the user touches the graph.
-  const [autoRotate, setAutoRotate] = useState(true)
-  const autoRotateRef = useRef(true)
+  // Gentle idle orbit — OFF by default (it fights manual zoom/pan);
+  // the user opts in via the toolbar button. Pauses on interaction.
+  const [autoRotate, setAutoRotate] = useState(false)
+  const autoRotateRef = useRef(false)
   useEffect(() => { autoRotateRef.current = autoRotate }, [autoRotate])
 
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined)
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  // The camera is auto-fitted exactly ONCE, after the first physics
+  // settle. Re-fitting on every engine stop would yank the camera back
+  // to the overview the instant anything re-heats the sim — which made
+  // the graph snap to "normal view" whenever the cursor touched a node.
+  const didInitialFitRef = useRef(false)
   const [dims, setDims] = useState({ w: 800, h: 600 })
 
   // ── Fetch the scoped graph (nodes + edges in one round-trip) ──
@@ -108,6 +114,7 @@ export default function KnowledgeGraph() {
     setError(null)
     setSelected(null)
     setHighlight(EMPTY_HL)
+    didInitialFitRef.current = false
     try {
       const { data } = await apiClient.get<ScopePayload>(
         `/knowledge-graph/scope/${scope}`,
@@ -119,7 +126,6 @@ export default function KnowledgeGraph() {
         total_nodes: data.total_nodes,
         total_edges: data.total_edges,
       })
-      setAutoRotate(true)
     } catch (e) {
       const err = e as { message?: string }
       setError(err?.message || 'Failed to load knowledge graph')
@@ -416,6 +422,7 @@ export default function KnowledgeGraph() {
         ref={wrapRef}
         className="flex-1 relative overflow-hidden"
         onPointerDown={() => setAutoRotate(false)}
+        onWheel={() => setAutoRotate(false)}
       >
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/40 backdrop-blur-sm">
@@ -459,9 +466,11 @@ export default function KnowledgeGraph() {
           nodeResolution={16}
           nodeOpacity={0.96}
           nodeVal={(n) => {
+            // Stable size (degree only). Deliberately NOT a function of
+            // `highlight` — changing node values on hover perturbs the
+            // force layout; the hover affordance is colour-only below.
             const node = n as GNode
-            const base = Math.min(14, 3 + node.degree * 0.7)
-            return highlight.nodes.has(node.id) ? base * 1.45 : base
+            return Math.min(14, 3 + node.degree * 0.7)
           }}
           nodeColor={(n) => {
             const node = n as GNode
@@ -502,7 +511,11 @@ export default function KnowledgeGraph() {
           enableNavigationControls
           cooldownTicks={180}
           warmupTicks={40}
-          onEngineStop={() => fgRef.current?.zoomToFit(700, 60)}
+          onEngineStop={() => {
+            if (didInitialFitRef.current) return
+            didInitialFitRef.current = true
+            fgRef.current?.zoomToFit(700, 60)
+          }}
           onNodeHover={handleNodeHover}
           onNodeClick={(n) => focusNode(n as GNode)}
           onBackgroundClick={() => { setSelected(null); setHighlight(EMPTY_HL) }}
