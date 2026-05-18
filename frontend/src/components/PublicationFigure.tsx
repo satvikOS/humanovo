@@ -18,7 +18,7 @@
 //     <ResponsiveContainer><LineChart …>…</LineChart></ResponsiveContainer>
 //   </PublicationFigure>
 import { useState, useRef, useCallback } from 'react'
-import { FiDownload, FiSettings, FiMaximize2, FiMinimize2 } from 'react-icons/fi'
+import { FiDownload, FiSettings, FiMaximize2, FiMinimize2, FiCopy } from 'react-icons/fi'
 import html2canvas from 'html2canvas'
 import { jsPDF } from 'jspdf'
 import { getPlotBlob } from '../utils/plotExport'
@@ -158,6 +158,26 @@ export default function PublicationFigure({
     a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href)
   }, [exportStem])
 
+  // Copy the rendered figure to the clipboard as a PNG image so it can
+  // be pasted straight into a doc / slide / chat.
+  const copyImage = useCallback(async () => {
+    const el = figRef.current?.querySelector('[data-pub-figure-canvas]') as HTMLElement | null
+    if (!el) return
+    try {
+      const isPlotly = !!el.querySelector('.js-plotly-plot')
+      let blob: Blob | null = null
+      if (isPlotly) {
+        blob = await getPlotBlob(el, 'png')
+      } else {
+        const canvas = await html2canvas(el, { backgroundColor: themeStyle.bg === 'transparent' ? null : themeStyle.bg, scale: 2, useCORS: true, logging: false })
+        blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'))
+      }
+      if (blob && navigator.clipboard && 'write' in navigator.clipboard) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      }
+    } catch { /* ignore */ }
+  }, [themeStyle.bg])
+
   const exportPdf = useCallback(async () => {
     const el = figRef.current?.querySelector('[data-pub-figure-canvas]') as HTMLElement | null
     if (!el) return
@@ -249,57 +269,72 @@ export default function PublicationFigure({
         background: themeStyle.bg,
         color: themeStyle.textColor,
         fontFamily: themeStyle.bodyFont,
+        // Even padding all round so the figure never crowds an edge.
         padding: themeStyle.bg === 'transparent' ? 0 : 16,
         borderRadius: themeStyle.bg === 'transparent' ? 0 : 6,
         position: expanded ? 'fixed' : 'relative',
         boxShadow: expanded ? '0 25px 50px -12px rgba(0,0,0,0.5)' : undefined,
         border: expanded ? '1px solid var(--color-border)' : undefined,
+        // Column flex so the chart canvas region can grow to fill the
+        // host container instead of leaving dead space below a fixed-
+        // height chart. height:100% only applies when the parent gives
+        // the figure a definite height (e.g. Compute Lab's flex body);
+        // in free-flowing layouts it collapses to the content height.
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        minHeight: 0,
       }}
     >
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex-1" />
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => exportPng(1)}
-            className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            title="Download PNG (1×)"
-            aria-label="Download PNG"
-          >
-            <FiDownload className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => exportPng(4)}
-            className="px-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono"
-            title="Download PNG @ 4× (publication / ~300 DPI)"
-          >4×</button>
-          <button
-            onClick={exportSvg}
-            className="px-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono"
-            title="Download SVG (vector)"
-          >SVG</button>
-          <button
-            onClick={exportPdf}
-            className="px-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono"
-            title="Download PDF (publication layout)"
-          >PDF</button>
-          <button
-            onClick={() => setSettingsOpen(o => !o)}
-            className={`p-1.5 rounded hover:bg-[var(--glass-bg)] ${settingsOpen ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
-            title="Publication settings"
-            aria-label="Publication settings"
-            aria-pressed={settingsOpen}
-          >
-            <FiSettings className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            title={expanded ? 'Collapse' : 'Expand'}
-          >
-            {expanded ? <FiMinimize2 className="w-3.5 h-3.5" /> : <FiMaximize2 className="w-3.5 h-3.5" />}
-          </button>
-        </div>
+      {/* Toolbar — one consolidated, evenly-spaced control row.
+          Export actions (copy / SVG / PNG / PDF) sit together; the
+          settings + fullscreen affordances are split off by a hairline
+          divider so the row reads cleanly. */}
+      <div className="flex items-center justify-end gap-1.5 mb-2.5">
+        <button
+          onClick={copyImage}
+          className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+          title="Copy figure to clipboard (PNG)"
+          aria-label="Copy figure"
+        >
+          <FiCopy className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => exportPng(4)}
+          className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+          title="Download PNG @ 4× (publication / ~300 DPI)"
+          aria-label="Download PNG"
+        >
+          <FiDownload className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={exportSvg}
+          className="px-2 py-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono transition-colors"
+          title="Download SVG (vector)"
+        >SVG</button>
+        <button
+          onClick={exportPdf}
+          className="px-2 py-1 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xxs font-mono transition-colors"
+          title="Download PDF (publication layout)"
+        >PDF</button>
+        <span className="w-px h-4 mx-0.5" style={{ background: themeStyle.gridColor }} />
+        <button
+          onClick={() => setSettingsOpen(o => !o)}
+          className={`p-1.5 rounded hover:bg-[var(--glass-bg)] transition-colors ${settingsOpen ? 'text-[var(--color-text)] bg-[var(--glass-bg)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+          title="Publication settings"
+          aria-label="Publication settings"
+          aria-pressed={settingsOpen}
+        >
+          <FiSettings className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+          title={expanded ? 'Collapse' : 'Expand to fullscreen'}
+          aria-label={expanded ? 'Collapse' : 'Expand'}
+        >
+          {expanded ? <FiMinimize2 className="w-3.5 h-3.5" /> : <FiMaximize2 className="w-3.5 h-3.5" />}
+        </button>
       </div>
 
       {/* Settings drawer */}
@@ -451,19 +486,25 @@ export default function PublicationFigure({
       )}
 
       {/* Chart canvas — children render here. data-pub-figure-canvas
-          is the export hook. */}
+          is the export hook. With a fixed aspect ratio the canvas keeps
+          that ratio; otherwise it flex-grows to consume all remaining
+          height in the figure so the chart fills its container with no
+          dead space below it. */}
       <div
         data-pub-figure-canvas
         style={{
           filter: cbSim !== 'none' ? CB_SIM_FILTER[cbSim] : undefined,
           position: 'relative',
-          ...(aspectRatio ? { aspectRatio: String(aspectRatio), width: '100%' } : {}),
+          width: '100%',
+          ...(aspectRatio
+            ? { aspectRatio: String(aspectRatio) }
+            : { flex: '1 1 auto', minHeight: 180 }),
         }}
       >
         {/* Pass theme context via a CSS variable so children can opt-in
             to the publication palette without changing their props. */}
         <div style={{
-          height: aspectRatio ? '100%' : undefined,
+          height: '100%',
           // Expose context as CSS custom properties for downstream styling
           // hooks. `--*` keys aren't in React's CSSProperties type, so we
           // cast the whole object once.

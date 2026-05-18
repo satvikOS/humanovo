@@ -38,6 +38,8 @@ import { getPlotBlob } from '../../utils/plotExport'
 import { plotlyConfig } from '../../utils/plotlyConfig'
 import PublicationFigure from '../../components/PublicationFigure'
 import ChartErrorBoundary from '../../components/ChartErrorBoundary'
+import Chart3D from '../../components/Chart3D'
+import type { DataPoint3D, Chart3DType } from '../../components/PlotlyPlot3D'
 import { getPalette, makeTickFormatter } from '../../utils/publicationTheme'
 
 /* ── Persistence keys ────────────────────────────────────────────────── */
@@ -7367,6 +7369,9 @@ export default function Workstation() {
                 {plots.length > 0 ? `${activePlot + 1} / ${plots.length}` : 'none'}
               </span>
             </div>
+            {/* Data-display controls only. Export / fullscreen actions
+                live in the figure's own toolbar (PublicationFigure) so
+                there's a single, un-duplicated control row per concern. */}
             <div style={styles.panelToolbar}>
               <button
                 style={plotOpts.grid ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
@@ -7388,46 +7393,23 @@ export default function Workstation() {
                 onClick={() => setPlotOpts(o => ({ ...o, legend: o.legend === 'off' ? 'on' : 'off' }))}
                 title="Toggle legend"
               >legend</button>
-              <span style={{ flex: 1 }} />
-              <button
-                style={styles.plotChip}
-                disabled={plots.length < 2}
-                onClick={() => setActivePlot(i => Math.max(0, i - 1))}
-                title="Previous figure"
-                aria-label="Previous figure"
-              >◀</button>
-              <button
-                style={styles.plotChip}
-                disabled={plots.length < 2}
-                onClick={() => setActivePlot(i => Math.min(plots.length - 1, i + 1))}
-                title="Next figure"
-                aria-label="Next figure"
-              >▶</button>
-              <button
-                style={styles.plotChip}
-                disabled={plots.length === 0}
-                onClick={() => { copyPlotToClipboard() }}
-                title="Copy figure to clipboard as PNG"
-              >copy</button>
-              <button
-                style={styles.plotChip}
-                disabled={plots.length === 0}
-                onClick={exportPlotSVG}
-                title="Download current figure as SVG"
-              >svg</button>
-              <button
-                style={styles.plotChip}
-                disabled={plots.length === 0}
-                onClick={exportPlotPNG}
-                title="Download current figure as PNG"
-              >png</button>
-              <button
-                style={styles.plotChip}
-                disabled={plots.length === 0}
-                onClick={() => setPlotFullscreen(true)}
-                title="Expand figure to fullscreen (double-click chart)"
-                aria-label="Expand figure"
-              >⤢</button>
+              {plots.length > 1 && (
+                <>
+                  <span style={{ flex: 1 }} />
+                  <button
+                    style={styles.plotChip}
+                    onClick={() => setActivePlot(i => Math.max(0, i - 1))}
+                    title="Previous figure"
+                    aria-label="Previous figure"
+                  >◀</button>
+                  <button
+                    style={styles.plotChip}
+                    onClick={() => setActivePlot(i => Math.min(plots.length - 1, i + 1))}
+                    title="Next figure"
+                    aria-label="Next figure"
+                  >▶</button>
+                </>
+              )}
             </div>
             {plots.length > 1 && (
               <div style={styles.figurePillStrip}>
@@ -8423,94 +8405,52 @@ interface PlotOpts {
 }
 const DEFAULT_PLOT_OPTS: PlotOpts = { grid: true, logX: false, logY: false, legend: 'auto' }
 
+// Map a PlotSpec.colorscale (Plotly colormap name) onto the colour
+// scheme vocabulary Chart3D understands.
+function colorSchemeFor(cs?: string): 'viridis' | 'plasma' | 'categorical' | 'gradient' {
+  const s = (cs || '').toLowerCase()
+  if (s.includes('plasma') || s.includes('magma') || s.includes('inferno')) return 'plasma'
+  if (s.includes('viridis')) return 'viridis'
+  return 'gradient'
+}
+
 function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; opts?: PlotOpts }) {
-  // 3D plot rendering via Plotly
-  if (plot?.mode3d) {
-    const cs = plot.colorscale || 'Viridis'
-    let traces: Array<Record<string, unknown>> = []
+  // 3D plot rendering. The true-3D modes (surface / wireframe / contour /
+  // scatter3d) render via Chart3D (three.js) — Plotly's WebGL gl3d engine
+  // renders BLANK in the app's WebView2 runtime. The `heatmap` mode is a
+  // flat 2D SVG trace (not gl3d), so it stays on the Plotly path.
+  if (plot?.mode3d && plot.mode3d !== 'heatmap') {
     const mode = plot.mode3d
-    if (mode === 'surface' || mode === 'wireframe' || mode === 'contour') {
-      // MATLAB-grade 3D surface — same conventions as
-      // PlotlyPlot3D's surface_3d: gradient color + black mesh
-      // wireframe overlay (x/y contour lines on the surface) +
-      // floor projection at z=zmin. Floor projection uses
-      // usecolormap so the projected lines pick up the
-      // surface's mapping (matches the matplotlib reference
-      // figure the user shared).
-      const base: Record<string, unknown> = {
-        type: 'surface', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ,
-        colorscale: cs,
-        opacity: mode === 'wireframe' ? 0 : 0.95,
-        lighting: { ambient: 0.55, diffuse: 0.85, specular: 0.2, fresnel: 0.1, roughness: 0.5 },
-        lightposition: { x: 100, y: 200, z: 100 },
-      }
-      if (mode === 'wireframe') {
-        // Hide the filled surface, keep wire-only render for the
-        // matlab `mesh()` look. Muted ocean-blue wires on the
-        // platform's default palette match the rest of humanovo's
-        // tonal register.
-        base.hidesurface = true
-        base.contours = {
-          x: { show: true, color: '#3D5A80', width: 2 },
-          y: { show: true, color: '#3D5A80', width: 2 },
-          z: { show: false },
-        }
-        base.showscale = false
-        base.lighting = { ambient: 1, diffuse: 0, specular: 0 }
-      } else if (mode === 'contour') {
-        base.contours = {
-          z: { show: true, usecolormap: true, highlight: true, project: { z: true } },
-          x: { show: true, color: 'rgba(0,0,0,0.5)', width: 1 },
-          y: { show: true, color: 'rgba(0,0,0,0.5)', width: 1 },
-        }
-      } else {
-        // Plain `surface` mode: x/y wire overlay + z-floor
-        // projection (the MATLAB `surf` default in one trace).
-        base.contours = {
-          x: { show: true, color: 'rgba(0,0,0,0.6)', width: 1 },
-          y: { show: true, color: 'rgba(0,0,0,0.6)', width: 1 },
-          z: { show: true, usecolormap: true, highlight: false, project: { z: true } },
-        }
-      }
-      traces = [base]
-    } else if (mode === 'scatter3d') {
-      traces = [{ type: 'scatter3d', mode: 'markers', x: plot.scatter3dX, y: plot.scatter3dY, z: plot.scatter3dZ, marker: { size: 3, color: plot.scatter3dZ, colorscale: cs, opacity: 0.85 } }]
-    } else if (mode === 'heatmap') {
-      traces = [{ type: 'heatmap', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ, colorscale: cs }]
-    }
-    const is2D = mode === 'heatmap'
-    const layout: Record<string, unknown> = {
-      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: '#a1a1aa', size: 11 }, margin: { l: 10, r: 10, t: plot.title ? 30 : 10, b: 10 },
-      showlegend: false, autosize: true,
-      title: plot.title ? { text: plot.title, font: { color: '#e5e5e5', size: 13 } } : undefined,
-    }
-    if (!is2D) {
-      // MATLAB-grade scene: aspectmode 'data' (preserves natural
-      // data ranges instead of stretching to a cube), 30°/45°
-      // isometric camera (the standard MATLAB `surf` default
-      // view), bumped gridline contrast so the bounding-box
-      // edges are visible enough to read tick labels against.
-      const axisStyle = {
-        color: '#a1a1aa',
-        gridcolor: 'rgba(255,255,255,0.12)',
-        zerolinecolor: 'rgba(255,255,255,0.18)',
-        backgroundcolor: 'rgba(0,0,0,0)',
-        showbackground: true,
-        showspikes: false,
-      }
-      layout.scene = {
-        xaxis: { ...axisStyle, title: plot.xLabel || 'x' },
-        yaxis: { ...axisStyle, title: plot.yLabel || 'y' },
-        zaxis: { ...axisStyle, title: plot.zLabel || 'z' },
-        bgcolor: 'rgba(0,0,0,0)',
-        aspectmode: 'data' as const,
-        camera: { eye: { x: 1.4, y: -1.6, z: 1.1 }, center: { x: 0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 } },
-      }
+    // Flatten the PlotSpec's 3D payload into the DataPoint3D[] shape
+    // Chart3D consumes. For surface/wireframe/contour the surfaceX/Y/Z
+    // grid is unrolled into one point per grid cell — Chart3D's
+    // SurfaceRenderer IDW-reconstructs the surface from those samples.
+    // For scatter3d the parallel scatter3d{X,Y,Z} arrays are zipped.
+    const points: DataPoint3D[] = []
+    if (mode === 'scatter3d') {
+      const xs = plot.scatter3dX || []
+      const ys = plot.scatter3dY || []
+      const zs = plot.scatter3dZ || []
+      const n = Math.min(xs.length, ys.length, zs.length)
+      for (let i = 0; i < n; i++) points.push({ x: xs[i], y: ys[i], z: zs[i] })
     } else {
-      layout.xaxis = { title: plot.xLabel || 'x', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' }
-      layout.yaxis = { title: plot.yLabel || 'y', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' }
+      const xs = plot.surfaceX || []
+      const ys = plot.surfaceY || []
+      const zg = plot.surfaceZ || []
+      // surfaceZ is row-major: zg[yi][xi].
+      for (let yi = 0; yi < ys.length; yi++) {
+        const row = zg[yi] || []
+        for (let xi = 0; xi < xs.length; xi++) {
+          if (row[xi] === undefined) continue
+          points.push({ x: xs[xi], y: ys[yi], z: row[xi] })
+        }
+      }
     }
+    const chart3dType: Chart3DType =
+      mode === 'scatter3d' ? 'scatter_3d'
+      : mode === 'wireframe' ? 'wireframe_3d'
+      : mode === 'contour' ? 'contour_3d'
+      : 'surface_3d'
     return (
       <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
         <PublicationFigure
@@ -8518,8 +8458,54 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
           subtitle={plot.xLabel && plot.yLabel ? `${plot.xLabel} vs ${plot.yLabel}${plot.zLabel ? ` vs ${plot.zLabel}` : ''}` : undefined}
           exportName={(plot.title || `figure-${mode}`).replace(/[^\w-]+/g, '_')}
         >
-          <div style={{ width: '100%', height: 480 }}>
-            <ChartErrorBoundary resetKey={`${plot.title}:${traces.length}:${mode}`}>
+          {ctx => (
+            <div style={{ width: '100%', height: '100%', minHeight: 420, display: 'flex' }}>
+              <ChartErrorBoundary resetKey={`${plot.title}:${points.length}:${mode}`}>
+                <div style={{ flex: 1, minHeight: 420 }}>
+                  <Chart3D
+                    data={points}
+                    chartType={chart3dType}
+                    title={undefined}
+                    xLabel={plot.xLabel || 'x'}
+                    yLabel={plot.yLabel || 'y'}
+                    zLabel={plot.zLabel || 'z'}
+                    colorScheme={colorSchemeFor(plot.colorscale)}
+                    theme={ctx.theme}
+                    height={480}
+                  />
+                </div>
+              </ChartErrorBoundary>
+            </div>
+          )}
+        </PublicationFigure>
+      </div>
+    )
+  }
+
+  // 2D heatmap (mode3d === 'heatmap') — flat Plotly SVG, not gl3d, so it
+  // renders fine in WebView2.
+  if (plot?.mode3d === 'heatmap') {
+    const cs = plot.colorscale || 'Viridis'
+    const traces: Array<Record<string, unknown>> = [
+      { type: 'heatmap', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ, colorscale: cs },
+    ]
+    const layout: Record<string, unknown> = {
+      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { color: '#a1a1aa', size: 11 }, margin: { l: 10, r: 10, t: plot.title ? 30 : 10, b: 10 },
+      showlegend: false, autosize: true,
+      title: plot.title ? { text: plot.title, font: { color: '#e5e5e5', size: 13 } } : undefined,
+      xaxis: { title: plot.xLabel || 'x', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' },
+      yaxis: { title: plot.yLabel || 'y', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' },
+    }
+    return (
+      <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
+        <PublicationFigure
+          title={plot.title || 'Figure (heatmap)'}
+          subtitle={plot.xLabel && plot.yLabel ? `${plot.xLabel} vs ${plot.yLabel}` : undefined}
+          exportName={(plot.title || 'figure-heatmap').replace(/[^\w-]+/g, '_')}
+        >
+          <div style={{ width: '100%', height: '100%', minHeight: 420 }}>
+            <ChartErrorBoundary resetKey={`${plot.title}:${traces.length}:heatmap`}>
               <PlotlyChart data={traces as unknown as Data[]} layout={layout as Partial<Layout>} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
             </ChartErrorBoundary>
           </div>
@@ -8711,7 +8697,7 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
             </>
           )
           return (
-            <div style={{ width: '100%', height: Math.max(280, 420) }}>
+            <div style={{ width: '100%', height: '100%', minHeight: 280 }}>
               <ResponsiveContainer width="100%" height="100%">
                 {kind === 'bar' ? (
                   <BarChart data={data}>
