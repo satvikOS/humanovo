@@ -19,8 +19,6 @@ import { Canvas, useFrame } from '@react-three/fiber'
 // into the bundle and breaks the rollup build. Importing each component
 // from its own file keeps SpotLight out of Chart3D's import graph.
 import { OrbitControls } from '@react-three/drei/core/OrbitControls'
-import { Text } from '@react-three/drei/core/Text'
-import { Billboard } from '@react-three/drei/core/Billboard'
 import * as THREE from 'three'
 import type { DataPoint3D, Chart3DType, PlotlyPlot3DProps } from './PlotlyPlot3D'
 import { THEMES, type PublicationTheme } from '../utils/publicationTheme'
@@ -234,6 +232,52 @@ function PolyLine({
   return <primitive object={obj} />
 }
 
+// Sprite-based 3D text label — replaces drei's <Text>/<Billboard>.
+// drei's <Text> is troika-three-text, which sets `customDepthMaterial`
+// on its mesh; three 0.182 made that a getter-only property, so every
+// <Text> threw ("Cannot set property customDepthMaterial") and took
+// down every 3D chart (the axes are labelled with it). A THREE.Sprite
+// with a canvas texture has no troika/three-stdlib dependency and a
+// sprite always faces the camera, so <Billboard> isn't needed either.
+function Label3D({
+  position, text, color, fontSize = 0.42,
+}: {
+  position: [number, number, number]
+  text: string | number | undefined
+  color: string
+  fontSize?: number
+}) {
+  const sprite = useMemo(() => {
+    const txt = String(text ?? '').trim()
+    if (!txt) return null
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    const fontPx = 64
+    const font = `600 ${fontPx}px Inter, system-ui, sans-serif`
+    ctx.font = font
+    const w = Math.max(1, Math.ceil(ctx.measureText(txt).width))
+    canvas.width = w + 20
+    canvas.height = fontPx + 20
+    // resizing the canvas resets the 2D context — re-apply state.
+    ctx.font = font
+    ctx.fillStyle = color
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(txt, canvas.width / 2, canvas.height / 2)
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.minFilter = THREE.LinearFilter
+    tex.needsUpdate = true
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })
+    const s = new THREE.Sprite(mat)
+    const aspect = canvas.width / canvas.height
+    s.scale.set(fontSize * aspect, fontSize, 1)
+    return s
+  }, [text, color, fontSize])
+  if (!sprite) return null
+  return <primitive object={sprite} position={position} />
+}
+
 function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
   const h = CUBE / 2
   const { mx, my, mz } = mapper
@@ -272,11 +316,7 @@ function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
         return (
           <group key={`xt${i}`}>
             <PolyLine points={[[sx, -h, -h], [sx, -h - 0.25, -h]]} color={chrome.axis} lineWidth={1} />
-            <Billboard position={[sx, -h - 0.7, -h]}>
-              <Text fontSize={0.42} color={chrome.text} anchorX="center" anchorY="middle">
-                {fmtTick(t)}
-              </Text>
-            </Billboard>
+            <Label3D position={[sx, -h - 0.7, -h]} text={fmtTick(t)} color={chrome.text} fontSize={0.42} />
           </group>
         )
       })}
@@ -286,11 +326,7 @@ function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
         return (
           <group key={`yt${i}`}>
             <PolyLine points={[[-h, -h, sz], [-h - 0.25, -h, sz]]} color={chrome.axis} lineWidth={1} />
-            <Billboard position={[-h - 0.7, -h - 0.2, sz]}>
-              <Text fontSize={0.42} color={chrome.text} anchorX="center" anchorY="middle">
-                {fmtTick(t)}
-              </Text>
-            </Billboard>
+            <Label3D position={[-h - 0.7, -h - 0.2, sz]} text={fmtTick(t)} color={chrome.text} fontSize={0.42} />
           </group>
         )
       })}
@@ -300,25 +336,15 @@ function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
         return (
           <group key={`zt${i}`}>
             <PolyLine points={[[-h, sy, -h], [-h - 0.25, sy, -h]]} color={chrome.axis} lineWidth={1} />
-            <Billboard position={[-h - 0.9, sy, -h]}>
-              <Text fontSize={0.42} color={chrome.text} anchorX="center" anchorY="middle">
-                {fmtTick(t)}
-              </Text>
-            </Billboard>
+            <Label3D position={[-h - 0.9, sy, -h]} text={fmtTick(t)} color={chrome.text} fontSize={0.42} />
           </group>
         )
       })}
 
       {/* axis titles */}
-      <Billboard position={[0, -h - 1.7, -h]}>
-        <Text fontSize={0.6} color={chrome.text} anchorX="center" anchorY="middle">{xLabel}</Text>
-      </Billboard>
-      <Billboard position={[-h - 1.9, -h - 0.2, 0]}>
-        <Text fontSize={0.6} color={chrome.text} anchorX="center" anchorY="middle">{yLabel}</Text>
-      </Billboard>
-      <Billboard position={[-h - 2.0, 0, -h]}>
-        <Text fontSize={0.6} color={chrome.text} anchorX="center" anchorY="middle">{zLabel}</Text>
-      </Billboard>
+      <Label3D position={[0, -h - 1.7, -h]} text={xLabel} color={chrome.text} fontSize={0.6} />
+      <Label3D position={[-h - 1.9, -h - 0.2, 0]} text={yLabel} color={chrome.text} fontSize={0.6} />
+      <Label3D position={[-h - 2.0, 0, -h]} text={zLabel} color={chrome.text} fontSize={0.6} />
     </group>
   )
 }
@@ -997,11 +1023,12 @@ function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
             <mesh geometry={s.geo} position={[0, -depth / 2, 0]}>
               <meshStandardMaterial color={col} roughness={0.45} metalness={0.08} />
             </mesh>
-            <Billboard position={[Math.cos(mid) * labelR, depth, -Math.sin(mid) * labelR]}>
-              <Text fontSize={0.5} color={chrome.text} anchorX="center" anchorY="middle">
-                {`${s.label} ${(s.frac * 100).toFixed(0)}%`}
-              </Text>
-            </Billboard>
+            <Label3D
+              position={[Math.cos(mid) * labelR, depth, -Math.sin(mid) * labelR]}
+              text={`${s.label} ${(s.frac * 100).toFixed(0)}%`}
+              color={chrome.text}
+              fontSize={0.5}
+            />
           </group>
         )
       })}
