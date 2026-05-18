@@ -540,7 +540,7 @@ export default function Projects() {
 
   useEffect(() => {
     let cancelled = false
-    api.listProjectDocuments({ limit: 1000 })
+    api.listProjectDocuments({ limit: 500 })
       .then(rows => {
         if (cancelled) return
         const counts: Record<string, number> = {}

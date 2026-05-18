@@ -1,1188 +1,552 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import ForceGraph3D from 'react-force-graph-3d'
+import type { ForceGraphMethods } from 'react-force-graph-3d'
 import {
-  FiSearch, FiZoomIn, FiZoomOut, FiMaximize, FiFilter,
-  FiDownload, FiShare2, FiLayers,
-  FiChevronRight, FiChevronDown, FiExternalLink, FiX,
-  FiInfo, FiBook, FiLink, FiCheck
+  FiSearch, FiX, FiRefreshCw, FiMaximize, FiCrosshair,
+  FiInfo, FiShare2,
 } from 'react-icons/fi'
-import { api, apiClient, Entity } from '../services/api'
-import { toast } from '../contexts/ToastContext'
-import { modalBackdropProps } from '../utils/clickable'
-import KnowledgeGraphView from '../components/KnowledgeGraphView'
+import { api, apiClient } from '../services/api'
 
-// Entity type colors and configurations
-const ENTITY_COLORS = {
-  gene: { bg: '#3B82F6', border: '#1D4ED8', text: 'Gene' },
-  protein: { bg: '#8B5CF6', border: '#6D28D9', text: 'Protein' },
-  disease: { bg: '#EF4444', border: '#B91C1C', text: 'Disease' },
-  drug: { bg: '#10B981', border: '#047857', text: 'Drug' },
-  pathway: { bg: '#F59E0B', border: '#B45309', text: 'Pathway' },
-  biomarker: { bg: '#EC4899', border: '#BE185D', text: 'Biomarker' },
-  adc: { bg: '#06B6D4', border: '#0891B2', text: 'ADC' },
-  antigen: { bg: '#14B8A6', border: '#0D9488', text: 'Antigen' },
-  cell_type: { bg: '#6366F1', border: '#4338CA', text: 'Cell Type' },
-  mutation: { bg: '#F97316', border: '#C2410C', text: 'Mutation' },
+// ─── Entity palette ─────────────────────────────────────────────────
+// Node colours by category — kept aligned with KnowledgeGraphView so a
+// user moving between embeds and this page sees one colour language.
+const ENTITY_COLORS: Record<string, { bg: string; text: string }> = {
+  gene: { bg: '#3B82F6', text: 'Gene' },
+  protein: { bg: '#8B5CF6', text: 'Protein' },
+  disease: { bg: '#EF4444', text: 'Disease' },
+  drug: { bg: '#10B981', text: 'Drug' },
+  pathway: { bg: '#F59E0B', text: 'Pathway' },
+  biomarker: { bg: '#EC4899', text: 'Biomarker' },
+  adc: { bg: '#06B6D4', text: 'ADC' },
+  antigen: { bg: '#14B8A6', text: 'Antigen' },
+  cell_type: { bg: '#6366F1', text: 'Cell Type' },
+  mutation: { bg: '#F97316', text: 'Mutation' },
+}
+const DEFAULT_COLOR = '#64748b'
+
+const RELATION_COLORS: Record<string, string> = {
+  treats: '#10B981', targets: '#3B82F6', inhibits: '#EF4444',
+  activates: '#22C55E', causes: '#F97316', associates: '#8B5CF6',
+  expresses: '#EC4899', resistance: '#F59E0B', modulates: '#06B6D4',
+  biomarker_of: '#14B8A6',
 }
 
-// Relation type configurations
-const RELATION_TYPES = {
-  treats: { color: '#10B981', label: 'Treats' },
-  targets: { color: '#3B82F6', label: 'Targets' },
-  inhibits: { color: '#EF4444', label: 'Inhibits' },
-  activates: { color: '#22C55E', label: 'Activates' },
-  causes: { color: '#F97316', label: 'Causes' },
-  associates: { color: '#8B5CF6', label: 'Associates' },
-  expresses: { color: '#EC4899', label: 'Expresses' },
-  resistance: { color: '#F59E0B', label: 'Resistance' },
-  modulates: { color: '#06B6D4', label: 'Modulates' },
-  biomarker_of: { color: '#14B8A6', label: 'Biomarker Of' },
-}
+type Scope = 'private' | 'common' | 'all'
 
-// Context categories
-const CONTEXT_CATEGORIES = [
-  { id: 'drug_context', label: 'Drug/Treatment', color: '#10B981' },
-  { id: 'indication_context', label: 'Disease/Indication', color: '#EF4444' },
-  { id: 'resistance_context', label: 'Resistance', color: '#F59E0B' },
-  { id: 'biomarker_context', label: 'Biomarker', color: '#EC4899' },
-  { id: 'outcome_context', label: 'Clinical Outcome', color: '#3B82F6' },
-  { id: 'mechanism_context', label: 'Mechanism', color: '#8B5CF6' },
-]
-
-// Confidence levels
-const CONFIDENCE_LEVELS = [
-  { id: 'very_high', label: 'Very High (>0.8)', min: 0.8, color: '#22C55E' },
-  { id: 'high', label: 'High (0.6-0.8)', min: 0.6, color: '#3B82F6' },
-  { id: 'moderate', label: 'Moderate (0.4-0.6)', min: 0.4, color: '#F59E0B' },
-  { id: 'low', label: 'Low (<0.4)', min: 0, color: '#EF4444' },
-]
-
-interface GraphNode {
+// Backend shapes — /knowledge-graph/scope/{scope}
+interface RawNode {
   id: string
-  label: string
-  type: string
-  x?: number
-  y?: number
-  confidence?: number
-  sources?: number
-  metadata?: Record<string, unknown>
+  name: string
+  type: string | null
+  description?: string | null
+  properties?: Record<string, unknown>
 }
-
-interface GraphEdge {
+interface RawEdge {
   id: string
-  source: string
-  target: string
-  relation: string
-  confidence: number
-  evidenceCount: number
-  evidence?: Array<{
-    text: string
-    source: string
-    confidence: number
-  }>
+  source_id: string
+  target_id: string
+  source_name?: string | null
+  target_name?: string | null
+  relationship: string
+  strength?: number | null
+}
+interface ScopePayload {
+  nodes: RawNode[]
+  edges: RawEdge[]
+  total_nodes?: number
+  total_edges?: number
 }
 
-interface FilterState {
-  entityTypes: string[]
-  relationTypes: string[]
-  contexts: string[]
-  minConfidence: number
-  showOrphans: boolean
+// react-force-graph node — RawNode + runtime-assigned coordinates +
+// our derived degree (drives node size).
+interface GNode extends RawNode {
+  degree: number
+  x?: number; y?: number; z?: number
 }
+interface GLink {
+  source: string | GNode
+  target: string | GNode
+  relationship: string
+  strength: number
+}
+
+function colorOf(type: string | null | undefined): string {
+  return ENTITY_COLORS[(type || '').toLowerCase()]?.bg || DEFAULT_COLOR
+}
+
+const NODE_LIMIT = 1200
 
 export default function KnowledgeGraph() {
+  const [scope, setScope] = useState<Scope>('all')
+  const [payload, setPayload] = useState<ScopePayload | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null)
-  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
-  const [showFilters, setShowFilters] = useState(true)
-  const [, setShowEvidencePanel] = useState(false)
-  const [expandedSections, setExpandedSections] = useState({
-    entityTypes: true,
-    relationTypes: true,
-    contexts: false,
-    confidence: true,
-  })
-  const [filters, setFilters] = useState<FilterState>({
-    entityTypes: Object.keys(ENTITY_COLORS),
-    relationTypes: Object.keys(RELATION_TYPES),
-    contexts: [],
-    minConfidence: 0,
-    showOrphans: false,
-  })
-  const [zoom, setZoom] = useState(1)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [connectMode, setConnectMode] = useState(false)
-  const [connectSource, setConnectSource] = useState<GraphNode | null>(null)
-  const [connectRelation, setConnectRelation] = useState<string>('associates')
-  const [showConnectDialog, setShowConnectDialog] = useState<{ source: GraphNode; target: GraphNode } | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<GNode | null>(null)
 
-  // Graph data - fetched from backend knowledge graph API
-  const [graphData, setGraphData] = useState<{ nodes: GraphNode[], edges: GraphEdge[] }>({
-    nodes: [],
-    edges: [],
-  })
-  const [, setGraphLoading] = useState(true)
+  const fgRef = useRef<ForceGraphMethods | undefined>(undefined)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const [dims, setDims] = useState({ w: 800, h: 600 })
 
-  // Fetch graph data from the live /api/v1/knowledge-graph/entities
-  // endpoint (introduced in Batch 4). Legacy /knowledge-graph/full was
-  // never implemented server-side and returned 404 on every page load.
-  useEffect(() => {
-    const fetchGraph = async () => {
-      setGraphLoading(true)
-      try {
-        // Pull an initial page of entities as graph nodes.
-        const { data } = await apiClient.get('/knowledge-graph/entities', { params: { limit: 200 } })
-        const nodes: GraphNode[] = (data.entities || data.items || []).map((n: {
-          id: string
-          name?: string
-          category?: string
-          source?: string
-          evidence_count?: number
-        }) => ({
-          id: n.id,
-          label: n.name || n.id,
-          type: n.category || 'gene',
-          confidence: 0.75,
-          sources: n.evidence_count || 0,
-        }))
-        // Expand the first ~10 nodes' relationships into edges so the
-        // graph has visible structure; expansion continues on click.
-        const edges: GraphEdge[] = []
-        const seedIds = nodes.slice(0, 10).map((n) => n.id)
-        for (const nid of seedIds) {
-          try {
-            const { data: rels } = await apiClient.get<Array<{
-              id: string
-              source_id: string
-              target_id: string
-              relation_type?: string
-              confidence?: number
-              evidence_count?: number
-            }>>(
-              `/knowledge-graph/entities/${encodeURIComponent(nid)}/relationships`,
-              { params: { limit: 10 } },
-            )
-            for (const r of rels) {
-              edges.push({
-                id: r.id,
-                source: r.source_id,
-                target: r.target_id,
-                relation: r.relation_type || 'associates',
-                confidence: r.confidence ?? 0.5,
-                evidenceCount: r.evidence_count ?? 0,
-              })
-            }
-          } catch {
-            // per-entity relationship fetch failures are non-fatal —
-            // the graph renders whatever we collected.
-          }
-        }
-        setGraphData({ nodes, edges })
-      } catch (err) {
-        console.warn('Failed to fetch knowledge graph data:', err)
-      }
-      setGraphLoading(false)
+  // ── Fetch the scoped graph (nodes + edges in one round-trip) ──
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const { data } = await apiClient.get<ScopePayload>(
+        `/knowledge-graph/scope/${scope}`,
+        { params: { limit: NODE_LIMIT } },
+      )
+      setPayload({
+        nodes: Array.isArray(data.nodes) ? data.nodes : [],
+        edges: Array.isArray(data.edges) ? data.edges : [],
+        total_nodes: data.total_nodes,
+        total_edges: data.total_edges,
+      })
+    } catch (e) {
+      const err = e as { message?: string }
+      setError(err?.message || 'Failed to load knowledge graph')
+      setPayload(null)
+    } finally {
+      setLoading(false)
     }
-    fetchGraph()
-  }, [])
+  }, [scope])
 
-  const { data: searchResults } = useQuery({
-    queryKey: ['entities', 'search', searchQuery],
-    queryFn: () => api.searchEntities(searchQuery, { limit: 20 }),
-    enabled: searchQuery.length >= 2,
-  })
+  useEffect(() => { load() }, [load])
 
-  const { data: neighborhood } = useQuery({
-    queryKey: ['entity', 'neighborhood', selectedEntity?.id],
-    queryFn: () => api.getEntityNeighbors(selectedEntity!.id, { depth: 1, limit: 50 }),
-    enabled: !!selectedEntity,
-  })
-
+  // Aggregate counts for the header (full KB totals, not the page slice)
   const { data: stats } = useQuery({
     queryKey: ['knowledge', 'stats'],
     queryFn: () => api.getGraphStats(),
   })
 
-  // Filter graph data based on current filters
-  const filteredGraph = useMemo(() => {
-    const visibleNodes = graphData.nodes.filter(node => {
-      if (!filters.entityTypes.includes(node.type)) return false
-      if (node.confidence && node.confidence < filters.minConfidence) return false
-      return true
-    })
-    const visibleNodeIds = new Set(visibleNodes.map(n => n.id))
-
-    const visibleEdges = graphData.edges.filter(edge => {
-      if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) return false
-      if (!filters.relationTypes.includes(edge.relation)) return false
-      if (edge.confidence < filters.minConfidence) return false
-      return true
-    })
-
-    return { nodes: visibleNodes, edges: visibleEdges }
-  }, [graphData, filters])
-
-  // Position nodes in a force-directed layout (simplified)
-  const positionedNodes = useMemo(() => {
-    const centerX = 400
-    const centerY = 300
-    const radius = 200
-
-    return filteredGraph.nodes.map((node, i) => {
-      const angle = (2 * Math.PI * i) / filteredGraph.nodes.length
-      return {
-        ...node,
-        x: centerX + radius * Math.cos(angle),
-        y: centerY + radius * Math.sin(angle),
-      }
-    })
-  }, [filteredGraph.nodes])
-
-  // Draw the graph
+  // ── Size the 3D viewport to its container ──
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    // Set canvas size
-    canvas.width = canvas.offsetWidth * window.devicePixelRatio
-    canvas.height = canvas.offsetHeight * window.devicePixelRatio
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
-
-    // Clear canvas
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim() || '#000000'
-    ctx.fillRect(0, 0, canvas.offsetWidth, canvas.offsetHeight)
-
-    // Apply zoom and pan
-    ctx.save()
-    ctx.translate(pan.x, pan.y)
-    ctx.scale(zoom, zoom)
-
-    // Draw edges as curved bezier lines
-    filteredGraph.edges.forEach(edge => {
-      const sourceNode = positionedNodes.find(n => n.id === edge.source)
-      const targetNode = positionedNodes.find(n => n.id === edge.target)
-      if (!sourceNode || !targetNode) return
-
-      const relationConfig = RELATION_TYPES[edge.relation as keyof typeof RELATION_TYPES]
-      const color = relationConfig?.color || '#64748b'
-      const alpha = Math.max(0.3, edge.confidence)
-
-      // Calculate control point for quadratic bezier curve
-      const midX = (sourceNode.x! + targetNode.x!) / 2
-      const midY = (sourceNode.y! + targetNode.y!) / 2
-      const dx = targetNode.x! - sourceNode.x!
-      const dy = targetNode.y! - sourceNode.y!
-      const dist = Math.sqrt(dx * dx + dy * dy)
-      // Perpendicular offset for curve — scales with distance
-      const curvature = Math.min(dist * 0.2, 40)
-      const nx = -dy / dist  // normal x
-      const ny = dx / dist   // normal y
-      const cpX = midX + nx * curvature
-      const cpY = midY + ny * curvature
-
-      ctx.beginPath()
-      ctx.moveTo(sourceNode.x!, sourceNode.y!)
-      ctx.quadraticCurveTo(cpX, cpY, targetNode.x!, targetNode.y!)
-      ctx.strokeStyle = color
-      ctx.globalAlpha = alpha
-      ctx.lineWidth = selectedEdge?.id === edge.id ? 3 : 1.5
-      ctx.stroke()
-      ctx.globalAlpha = 1
-
-      // Draw arrow at the target end, tangent to the curve
-      const t = 0.92  // point near the end of the curve to compute tangent
-      const bx = (1 - t) * (1 - t) * sourceNode.x! + 2 * (1 - t) * t * cpX + t * t * targetNode.x!
-      const by = (1 - t) * (1 - t) * sourceNode.y! + 2 * (1 - t) * t * cpY + t * t * targetNode.y!
-      const angle = Math.atan2(targetNode.y! - by, targetNode.x! - bx)
-      const arrowSize = 8
-      const arrowX = targetNode.x! - 25 * Math.cos(angle)
-      const arrowY = targetNode.y! - 25 * Math.sin(angle)
-
-      ctx.beginPath()
-      ctx.moveTo(arrowX, arrowY)
-      ctx.lineTo(
-        arrowX - arrowSize * Math.cos(angle - Math.PI / 6),
-        arrowY - arrowSize * Math.sin(angle - Math.PI / 6)
-      )
-      ctx.lineTo(
-        arrowX - arrowSize * Math.cos(angle + Math.PI / 6),
-        arrowY - arrowSize * Math.sin(angle + Math.PI / 6)
-      )
-      ctx.closePath()
-      ctx.fillStyle = color
-      ctx.fill()
+    const el = wrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      setDims({
+        w: Math.max(320, el.clientWidth),
+        h: Math.max(320, el.clientHeight),
+      })
     })
-
-    // Draw in-progress connection line when in connect mode
-    if (connectMode && connectSource) {
-      const srcNode = positionedNodes.find(n => n.id === connectSource.id)
-      if (srcNode) {
-        ctx.beginPath()
-        ctx.setLineDash([6, 4])
-        ctx.moveTo(srcNode.x!, srcNode.y!)
-        // Draw to cursor position (approximate center if no mouse tracking)
-        ctx.strokeStyle = '#3B82F6'
-        ctx.globalAlpha = 0.6
-        ctx.lineWidth = 2
-        ctx.stroke()
-        ctx.setLineDash([])
-        ctx.globalAlpha = 1
-      }
-    }
-
-    // Draw nodes
-    positionedNodes.forEach(node => {
-      const entityConfig = ENTITY_COLORS[node.type as keyof typeof ENTITY_COLORS]
-      const bgColor = entityConfig?.bg || '#64748b'
-      const borderColor = entityConfig?.border || '#475569'
-      const isSelected = selectedEntity?.id === node.id
-
-      // Node circle
-      ctx.beginPath()
-      ctx.arc(node.x!, node.y!, isSelected ? 28 : 22, 0, 2 * Math.PI)
-      ctx.fillStyle = bgColor
-      ctx.fill()
-      ctx.strokeStyle = isSelected ? '#ffffff' : borderColor
-      ctx.lineWidth = isSelected ? 3 : 2
-      ctx.stroke()
-
-      // Node label
-      ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 11px Inter, system-ui, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      const label = node.label.length > 8 ? node.label.slice(0, 7) + '...' : node.label
-      ctx.fillText(label, node.x!, node.y!)
-
-      // Confidence indicator
-      if (node.confidence) {
-        const confLevel = CONFIDENCE_LEVELS.find(l => node.confidence! >= l.min)
-        if (confLevel) {
-          ctx.beginPath()
-          ctx.arc(node.x! + 18, node.y! - 18, 6, 0, 2 * Math.PI)
-          ctx.fillStyle = confLevel.color
-          ctx.fill()
-        }
-      }
-    })
-
-    ctx.restore()
-  }, [filteredGraph, positionedNodes, zoom, pan, selectedEntity, selectedEdge, connectMode, connectSource])
-
-  // Add a new edge between two nodes
-  const addEdge = useCallback((source: GraphNode, target: GraphNode, relation: string) => {
-    const newEdge: GraphEdge = {
-      id: `e-custom-${Date.now()}`,
-      source: source.id,
-      target: target.id,
-      relation,
-      confidence: 0.75,
-      evidenceCount: 0,
-    }
-    setGraphData(prev => ({
-      ...prev,
-      edges: [...prev.edges, newEdge],
-    }))
+    ro.observe(el)
+    setDims({ w: Math.max(320, el.clientWidth), h: Math.max(320, el.clientHeight) })
+    return () => ro.disconnect()
   }, [])
 
-  // Handle canvas click
-  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const rect = canvas.getBoundingClientRect()
-    const x = (e.clientX - rect.left - pan.x) / zoom
-    const y = (e.clientY - rect.top - pan.y) / zoom
-
-    // Check if clicked on a node
-    for (const node of positionedNodes) {
-      const dist = Math.sqrt((x - node.x!) ** 2 + (y - node.y!) ** 2)
-      if (dist < 25) {
-        // Connect mode: select source then target
-        if (connectMode) {
-          if (!connectSource) {
-            setConnectSource(node)
-          } else if (node.id !== connectSource.id) {
-            // Show dialog to pick relation type
-            setShowConnectDialog({ source: connectSource, target: node })
-          }
-          return
-        }
-        setSelectedEntity({
-          id: node.id,
-          name: node.label,
-          entity_type: node.type,
-        } as Entity)
-        setSelectedEdge(null)
-        return
-      }
+  // ── Build graph data (filtered by entity-type toggles) ──
+  // Degree drives node size; rebuilt only when payload / filters change
+  // so search highlighting never re-runs the physics simulation.
+  const graphData = useMemo(() => {
+    if (!payload) return { nodes: [] as GNode[], links: [] as GLink[] }
+    const nodes: GNode[] = payload.nodes
+      .filter(n => !hiddenTypes.has((n.type || 'other').toLowerCase()))
+      .map(n => ({ ...n, degree: 0 }))
+    const byId = new Map(nodes.map(n => [n.id, n]))
+    const links: GLink[] = []
+    for (const e of payload.edges) {
+      const s = byId.get(e.source_id)
+      const t = byId.get(e.target_id)
+      if (!s || !t) continue
+      s.degree += 1
+      t.degree += 1
+      links.push({
+        source: e.source_id,
+        target: e.target_id,
+        relationship: e.relationship,
+        strength: e.strength ?? 0.5,
+      })
     }
+    return { nodes, links }
+  }, [payload, hiddenTypes])
 
-    // Check if clicked on an edge
-    for (const edge of filteredGraph.edges) {
-      const sourceNode = positionedNodes.find(n => n.id === edge.source)
-      const targetNode = positionedNodes.find(n => n.id === edge.target)
-      if (!sourceNode || !targetNode) continue
-
-      const dist = pointToLineDistance(x, y, sourceNode.x!, sourceNode.y!, targetNode.x!, targetNode.y!)
-      if (dist < 10) {
-        setSelectedEdge(edge)
-        setShowEvidencePanel(true)
-        return
-      }
-    }
-
-    // Clicked on empty space
-    if (connectMode) {
-      setConnectSource(null)
-    }
-    setSelectedEntity(null)
-    setSelectedEdge(null)
-  }, [positionedNodes, filteredGraph.edges, zoom, pan, connectMode, connectSource])
-
-  // Helper function for point-to-line distance
-  function pointToLineDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
-    const A = px - x1
-    const B = py - y1
-    const C = x2 - x1
-    const D = y2 - y1
-    const dot = A * C + B * D
-    const lenSq = C * C + D * D
-    let param = -1
-    if (lenSq !== 0) param = dot / lenSq
-    let xx, yy
-    if (param < 0) { xx = x1; yy = y1 }
-    else if (param > 1) { xx = x2; yy = y2 }
-    else { xx = x1 + param * C; yy = y1 + param * D }
-    return Math.sqrt((px - xx) ** 2 + (py - yy) ** 2)
-  }
-
-  const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))
-  }
-
-  const toggleEntityType = (type: string) => {
-    setFilters(prev => ({
-      ...prev,
-      entityTypes: prev.entityTypes.includes(type)
-        ? prev.entityTypes.filter(t => t !== type)
-        : [...prev.entityTypes, type]
-    }))
-  }
-
-  const toggleRelationType = (type: string) => {
-    setFilters(prev => ({
-      ...prev,
-      relationTypes: prev.relationTypes.includes(type)
-        ? prev.relationTypes.filter(t => t !== type)
-        : [...prev.relationTypes, type]
-    }))
-  }
-
-  const toggleContext = (context: string) => {
-    setFilters(prev => ({
-      ...prev,
-      contexts: prev.contexts.includes(context)
-        ? prev.contexts.filter(c => c !== context)
-        : [...prev.contexts, context]
-    }))
-  }
-
-  const getConfidenceBadge = (confidence: number) => {
-    const level = CONFIDENCE_LEVELS.find(l => confidence >= l.min)
-    return (
-      <span
-        className="px-2 py-0.5 rounded text-xs font-medium"
-        style={{ backgroundColor: level?.color + '20', color: level?.color }}
-      >
-        {(confidence * 100).toFixed(0)}%
-      </span>
+  // ── Search — matched node ids (highlighted, not filtered out) ──
+  const matchedIds = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (q.length < 2) return new Set<string>()
+    return new Set(
+      graphData.nodes
+        .filter(n => n.name.toLowerCase().includes(q))
+        .map(n => n.id),
     )
-  }
+  }, [searchQuery, graphData.nodes])
+
+  const searchResults = useMemo(() => {
+    if (matchedIds.size === 0) return []
+    return graphData.nodes.filter(n => matchedIds.has(n.id)).slice(0, 12)
+  }, [matchedIds, graphData.nodes])
+
+  // Entity types actually present, for the filter row
+  const presentTypes = useMemo(() => {
+    const s = new Set<string>()
+    for (const n of payload?.nodes || []) s.add((n.type || 'other').toLowerCase())
+    return [...s].sort()
+  }, [payload])
+
+  // Fly the camera to a node and select it.
+  const focusNode = useCallback((node: GNode) => {
+    setSelected(node)
+    const fg = fgRef.current
+    if (fg && node.x != null && node.y != null && node.z != null) {
+      const dist = 90
+      const ratio = 1 + dist / Math.hypot(node.x, node.y, node.z || 1)
+      fg.cameraPosition(
+        { x: node.x * ratio, y: node.y * ratio, z: (node.z || 1) * ratio },
+        { x: node.x, y: node.y, z: node.z || 0 },
+        1400,
+      )
+    }
+  }, [])
+
+  const toggleType = (t: string) =>
+    setHiddenTypes(prev => {
+      const next = new Set(prev)
+      if (next.has(t)) next.delete(t)
+      else next.add(t)
+      return next
+    })
+
+  // Connections for the detail drawer — from the pristine edge list.
+  const connections = useMemo(() => {
+    if (!selected || !payload) return []
+    const out: { relationship: string; otherId: string; otherName: string; dir: '→' | '←' }[] = []
+    for (const e of payload.edges) {
+      if (e.source_id === selected.id) {
+        out.push({ relationship: e.relationship, otherId: e.target_id, otherName: e.target_name || e.target_id, dir: '→' })
+      } else if (e.target_id === selected.id) {
+        out.push({ relationship: e.relationship, otherId: e.source_id, otherName: e.source_name || e.source_id, dir: '←' })
+      }
+    }
+    return out.slice(0, 60)
+  }, [selected, payload])
+
+  const searchActive = matchedIds.size > 0
 
   return (
     <div className="h-full flex flex-col bg-[var(--color-bg)]">
-      {/* Scope toggle + compact KG strip — Private (current user's
-          owned entities) vs Common (community pool). Sits above the
-          full explorer chrome below; the explorer continues to drive
-          its own data flow for now (Phase 2 will unify when the
-          PostgresGraphStore swap lands). */}
-      <ScopedKnowledgeGraphPanel />
-
-      {/* Header */}
-      <div className="p-4 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h1 className="text-xl font-bold text-[var(--color-text)]">Knowledge Graph Explorer</h1>
-            <p className="text-[var(--color-text-muted)] text-sm">
-              Interactive visualization with evidence drill-down
+      {/* ── Header ── */}
+      <div className="px-4 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)] flex-shrink-0">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="mr-auto">
+            <h1 className="text-lg font-bold text-[var(--color-text)] leading-tight">
+              Knowledge Graph
+            </h1>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {stats
+                ? `${stats.total_entities?.toLocaleString() ?? 0} entities · ${stats.total_relations?.toLocaleString() ?? 0} relations`
+                : 'Interactive 3D exploration with evidence drill-down'}
             </p>
           </div>
-          <div className="flex items-center space-x-4">
-            {stats && (
-              <div className="flex space-x-4 text-sm mr-4">
-                <div className="flex items-center space-x-1">
-                  <div className="w-2 h-2 bg-white/15 rounded-full"></div>
-                  <span className="text-[var(--color-text-muted)]">Entities:</span>
-                  <span className="text-[var(--color-text)] font-medium">{stats.total_entities?.toLocaleString() || filteredGraph.nodes.length}</span>
-                </div>
-                <div className="flex items-center space-x-1">
-                  <div className="w-2 h-2 bg-white/15 rounded-full"></div>
-                  <span className="text-[var(--color-text-muted)]">Relations:</span>
-                  <span className="text-[var(--color-text)] font-medium">{stats.total_relations?.toLocaleString() || filteredGraph.edges.length}</span>
-                </div>
-              </div>
-            )}
-            <button
-              onClick={() => {
-                setConnectMode(!connectMode)
-                setConnectSource(null)
-                setShowConnectDialog(null)
-              }}
-              className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 text-sm ${connectMode ? 'bg-white/15 text-white' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
-              title="Connect two nodes"
-            >
-              <FiLink className="w-5 h-5" />
-              {connectMode && <span className="text-xs font-medium">{connectSource ? 'Select target' : 'Select source'}</span>}
-            </button>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`p-2 rounded-lg transition-colors ${showFilters ? 'bg-white/15 text-[var(--color-text)]' : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
-            >
-              <FiFilter className="w-5 h-5" />
-            </button>
-            <button aria-label="Download" className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-              <FiDownload className="w-5 h-5" />
-            </button>
-            <button className="p-2 bg-[var(--glass-bg)] rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]" aria-label="Share"><FiShare2 className="w-5 h-5" /></button>
-          </div>
-        </div>
 
-        {/* Search */}
-        <div className="relative max-w-xl">
-          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] w-4 h-4" />
-          <input
-            type="text"
-            className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-10 pr-4 text-[var(--color-text)] text-sm placeholder-secondary-500 focus:outline-none focus:border-[var(--color-border-strong)]"
-            placeholder="Search genes, proteins, diseases, drugs, pathways..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            >
-              <FiX className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-
-        {/* Search Results Dropdown */}
-        {searchQuery.length >= 2 && searchResults && searchResults.length > 0 && (
-          <div className="absolute z-20 mt-1 w-full max-w-xl bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg shadow-xl max-h-72 overflow-auto">
-            {searchResults.map((entity) => (
+          {/* Scope toggle */}
+          <div className="flex items-center gap-1">
+            {(['private', 'common', 'all'] as const).map(s => (
               <button
-                key={entity.id}
-                className="w-full px-4 py-2.5 text-left hover:bg-[var(--glass-bg-hover)] transition-colors flex items-center justify-between"
-                onClick={() => {
-                  setSelectedEntity(entity)
-                  setSearchQuery('')
+                key={s}
+                onClick={() => setScope(s)}
+                className="text-xs px-3 py-1.5 rounded-md capitalize transition-colors"
+                style={{
+                  background: scope === s ? 'var(--color-text)' : 'transparent',
+                  color: scope === s ? 'var(--color-bg)' : 'var(--color-text-muted)',
+                  border: '1px solid var(--color-border)',
+                  fontWeight: scope === s ? 600 : 400,
                 }}
               >
-                <div className="flex items-center space-x-3">
-                  <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text)] text-xs font-bold"
-                    style={{ backgroundColor: ENTITY_COLORS[entity.entity_type as keyof typeof ENTITY_COLORS]?.bg || '#64748b' }}
-                  >
-                    {entity.name.slice(0, 2)}
-                  </div>
-                  <div>
-                    <p className="text-[var(--color-text)] font-medium text-sm">{entity.name}</p>
-                    <p className="text-[var(--color-text-muted)] text-xs capitalize">{entity.entity_type}</p>
-                  </div>
-                </div>
+                {s === 'all' ? 'All visible' : s}
               </button>
             ))}
+          </div>
+
+          {/* Search */}
+          <div className="relative">
+            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] w-4 h-4" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search genes, proteins, diseases…"
+              className="w-72 bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 pl-9 pr-8 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-border-strong)]"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                <FiX className="w-4 h-4" />
+              </button>
+            )}
+            {searchResults.length > 0 && (
+              <div className="absolute z-30 mt-1 w-72 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-lg shadow-2xl max-h-72 overflow-auto">
+                {searchResults.map(n => (
+                  <button
+                    key={n.id}
+                    onClick={() => { focusNode(n); setSearchQuery('') }}
+                    className="w-full px-3 py-2 text-left hover:bg-[var(--glass-bg-hover)] flex items-center gap-2.5"
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: colorOf(n.type) }} />
+                    <span className="text-sm text-[var(--color-text)] truncate">{n.name}</span>
+                    <span className="text-xs text-[var(--color-text-muted)] ml-auto capitalize">{n.type || 'other'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => fgRef.current?.zoomToFit(800, 60)}
+            title="Fit to view"
+            className="p-2 rounded-lg bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          >
+            <FiMaximize className="w-4 h-4" />
+          </button>
+          <button
+            onClick={load}
+            title="Reload"
+            className="p-2 rounded-lg bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          >
+            <FiRefreshCw className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Entity-type filter row */}
+        {presentTypes.length > 0 && (
+          <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
+            {presentTypes.map(t => {
+              const on = !hiddenTypes.has(t)
+              const c = colorOf(t)
+              return (
+                <button
+                  key={t}
+                  onClick={() => toggleType(t)}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs capitalize transition-opacity"
+                  style={{
+                    background: 'var(--glass-bg)',
+                    border: '1px solid var(--color-border)',
+                    color: on ? 'var(--color-text)' : 'var(--color-text-muted)',
+                    opacity: on ? 1 : 0.45,
+                  }}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: c }} />
+                  {ENTITY_COLORS[t]?.text || t.replace('_', ' ')}
+                </button>
+              )
+            })}
           </div>
         )}
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Filters Panel */}
-        {showFilters && (
-          <div className="w-64 border-r border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-y-auto">
-            <div className="p-3">
-              <h3 className="text-sm font-semibold text-[var(--color-text)] mb-3 flex items-center">
-                <FiLayers className="w-4 h-4 mr-2" />
-                Filters & Layers
-              </h3>
-
-              {/* Entity Types */}
-              <div className="mb-4">
-                <button
-                  onClick={() => toggleSection('entityTypes')}
-                  className="w-full flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
-                >
-                  <span>Entity Types</span>
-                  {expandedSections.entityTypes ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
-                </button>
-                {expandedSections.entityTypes && (
-                  <div className="mt-2 space-y-1">
-                    {Object.entries(ENTITY_COLORS).map(([type, config]) => (
-                      <label key={type} className="flex items-center space-x-2 py-1 cursor-pointer group">
-                        <input
-                          type="checkbox"
-                          checked={filters.entityTypes.includes(type)}
-                          onChange={() => toggleEntityType(type)}
-                          className="rounded border-[var(--color-border-strong)] text-[var(--color-text)] focus:ring-blue-500"
-                        />
-                        <div
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: config.bg }}
-                        />
-                        <span className="text-sm text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)] capitalize">
-                          {config.text}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Relation Types */}
-              <div className="mb-4">
-                <button
-                  onClick={() => toggleSection('relationTypes')}
-                  className="w-full flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
-                >
-                  <span>Relation Types</span>
-                  {expandedSections.relationTypes ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
-                </button>
-                {expandedSections.relationTypes && (
-                  <div className="mt-2 space-y-1">
-                    {Object.entries(RELATION_TYPES).map(([type, config]) => (
-                      <label key={type} className="flex items-center space-x-2 py-1 cursor-pointer group">
-                        <input
-                          type="checkbox"
-                          checked={filters.relationTypes.includes(type)}
-                          onChange={() => toggleRelationType(type)}
-                          className="rounded border-[var(--color-border-strong)] text-[var(--color-text)] focus:ring-blue-500"
-                        />
-                        <div
-                          className="w-3 h-0.5 rounded"
-                          style={{ backgroundColor: config.color }}
-                        />
-                        <span className="text-sm text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">
-                          {config.label}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Context Toggles */}
-              <div className="mb-4">
-                <button
-                  onClick={() => toggleSection('contexts')}
-                  className="w-full flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
-                >
-                  <span>Context Categories</span>
-                  {expandedSections.contexts ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
-                </button>
-                {expandedSections.contexts && (
-                  <div className="mt-2 space-y-1">
-                    {CONTEXT_CATEGORIES.map((ctx) => (
-                      <label key={ctx.id} className="flex items-center space-x-2 py-1 cursor-pointer group">
-                        <input
-                          type="checkbox"
-                          checked={filters.contexts.includes(ctx.id)}
-                          onChange={() => toggleContext(ctx.id)}
-                          className="rounded border-[var(--color-border-strong)] text-[var(--color-text)] focus:ring-blue-500"
-                        />
-                        <div
-                          className="w-3 h-3 rounded"
-                          style={{ backgroundColor: ctx.color }}
-                        />
-                        <span className="text-sm text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">
-                          {ctx.label}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Confidence Threshold */}
-              <div className="mb-4">
-                <button
-                  onClick={() => toggleSection('confidence')}
-                  className="w-full flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] py-1"
-                >
-                  <span>Confidence Threshold</span>
-                  {expandedSections.confidence ? <FiChevronDown className="w-4 h-4" /> : <FiChevronRight className="w-4 h-4" />}
-                </button>
-                {expandedSections.confidence && (
-                  <div className="mt-2">
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={filters.minConfidence * 100}
-                      onChange={(e) => setFilters(prev => ({ ...prev, minConfidence: parseInt(e.target.value) / 100 }))}
-                      className="w-full h-2 bg-secondary-700 rounded-lg appearance-none cursor-pointer"
-                    />
-                    <div className="flex justify-between text-xs text-[var(--color-text-muted)] mt-1">
-                      <span>0%</span>
-                      <span className="text-[var(--color-text)]">{(filters.minConfidence * 100).toFixed(0)}%</span>
-                      <span>100%</span>
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      {CONFIDENCE_LEVELS.map((level) => (
-                        <div key={level.id} className="flex items-center space-x-2 text-xs">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: level.color }} />
-                          <span className="text-[var(--color-text-muted)]">{level.label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+      {/* ── 3D viewport ── */}
+      <div ref={wrapRef} className="flex-1 relative overflow-hidden">
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/40 backdrop-blur-sm">
+            <div className="text-sm text-[var(--color-text-muted)] flex items-center gap-2">
+              <FiRefreshCw className="w-4 h-4 animate-spin" />
+              Loading knowledge graph…
             </div>
           </div>
         )}
 
-        {/* Graph Canvas */}
-        <div className="flex-1 relative" ref={containerRef}>
-          <canvas
-            ref={canvasRef}
-            className="w-full h-full cursor-grab active:cursor-grabbing"
-            onClick={handleCanvasClick}
-            style={{ width: '100%', height: '100%' }}
-          />
-
-          {/* Zoom Controls */}
-          <div className="absolute bottom-4 right-4 flex flex-col space-y-2">
-            <button
-              onClick={() => setZoom(z => Math.min(2, z + 0.1))}
-              className="p-2 bg-[var(--glass-bg)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-            >
-              <FiZoomIn className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
-              className="p-2 bg-[var(--glass-bg)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-            >
-              <FiZoomOut className="w-5 h-5" />
-            </button>
-            <button aria-label="0"
-              onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
-              className="p-2 bg-[var(--glass-bg)] rounded-lg hover:bg-[var(--glass-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-            >
-              <FiMaximize className="w-5 h-5" />
-            </button>
+        {error && !loading && (
+          <div className="absolute inset-0 flex items-center justify-center z-20">
+            <div className="text-center">
+              <FiInfo className="w-6 h-6 text-[var(--color-text-muted)] mx-auto mb-2" />
+              <p className="text-sm text-[var(--color-text)]">{error}</p>
+              <button onClick={load} className="mt-3 text-xs px-3 py-1.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--color-border)] text-[var(--color-text)]">
+                Retry
+              </button>
+            </div>
           </div>
+        )}
 
-          {/* Legend */}
-          <div className="absolute top-4 left-4 bg-[var(--color-bg-elevated)] backdrop-blur-sm rounded-lg p-3 max-w-xs">
-            <h4 className="text-xs font-semibold text-[var(--color-text-secondary)] mb-2">Legend</h4>
-            <div className="grid grid-cols-2 gap-1">
-              {Object.entries(ENTITY_COLORS).slice(0, 6).map(([type, config]) => (
-                <div key={type} className="flex items-center space-x-1.5">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: config.bg }} />
-                  <span className="text-xs text-[var(--color-text-muted)]">{config.text}</span>
+        {!loading && !error && graphData.nodes.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center z-20">
+            <p className="text-sm text-[var(--color-text-muted)] max-w-sm text-center">
+              {scope === 'private'
+                ? 'No private entities yet — write a hypothesis or save a paper to start populating your graph.'
+                : 'No entities found in this scope yet.'}
+            </p>
+          </div>
+        )}
+
+        <ForceGraph3D
+          ref={fgRef}
+          width={dims.w}
+          height={dims.h}
+          graphData={graphData}
+          backgroundColor="#070a0f"
+          showNavInfo={false}
+          nodeRelSize={4}
+          nodeResolution={12}
+          nodeOpacity={0.95}
+          nodeVal={(n) => {
+            const node = n as GNode
+            return Math.min(14, 3 + node.degree * 0.7)
+          }}
+          nodeColor={(n) => {
+            const node = n as GNode
+            if (searchActive) {
+              return matchedIds.has(node.id) ? colorOf(node.type) : '#1f2a38'
+            }
+            return colorOf(node.type)
+          }}
+          nodeLabel={(n) => {
+            const node = n as GNode
+            return `<div style="background:#11161f;color:#e8eef5;padding:6px 10px;
+              border:1px solid #2a3240;border-radius:6px;font-size:11px;max-width:240px">
+              <b>${escapeHtml(node.name)}</b><br/>
+              <span style="color:#8a99b3">${node.type || 'entity'} · ${node.degree} link${node.degree === 1 ? '' : 's'}</span>
+            </div>`
+          }}
+          linkColor={(l) => {
+            const link = l as GLink
+            if (searchActive) return 'rgba(120,140,165,0.10)'
+            return RELATION_COLORS[link.relationship] || 'rgba(140,160,185,0.32)'
+          }}
+          linkWidth={(l) => Math.max(0.4, ((l as GLink).strength || 0.5) * 1.6)}
+          linkOpacity={0.55}
+          linkDirectionalParticles={graphData.links.length < 500 ? 2 : 0}
+          linkDirectionalParticleWidth={1.4}
+          linkDirectionalParticleSpeed={0.006}
+          enableNodeDrag={false}
+          enableNavigationControls
+          cooldownTicks={180}
+          warmupTicks={40}
+          onEngineStop={() => fgRef.current?.zoomToFit(700, 60)}
+          onNodeClick={(n) => focusNode(n as GNode)}
+          onBackgroundClick={() => setSelected(null)}
+        />
+
+        {/* Legend */}
+        {graphData.nodes.length > 0 && (
+          <div className="absolute top-3 left-3 bg-[var(--color-bg-elevated)]/90 backdrop-blur-sm rounded-lg p-3 z-10 border border-[var(--color-border)]">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">Legend</h4>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+              {presentTypes.slice(0, 10).map(t => (
+                <div key={t} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: colorOf(t) }} />
+                  <span className="text-[11px] text-[var(--color-text-muted)] capitalize">
+                    {ENTITY_COLORS[t]?.text || t.replace('_', ' ')}
+                  </span>
                 </div>
               ))}
             </div>
           </div>
+        )}
 
-          {/* Stats */}
-          <div className="absolute top-4 right-4 bg-[var(--color-bg-elevated)] backdrop-blur-sm rounded-lg px-3 py-2">
-            <div className="flex items-center space-x-4 text-xs">
-              <span className="text-[var(--color-text-muted)]">
-                Showing: <span className="text-[var(--color-text)] font-medium">{filteredGraph.nodes.length}</span> nodes
-              </span>
-              <span className="text-[var(--color-text-muted)]">
-                <span className="text-[var(--color-text)] font-medium">{filteredGraph.edges.length}</span> edges
-              </span>
-            </div>
+        {/* Stats chip */}
+        {payload && (
+          <div className="absolute bottom-3 left-3 bg-[var(--color-bg-elevated)]/90 backdrop-blur-sm rounded-lg px-3 py-1.5 z-10 border border-[var(--color-border)] flex items-center gap-3 text-xs">
+            <span className="text-[var(--color-text-muted)]">
+              Showing <span className="text-[var(--color-text)] font-medium">{graphData.nodes.length}</span> nodes
+            </span>
+            <span className="text-[var(--color-text-muted)]">
+              <span className="text-[var(--color-text)] font-medium">{graphData.links.length}</span> edges
+            </span>
+            {searchActive && (
+              <span className="text-[var(--color-text)]">· {matchedIds.size} match{matchedIds.size === 1 ? '' : 'es'}</span>
+            )}
           </div>
-        </div>
+        )}
 
-        {/* Entity/Edge Details Panel */}
-        {(selectedEntity || selectedEdge) && (
-          <div className="w-80 border-l border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-y-auto">
-            <div className="p-4">
-              {selectedEntity && !selectedEdge && (
-                <>
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-[var(--color-text)]">Entity Details</h2>
-                    <button
-                      onClick={() => setSelectedEntity(null)}
-                      className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                    >
-                      <FiX className="w-5 h-5" />
-                    </button>
-                  </div>
+        {/* Selected-node detail drawer */}
+        {selected && (
+          <div className="absolute top-3 right-3 bottom-3 w-80 bg-[var(--color-bg-elevated)]/95 backdrop-blur-sm rounded-lg z-10 border border-[var(--color-border)] flex flex-col">
+            <div className="p-4 border-b border-[var(--color-border)] flex items-start justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
+                  style={{ background: colorOf(selected.type) }}
+                >
+                  {selected.name.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-[var(--color-text)] font-semibold text-sm truncate">{selected.name}</h3>
+                  <p className="text-[var(--color-text-muted)] text-xs capitalize">{selected.type || 'entity'}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelected(null)}
+                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex-shrink-0"
+              >
+                <FiX className="w-4 h-4" />
+              </button>
+            </div>
 
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div
-                      className="w-12 h-12 rounded-full flex items-center justify-center text-[var(--color-text)] text-lg font-bold"
-                      style={{ backgroundColor: ENTITY_COLORS[selectedEntity.entity_type as keyof typeof ENTITY_COLORS]?.bg || '#64748b' }}
-                    >
-                      {selectedEntity.name.slice(0, 2)}
-                    </div>
-                    <div>
-                      <h3 className="text-[var(--color-text)] font-semibold">{selectedEntity.name}</h3>
-                      <p className="text-[var(--color-text-muted)] text-sm capitalize">{selectedEntity.entity_type}</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    {selectedEntity.description && (
-                      <div>
-                        <label className="text-[var(--color-text-muted)] text-xs font-medium">Description</label>
-                        <p className="text-[var(--color-text-secondary)] text-sm mt-1">{selectedEntity.description}</p>
-                      </div>
-                    )}
-
-                    {selectedEntity.properties?.confidence !== undefined && (
-                      <div>
-                        <label className="text-[var(--color-text-muted)] text-xs font-medium">Confidence</label>
-                        <div className="mt-1">
-                          {getConfidenceBadge(Number(selectedEntity.properties.confidence))}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedEntity.aliases && selectedEntity.aliases.length > 0 && (
-                      <div>
-                        <label className="text-[var(--color-text-muted)] text-xs font-medium">Aliases</label>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {selectedEntity.aliases.map((alias, i) => (
-                            <span key={i} className="px-2 py-0.5 bg-[var(--glass-bg)] rounded text-xs text-[var(--color-text-secondary)]">
-                              {alias}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="text-[var(--color-text-muted)] text-xs font-medium">External Links</label>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-text)] hover:text-white">
-                          <FiExternalLink className="w-3 h-3" />
-                          <span>PubMed</span>
-                        </a>
-                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-text)] hover:text-white">
-                          <FiExternalLink className="w-3 h-3" />
-                          <span>UniProt</span>
-                        </a>
-                        <a href="#" className="flex items-center space-x-1 text-xs text-[var(--color-text)] hover:text-white">
-                          <FiExternalLink className="w-3 h-3" />
-                          <span>DrugBank</span>
-                        </a>
-                      </div>
-                    </div>
-
-                    {neighborhood && neighborhood.relations && neighborhood.relations.length > 0 && (
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <label className="text-[var(--color-text-muted)] text-xs font-medium">
-                            Relationships ({neighborhood.relations.length})
-                          </label>
-                          <button
-                            onClick={() => {
-                              // Expand neighbours into the main canvas:
-                              // top-25 relations by confidence (proxy for
-                              // edge weight), with the connected nodes
-                              // added to graphData and de-duped by id.
-                              const top = [...neighborhood.relations]
-                                .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
-                                .slice(0, 25)
-                              const existingNodeIds = new Set(graphData.nodes.map(n => n.id))
-                              const newNodes: typeof graphData.nodes = []
-                              for (const rel of top) {
-                                const addNode = (id: string, name: string, type?: string) => {
-                                  if (!id || existingNodeIds.has(id)) return
-                                  existingNodeIds.add(id)
-                                  newNodes.push({
-                                    id,
-                                    label: name || id,
-                                    type: type || 'entity',
-                                    confidence: 0.7,
-                                  })
-                                }
-                                addNode(rel.source_id, rel.source_name, rel.source_type)
-                                addNode(rel.target_id, rel.target_name, rel.target_type)
-                              }
-                              const newEdges = top.map((rel, i) => ({
-                                id: `${rel.source_id}-${rel.target_id}-${i}`,
-                                source: rel.source_id,
-                                target: rel.target_id,
-                                relation: rel.relation_type,
-                                confidence: rel.confidence ?? 0.7,
-                                evidenceCount: 0,
-                              }))
-                              setGraphData(prev => ({
-                                nodes: [...prev.nodes, ...newNodes],
-                                edges: [...prev.edges, ...newEdges],
-                              }))
-                              toast('success', `Expanded ${newNodes.length} new nodes · ${newEdges.length} edges (top 25 by confidence)`)
-                            }}
-                            className="text-xxs px-2 py-1 rounded border border-[var(--glass-border)] hover:border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-                            title="Add 1-hop neighbours (top 25 by edge weight) to the canvas"
-                          >
-                            Expand in graph
-                          </button>
-                        </div>
-                        <div className="space-y-2 max-h-64 overflow-auto">
-                          {[...neighborhood.relations]
-                            .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
-                            .slice(0, 25)
-                            .map((rel, i) => (
-                            <div key={i} className="p-2 bg-[var(--glass-bg)] rounded text-xs">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[var(--color-text)]">{rel.source_name}</span>
-                                <span className="text-[var(--color-text-muted)] mx-1">→</span>
-                                <span className="text-[var(--color-text)]">{rel.target_name}</span>
-                              </div>
-                              <div className="flex items-center justify-between mt-1">
-                                <span className="text-[var(--color-text-muted)]">{rel.relation_type}</span>
-                                {getConfidenceBadge(rel.confidence || 0.7)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
+            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+              {selected.description && (
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium">Description</label>
+                  <p className="text-sm text-[var(--color-text-secondary)] mt-1">{selected.description}</p>
+                </div>
               )}
 
-              {selectedEdge && (
-                <>
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-[var(--color-text)]">Relationship Evidence</h2>
-                    <button
-                      onClick={() => { setSelectedEdge(null); setShowEvidencePanel(false) }}
-                      className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                    >
-                      <FiX className="w-5 h-5" />
-                    </button>
-                  </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-[var(--glass-bg)] rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-[var(--color-text-muted)]">Connections</p>
+                  <p className="text-[var(--color-text)] font-semibold">{selected.degree}</p>
+                </div>
+                <div className="bg-[var(--glass-bg)] rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-[var(--color-text-muted)]">Type</p>
+                  <p className="text-[var(--color-text)] font-semibold text-xs capitalize truncate">{selected.type || 'entity'}</p>
+                </div>
+              </div>
 
-                  <div className="bg-[var(--glass-bg)] rounded-lg p-3 mb-4">
-                    <div className="flex items-center justify-center space-x-2 text-sm">
-                      <span className="text-[var(--color-text)] font-medium">
-                        {positionedNodes.find(n => n.id === selectedEdge.source)?.label}
-                      </span>
-                      <div className="flex items-center space-x-1">
-                        <div
-                          className="w-8 h-0.5 rounded"
-                          style={{ backgroundColor: RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.color }}
-                        />
-                        <span className="text-[var(--color-text-muted)] text-xs">
-                          {RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.label}
-                        </span>
-                        <div
-                          className="w-8 h-0.5 rounded"
-                          style={{ backgroundColor: RELATION_TYPES[selectedEdge.relation as keyof typeof RELATION_TYPES]?.color }}
-                        />
-                      </div>
-                      <span className="text-[var(--color-text)] font-medium">
-                        {positionedNodes.find(n => n.id === selectedEdge.target)?.label}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div className="bg-[var(--glass-bg)] rounded p-2 text-center">
-                      <p className="text-[var(--color-text-muted)] text-xs">Confidence</p>
-                      <p className="text-[var(--color-text)] font-semibold">{(selectedEdge.confidence * 100).toFixed(0)}%</p>
-                    </div>
-                    <div className="bg-[var(--glass-bg)] rounded p-2 text-center">
-                      <p className="text-[var(--color-text-muted)] text-xs">Evidence</p>
-                      <p className="text-[var(--color-text)] font-semibold">{selectedEdge.evidenceCount}</p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-[var(--color-text-muted)] text-xs font-medium">Supporting Evidence</label>
-                      <FiBook className="w-4 h-4 text-[var(--color-text-muted)]" />
-                    </div>
-                    <div className="space-y-2">
-                      {selectedEdge.evidence && selectedEdge.evidence.length > 0 ? (
-                        selectedEdge.evidence.map((ev, i) => (
-                          <div key={i} className="bg-[var(--glass-bg)] rounded-lg p-3">
-                            <p className="text-[var(--color-text-secondary)] text-sm mb-2">"{ev.text}"</p>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[var(--color-text)] text-xs">{ev.source}</span>
-                              {getConfidenceBadge(ev.confidence)}
-                            </div>
+              {connections.length > 0 && (
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium flex items-center gap-1.5">
+                    <FiShare2 className="w-3 h-3" /> Relationships ({connections.length})
+                  </label>
+                  <div className="mt-2 space-y-1.5">
+                    {connections.map((c, i) => {
+                      const target = graphData.nodes.find(n => n.id === c.otherId)
+                      return (
+                        <button
+                          key={i}
+                          disabled={!target}
+                          onClick={() => target && focusNode(target)}
+                          className="w-full text-left p-2 bg-[var(--glass-bg)] rounded-lg text-xs hover:bg-[var(--glass-bg-hover)] transition-colors disabled:opacity-50"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="px-1.5 py-0.5 rounded text-[10px]"
+                              style={{
+                                background: (RELATION_COLORS[c.relationship] || '#64748b') + '22',
+                                color: RELATION_COLORS[c.relationship] || '#94a3b8',
+                              }}
+                            >
+                              {c.dir} {c.relationship}
+                            </span>
                           </div>
-                        ))
-                      ) : (
-                        <div className="bg-[var(--glass-bg)] rounded-lg p-3 text-center">
-                          <FiInfo className="w-5 h-5 text-[var(--color-text-muted)] mx-auto mb-1" />
-                          <p className="text-[var(--color-text-muted)] text-xs">Evidence details not loaded</p>
-                          <button className="text-[var(--color-text)] text-xs mt-1 hover:underline">
-                            Load evidence
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                          <p className="text-[var(--color-text)] mt-1 truncate">{c.otherName}</p>
+                        </button>
+                      )
+                    })}
                   </div>
+                </div>
+              )}
 
-                  <div className="mt-4">
-                    <label className="text-[var(--color-text-muted)] text-xs font-medium mb-2 block">Confidence Breakdown</label>
-                    <div className="text-center text-[var(--color-text-muted)] text-xs py-4">
-                      No confidence breakdown available
-                    </div>
-                  </div>
-                </>
+              {connections.length === 0 && (
+                <div className="text-center py-6">
+                  <FiCrosshair className="w-5 h-5 text-[var(--color-text-muted)] mx-auto mb-1" />
+                  <p className="text-xs text-[var(--color-text-muted)]">No relationships in this scope</p>
+                </div>
               )}
             </div>
           </div>
         )}
       </div>
-
-      {/* Connect Nodes Dialog */}
-      {showConnectDialog && (
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
-          aria-modal="true"
-          aria-label="Connect entities"
-          {...modalBackdropProps(() => { setShowConnectDialog(null); setConnectSource(null) })}
-        >
-          <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-xl w-full max-w-sm mx-4 p-0 shadow-2xl" role="dialog" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-border)]">
-              <h2 className="text-sm font-semibold text-[var(--color-text)]">Connect Nodes</h2>
-              <button onClick={() => { setShowConnectDialog(null); setConnectSource(null) }} className="p-1 rounded hover:bg-white/5 text-[var(--color-text-muted)]">
-                <FiX className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4">
-              <div className="flex items-center justify-center gap-3 mb-4">
-                <div className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ backgroundColor: ENTITY_COLORS[showConnectDialog.source.type as keyof typeof ENTITY_COLORS]?.bg + '30', color: ENTITY_COLORS[showConnectDialog.source.type as keyof typeof ENTITY_COLORS]?.bg }}>
-                  {showConnectDialog.source.label}
-                </div>
-                <span className="text-[var(--color-text-muted)]">→</span>
-                <div className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ backgroundColor: ENTITY_COLORS[showConnectDialog.target.type as keyof typeof ENTITY_COLORS]?.bg + '30', color: ENTITY_COLORS[showConnectDialog.target.type as keyof typeof ENTITY_COLORS]?.bg }}>
-                  {showConnectDialog.target.label}
-                </div>
-              </div>
-              <label className="text-xs text-[var(--color-text-muted)] font-medium block mb-2">Relation Type</label>
-              <select
-                value={connectRelation}
-                onChange={e => setConnectRelation(e.target.value)}
-                className="w-full bg-[var(--glass-bg)] border border-[var(--color-border)] rounded-lg py-2 px-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-border-strong)] mb-4"
-              >
-                {Object.entries(RELATION_TYPES).map(([key, config]) => (
-                  <option key={key} value={key}>{config.label}</option>
-                ))}
-              </select>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    addEdge(showConnectDialog.source, showConnectDialog.target, connectRelation)
-                    setShowConnectDialog(null)
-                    setConnectSource(null)
-                    setConnectMode(false)
-                  }}
-                  className="flex-1 py-2 px-3 bg-white/15 text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
-                >
-                  <FiCheck className="w-4 h-4" /> Create Connection
-                </button>
-                <button
-                  onClick={() => { setShowConnectDialog(null); setConnectSource(null) }}
-                  className="py-2 px-3 bg-[var(--glass-bg)] text-[var(--color-text-muted)] rounded-lg text-sm hover:bg-[var(--glass-bg-hover)] transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
 
-
-// ─── Scoped panel (Private / Common / All) ─────────────────────────
-// Sibling component: shows a compact KG view at the top of the
-// explorer page, scoped by the user-selected toggle. Hits the new
-// /knowledge-graph/scope/{scope} backend endpoint.
-
-function ScopedKnowledgeGraphPanel() {
-  const [scope, setScope] = useState<"private" | "common" | "all">("all")
-  const labels: Record<typeof scope, { title: string; sub: string }> = {
-    private: {
-      title: "Private",
-      sub: "Entities you own — only visible to you.",
-    },
-    common: {
-      title: "Common",
-      sub: "Community pool — visible to every authenticated user.",
-    },
-    all: {
-      title: "All visible",
-      sub: "Your private entities + the community pool.",
-    },
-  }
-  return (
-    <div
-      className="px-4 pt-4 pb-3 border-b"
-      style={{ borderColor: "var(--color-border)", background: "var(--color-bg)" }}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
-            {labels[scope].title} knowledge graph
-          </h2>
-          <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {labels[scope].sub}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          {(["private", "common", "all"] as const).map(s => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setScope(s)}
-              className="text-xs px-3 py-1 rounded-md"
-              style={{
-                background:
-                  scope === s ? "var(--color-text)" : "transparent",
-                color: scope === s ? "var(--color-bg)" : "var(--color-text-muted)",
-                border: "1px solid var(--color-border)",
-                fontWeight: scope === s ? 500 : 400,
-              }}
-            >
-              {labels[s].title}
-            </button>
-          ))}
-        </div>
-      </div>
-      <KnowledgeGraphView
-        fetchScope={scope}
-        height={280}
-        emptyLabel={
-          scope === "private"
-            ? "No private entities yet — write a hypothesis or save a paper to start populating your graph."
-            : "No community entities reachable yet."
-        }
-      />
-    </div>
-  )
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
