@@ -22,6 +22,7 @@ import * as XLSX from 'xlsx'
 import { getPlotBlob } from '../utils/plotExport'
 import { persistGet, persistSet, formatDate, logActivity } from '../utils/persistence'
 import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
+import Chart3D from '../components/Chart3D'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { toast } from '../contexts/ToastContext'
 import { modalBackdropProps } from '../utils/clickable'
@@ -1999,8 +2000,13 @@ export default function DataVisualization() {
           category: d.category,
           size: d.size,
         }))
+        // Plotly's gl3d WebGL engine renders blank inside the app's
+        // WebView2 runtime, so the 17 genuine 3D chart types are
+        // rendered on three.js via the Chart3D component (drop-in
+        // replacement for PlotlyPlot3D). Sankey stays on Plotly's SVG
+        // path — see the dedicated `sankey` case below.
         return (
-          <PlotlyPlot3D
+          <Chart3D
             data={points3d}
             chartType={type as Chart3DType}
             title=""
