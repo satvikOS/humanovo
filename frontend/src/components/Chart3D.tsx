@@ -720,15 +720,19 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
 // ── TRISURF — Delaunay-triangulated mesh of the actual scattered pts ─
 function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
   const b = mapper.bounds
-  const geo = useMemo(() => {
+  // Surface + wireframe geometry computed together in ONE top-level
+  // useMemo. (A prior version called useMemo inline inside the JSX for
+  // the wireframe — a Rules-of-Hooks violation that crashed the chart.)
+  const { surfGeo, wireGeo } = useMemo(() => {
     const tris = delaunay(data.map(d => ({ x: d.x, y: d.y })))
     const g = new THREE.BufferGeometry()
     const verts: number[] = []
     const cols: number[] = []
     const span = (b.zMax - b.zMin) || 1
-    for (const [a, c, d] of tris) {
-      for (const idx of [a, c, d]) {
+    for (const t of tris) {
+      for (const idx of t) {
         const p = data[idx]
+        if (!p) continue
         verts.push(mapper.mx(p.x), mapper.mz(p.z), mapper.my(p.y))
         const col = colorFn((p.z - b.zMin) / span)
         cols.push(col.r, col.g, col.b)
@@ -736,15 +740,18 @@ function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
     }
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
     g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
-    g.computeVertexNormals()
-    return g
+    if (verts.length > 0) g.computeVertexNormals()
+    const w = verts.length > 0
+      ? new THREE.WireframeGeometry(g)
+      : new THREE.BufferGeometry()
+    return { surfGeo: g, wireGeo: w }
   }, [data, mapper, b, colorFn])
   return (
     <group>
-      <mesh geometry={geo}>
+      <mesh geometry={surfGeo}>
         <meshStandardMaterial vertexColors roughness={0.45} metalness={0.06} side={THREE.DoubleSide} />
       </mesh>
-      <lineSegments geometry={useMemo(() => new THREE.WireframeGeometry(geo), [geo])}>
+      <lineSegments geometry={wireGeo}>
         <lineBasicMaterial color="#000000" transparent opacity={0.2} />
       </lineSegments>
       {/* vertex markers */}
