@@ -464,8 +464,6 @@ const TOOLTIP_STYLE = {
   fontFamily: "'Inter', system-ui, sans-serif",
 }
 
-const AXIS_TICK = { fontSize: 10, fill: 'var(--color-text-muted)', fontFamily: "'Inter', system-ui, sans-serif" }
-
 // ─── Publication theme presets ──────────────────────────────────
 // Each preset is a complete style sheet for the chart canvas:
 // background, font family/weight, axis stroke, gridline color/width,
@@ -812,6 +810,75 @@ function computeHistogram(values: number[], bins = 15): { label: string; count: 
     if (idx >= 0) buckets[idx].count++
   })
   return buckets.map(b => ({ label: b.label, count: b.count }))
+}
+
+// ─── "Nice" axis ticks ──────────────────────────────────────────
+// Computes a clean, rounded domain + tick array for a numeric axis
+// so journal figures never carry ugly machine-derived ticks like
+// `-0.15, 0.70, 1.55, 2.40, 3.14`. Uses the classic 1-2-2.5-5-10
+// "nice number" algorithm: snap the raw value range to a rounded
+// step that yields ~`targetCount` ticks landing on round numbers.
+// Returns null when the data is degenerate (no finite extent) so the
+// caller can fall back to Recharts' auto behaviour.
+function niceNumber(range: number, round: boolean): number {
+  const exp = Math.floor(Math.log10(range))
+  const frac = range / Math.pow(10, exp)
+  let niceFrac: number
+  if (round) {
+    if (frac < 1.5) niceFrac = 1
+    else if (frac < 3) niceFrac = 2
+    else if (frac < 7) niceFrac = 5
+    else niceFrac = 10
+  } else {
+    if (frac <= 1) niceFrac = 1
+    else if (frac <= 2) niceFrac = 2
+    else if (frac <= 5) niceFrac = 5
+    else niceFrac = 10
+  }
+  return niceFrac * Math.pow(10, exp)
+}
+
+function niceTicks(min: number, max: number, targetCount = 6): { domain: [number, number]; ticks: number[] } | null {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+  if (min === max) {
+    // Flat data — pad symmetrically so the single value isn't on an edge.
+    const pad = Math.abs(min) > 0 ? Math.abs(min) * 0.1 : 1
+    min -= pad; max += pad
+  }
+  const range = niceNumber(max - min, false)
+  if (!Number.isFinite(range) || range <= 0) return null
+  const step = niceNumber(range / Math.max(1, targetCount - 1), true)
+  if (!Number.isFinite(step) || step <= 0) return null
+  const niceMin = Math.floor(min / step) * step
+  const niceMax = Math.ceil(max / step) * step
+  const ticks: number[] = []
+  // Guard against runaway loops on pathological inputs.
+  for (let v = niceMin, i = 0; v <= niceMax + step * 0.5 && i < 200; v += step, i++) {
+    // Snap away tiny FP residue (e.g. 0.30000000000000004).
+    ticks.push(Math.abs(v) < step * 1e-9 ? 0 : parseFloat(v.toPrecision(12)))
+  }
+  return { domain: [niceMin, niceMax], ticks }
+}
+
+// Computes a nice numeric domain/ticks for the value-bearing axis of
+// a chart given its data rows and the keys that carry numeric series.
+// Returns null for categorical or empty data.
+function niceValueAxis(rows: Array<Record<string, unknown>>, keys: string[], targetCount = 6): { domain: [number, number]; ticks: number[] } | null {
+  let mn = Infinity, mx = -Infinity
+  for (const r of rows) {
+    for (const k of keys) {
+      const v = Number(r[k])
+      if (!Number.isFinite(v)) continue
+      if (v < mn) mn = v
+      if (v > mx) mx = v
+    }
+  }
+  if (!Number.isFinite(mn) || !Number.isFinite(mx)) return null
+  // Always include zero as a baseline when data is one-signed and the
+  // axis would otherwise float — journal convention for bar/area.
+  if (mn > 0 && mn / (mx || 1) < 0.6) mn = 0
+  if (mx < 0 && mx / (mn || 1) < 0.6) mx = 0
+  return niceTicks(mn, mx, targetCount)
 }
 
 // ─── Trend Line Helpers ─────────────────────────────────────────
@@ -1534,6 +1601,8 @@ export default function DataVisualization() {
       <Legend
         verticalAlign={legendVAlign}
         align={legendAlign}
+        iconType="plainline"
+        iconSize={10}
         wrapperStyle={legendWrapperStyle}
         onClick={handleLegendClick}
         formatter={(value: string) => (
@@ -1545,6 +1614,17 @@ export default function DataVisualization() {
         )}
       />
     ) : null
+    // A legend on a single-series chart is noise — a journal figure
+    // only legends when it must disambiguate 2+ series. `multiLegendEl`
+    // is the legend that single-series chart cases should use; it
+    // collapses to null unless the data actually carries a 2nd/3rd
+    // series, so e.g. a plain bar/area/line never renders a one-row
+    // "value" legend.
+    const hasMultiSeries =
+      data.some(d => d.value2 !== undefined) ||
+      data.some(d => d.value3 !== undefined) ||
+      new Set(data.map(d => d.category).filter(Boolean)).size > 1
+    const multiLegendEl = hasMultiSeries ? legendEl : null
     const brushEl = o.showBrush && data.length > 5 ? <Brush dataKey="label" height={20} stroke={theme.axisColor} fill={theme.bg === 'transparent' ? 'var(--glass-bg)' : '#F0F0F0'} travellerWidth={8} /> : null
     const xAxisProps: Record<string, unknown> = {
       dataKey: 'label',
@@ -1552,6 +1632,7 @@ export default function DataVisualization() {
       stroke: theme.axisColor,
       strokeWidth: theme.axisStrokeWidth,
       tickFormatter: xTickFmt,
+      tickMargin: 6,
       // X-axis label sits outside the plot area (`position: 'bottom'`)
       // with a small dy to clear the tick labels. Earlier
       // `position: 'insideBottom', offset: -5` rendered the label
@@ -1563,17 +1644,47 @@ export default function DataVisualization() {
     }
     if (o.tickCountX && o.tickCountX > 0) xAxisProps.tickCount = o.tickCountX
     const xAxisEl = <XAxis {...xAxisProps} />
+    // ── Nice Y-axis ──
+    // Snap the value axis to a clean rounded domain + round-number
+    // ticks (1-2-5-10 algorithm) so figures never carry machine
+    // residue like `-0.15, 0.70, 1.55`. Skipped for log scales (the
+    // algorithm is linear) and when the author has dialled in an
+    // explicit tick count, in which case Recharts owns the axis.
+    const nice = (!o.logScaleY && !(o.tickCountY && o.tickCountY > 0))
+      ? niceValueAxis(data as unknown as Array<Record<string, unknown>>, ['value', 'value2', 'value3'], 6)
+      : null
     const yAxisProps: Record<string, unknown> = {
       tick: tickStyle,
       stroke: theme.axisColor,
       strokeWidth: theme.axisStrokeWidth,
       tickFormatter: yTickFmt,
-      label: o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle } : undefined,
+      tickMargin: 6,
+      label: o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : undefined,
       scale: o.logScaleY ? 'log' : 'auto',
-      domain: o.logScaleY ? ['auto', 'auto'] : undefined,
+      domain: o.logScaleY ? ['auto', 'auto'] : nice ? nice.domain : undefined,
+      ticks: nice ? nice.ticks : undefined,
+      allowDecimals: nice ? nice.ticks.some(t => !Number.isInteger(t)) : true,
     }
     if (o.tickCountY && o.tickCountY > 0) yAxisProps.tickCount = o.tickCountY
     const yAxisEl = <YAxis {...yAxisProps} />
+    // Stacked / cumulative charts (stacked bar, 100 % bar, stacked
+    // area, streamgraph, waterfall) have a Y extent that is the SUM of
+    // the series, not max(series) — so the `nice` domain computed from
+    // individual values would clip the stack. These cases use an
+    // auto-domain Y axis that keeps the theme typography + tickMargin
+    // but lets Recharts size the domain to the rendered geometry.
+    const yAxisStackProps: Record<string, unknown> = {
+      tick: tickStyle,
+      stroke: theme.axisColor,
+      strokeWidth: theme.axisStrokeWidth,
+      tickFormatter: yTickFmt,
+      tickMargin: 6,
+      label: o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : undefined,
+      scale: o.logScaleY ? 'log' : 'auto',
+      domain: o.logScaleY ? ['auto', 'auto'] : undefined,
+    }
+    if (o.tickCountY && o.tickCountY > 0) yAxisStackProps.tickCount = o.tickCountY
+    const yAxisStackEl = <YAxis {...yAxisStackProps} />
     // Reference bands (shaded zones) render before annotation lines
     // so the lines layer on top of them.
     const bandEls = (chart.referenceBands || []).map(band => (
@@ -1614,7 +1725,7 @@ export default function DataVisualization() {
               <ComposedChart data={data} barGap={o.barGap} margin={chartMargin}>
                 {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={animDur} hide={hidden.has('value')}>
-                  {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
+                  {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10 * fs, fill: theme.mutedColor, fontFamily: theme.bodyFont }} />}
                   {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                   {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                 </Bar>
@@ -1622,9 +1733,9 @@ export default function DataVisualization() {
               </ComposedChart>
             ) : (
               <BarChart data={data} barGap={o.barGap} margin={chartMargin}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{multiLegendEl}{brushEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={animDur} hide={hidden.has('value')}>
-                  {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10, fill: 'var(--color-text-muted)' }} />}
+                  {o.showValues && <LabelList dataKey="value" position="top" style={{ fontSize: 10 * fs, fill: theme.mutedColor, fontFamily: theme.bodyFont }} />}
                   {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                   {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                 </Bar>
@@ -1633,18 +1744,44 @@ export default function DataVisualization() {
           </ResponsiveContainer>
         )
 
-      case 'horizontal_bar':
+      case 'horizontal_bar': {
+        // Value axis is X here. Derive nice ticks from the same data
+        // and widen the Y band so long category labels never clip.
+        const hbMaxLabel = data.reduce((m, d) => Math.max(m, String(d.label).length), 0)
+        const hbYWidth = Math.min(160, Math.max(70, hbMaxLabel * 6.5 + 12))
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={data} layout="vertical" barGap={o.barGap} margin={chartMargin}>
               {gridEl}
-              <XAxis type="number" tick={AXIS_TICK} />
-              <YAxis dataKey="label" type="category" tick={AXIS_TICK} width={90} />
-              {tooltipEl}{legendEl}
-              <Bar dataKey="value" fill={colors[0]} radius={[0, 4, 4, 0]} />
+              <XAxis
+                type="number"
+                tick={tickStyle}
+                stroke={theme.axisColor}
+                strokeWidth={theme.axisStrokeWidth}
+                tickFormatter={xTickFmt}
+                tickMargin={6}
+                domain={nice ? nice.domain : undefined}
+                ticks={nice ? nice.ticks : undefined}
+                allowDecimals={nice ? nice.ticks.some(t => !Number.isInteger(t)) : true}
+                label={o.xLabel ? { value: o.xLabel, position: 'bottom', dy: 8, style: labelStyle } : undefined}
+              />
+              <YAxis
+                dataKey="label"
+                type="category"
+                tick={tickStyle}
+                stroke={theme.axisColor}
+                strokeWidth={theme.axisStrokeWidth}
+                tickMargin={6}
+                width={hbYWidth}
+              />
+              {tooltipEl}{multiLegendEl}
+              <Bar dataKey="value" fill={colors[0]} radius={[0, 4, 4, 0]} animationDuration={animDur}>
+                {o.showValues && <LabelList dataKey="value" position="right" style={{ fontSize: 10 * fs, fill: theme.mutedColor, fontFamily: theme.bodyFont }} formatter={xTickFmt} />}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         )
+      }
 
       case 'grouped_bar': {
         const cats = [...new Set(data.map(d => d.category).filter(Boolean))]
@@ -1684,7 +1821,7 @@ export default function DataVisualization() {
           return (
             <ResponsiveContainer width="100%" height={height}>
               <BarChart data={data} margin={chartMargin}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisStackEl}{tooltipEl}{multiLegendEl}{bandEls}{annotationEls}
                 <Bar dataKey="value" stackId="a" fill={colors[0]} />
                 {data.some(d => d.value2 !== undefined) && <Bar dataKey="value2" stackId="a" fill={colors[1]} />}
               </BarChart>
@@ -1708,7 +1845,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={pivoted} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisStackEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               {cats.map((cat, i) => <Bar key={cat} dataKey={cat!} stackId="a" fill={colors[i % colors.length]} />)}
             </BarChart>
           </ResponsiveContainer>
@@ -1722,17 +1859,25 @@ export default function DataVisualization() {
           cumulative += d.value
           return { ...d, start, end: cumulative, fill: i === data.length - 1 ? colors[2] : d.value >= 0 ? colors[0] : colors[3] || '#B07E8B' }
         })
+        // Y extent is the running cumulative total, not the per-step
+        // delta — derive nice ticks from start/end so the axis reads
+        // cleanly and the zero baseline is included.
+        const wfNice = niceValueAxis(waterfallData as unknown as Array<Record<string, unknown>>, ['start', 'end'], 6)
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={waterfallData} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
+              {gridEl}{xAxisEl}
+              <YAxis tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} tickFormatter={yTickFmt} tickMargin={6}
+                domain={wfNice ? wfNice.domain : undefined} ticks={wfNice ? wfNice.ticks : undefined}
+                label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : undefined} />
+              {tooltipEl}
               <Bar dataKey="end" fill="transparent" stackId="w">
                 {waterfallData.map((_, i) => <Cell key={i} fill="transparent" />)}
               </Bar>
               <Bar dataKey="value" stackId="w2" radius={[3, 3, 0, 0]}>
                 {waterfallData.map((d, i) => <Cell key={i} fill={d.fill} />)}
               </Bar>
-              <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeDasharray="3 3" />
+              <ReferenceLine y={0} stroke={theme.mutedColor} strokeDasharray="3 3" />
             </BarChart>
           </ResponsiveContainer>
         )
@@ -1756,7 +1901,7 @@ export default function DataVisualization() {
               </ComposedChart>
             ) : (
               <LineChart data={finalData} margin={chartMargin}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{hasTrend ? legendEl : multiLegendEl}{brushEl}{bandEls}{annotationEls}
                 <Line type={o.smooth ? 'monotone' : 'linear'} dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} animationDuration={animDur} hide={hidden.has('value')}>
                   {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                   {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
@@ -1771,7 +1916,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{multiLegendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="monotone" dataKey="value" name="Series 1" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value')} />
               {data.some(d => d.value2 !== undefined) && <Line type="monotone" dataKey="value2" name="Series 2" stroke={colors[1]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value2')} />}
               {data.some(d => d.value3 !== undefined) && <Line type="monotone" dataKey="value3" name="Series 3" stroke={colors[2]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize }} hide={hidden.has('value3')} />}
@@ -1783,7 +1928,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{multiLegendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="stepAfter" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
@@ -1793,7 +1938,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <LineChart data={data} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{multiLegendEl}{brushEl}{bandEls}{annotationEls}
               <Line type="natural" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={{ r: o.markerSize, fill: colors[0] }} hide={hidden.has('value')} />
             </LineChart>
           </ResponsiveContainer>
@@ -1823,7 +1968,7 @@ export default function DataVisualization() {
               </ComposedChart>
             ) : (
               <AreaChart data={data} margin={chartMargin}>
-                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+                {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{multiLegendEl}{brushEl}{bandEls}{annotationEls}
                 <Area type="monotone" dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} hide={hidden.has('value')} />
               </AreaChart>
             )}
@@ -1834,7 +1979,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{brushEl}{bandEls}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisStackEl}{tooltipEl}{multiLegendEl}{brushEl}{bandEls}{annotationEls}
               <Area type="monotone" dataKey="value" stackId="1" name="Series 1" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} hide={hidden.has('value')} />
               {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" name="Series 2" stroke={colors[1]} fill={colors[1]} fillOpacity={o.fillOpacity} hide={hidden.has('value2')} />}
               {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" name="Series 3" stroke={colors[2]} fill={colors[2]} fillOpacity={o.fillOpacity} hide={hidden.has('value3')} />}
@@ -1846,7 +1991,7 @@ export default function DataVisualization() {
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data} stackOffset="silhouette" margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
+              {gridEl}{xAxisEl}{yAxisStackEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
               <Area type="monotone" dataKey="value" stackId="1" stroke={colors[0]} fill={colors[0]} fillOpacity={0.6} />
               {data.some(d => d.value2 !== undefined) && <Area type="monotone" dataKey="value2" stackId="1" stroke={colors[1]} fill={colors[1]} fillOpacity={0.6} />}
               {data.some(d => d.value3 !== undefined) && <Area type="monotone" dataKey="value3" stackId="1" stroke={colors[2]} fill={colors[2]} fillOpacity={0.6} />}
@@ -1854,40 +1999,99 @@ export default function DataVisualization() {
           </ResponsiveContainer>
         )
 
-      case 'band':
-        // Render as area between value (low) and value2 (high)
+      case 'band': {
+        // Range band: shaded envelope between a low (`value`) and high
+        // (`value2`) series. Recharts has no native two-bound area, so
+        // we paint the upper area, then overpaint the lower area with
+        // the chart background to "cut out" the region below the low
+        // bound. The cut-out fill must resolve to a concrete colour —
+        // `transparent` (screen theme) wouldn't mask, so fall back to
+        // the solid surface token there.
+        const bandMask = theme.bg === 'transparent' ? 'var(--color-surface-solid)' : theme.bg
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={data} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{legendEl}{bandEls}{annotationEls}
-              <Area type="monotone" dataKey="value2" stroke="none" fill={colors[0]} fillOpacity={o.fillOpacity} name="Upper" />
-              <Area type="monotone" dataKey="value" stroke="none" fill="var(--color-bg)" fillOpacity={1} name="Lower" />
-              <Line type="monotone" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={false} />
-              <Line type="monotone" dataKey="value2" stroke={colors[0]} strokeWidth={o.lineWidth} dot={false} />
+              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}{bandEls}{annotationEls}
+              <Area type="monotone" dataKey="value2" stroke="none" fill={colors[0]} fillOpacity={Math.max(o.fillOpacity, 0.18)} name="Range" isAnimationActive={effectiveAnimate} />
+              <Area type="monotone" dataKey="value" stroke="none" fill={bandMask} fillOpacity={1} legendType="none" isAnimationActive={effectiveAnimate} />
+              <Line type="monotone" dataKey="value" stroke={colors[0]} strokeWidth={o.lineWidth} dot={false} isAnimationActive={effectiveAnimate} />
+              <Line type="monotone" dataKey="value2" stroke={colors[0]} strokeWidth={o.lineWidth} dot={false} isAnimationActive={effectiveAnimate} />
             </AreaChart>
           </ResponsiveContainer>
         )
+      }
 
       // ── CIRCULAR CHARTS ─────────────────────────────────────
       case 'pie':
       case 'donut': {
-        // Drop labels on slices smaller than 4 % — under that the
-        // ${name} ${percent}% string overlaps neighbouring labels and
-        // looks like a dropped pixel. The legend still carries the
-        // full breakdown for those slices. Also: labelLine={false}
-        // because journal convention is "no leader line", and outer
-        // radius shrunk slightly to leave room for the labels we
-        // DO render.
-        const pieLabel = ({ name, percent }: { name?: string; percent?: number }) => {
-          const p = (percent ?? 0) * 100
-          if (p < 4) return ''
-          return `${name ?? ''} ${p.toFixed(0)}%`
-        }
-        const pieOuter = Math.max(40, height / 3 - 18)
+        // Publication-grade slice labels. Recharts' default label
+        // string renders each label at the slice mid-angle, which on
+        // a busy pie overlaps badly AND (when text is long) reads as
+        // if it were rotated. This custom renderer instead:
+        //   • always draws upright (horizontal) text,
+        //   • pushes the label OUTSIDE the pie with a two-segment
+        //     leader line (radial stub → horizontal elbow),
+        //   • anchors text left/right by hemisphere so it never
+        //     crosses the pie,
+        //   • drops labels on <3 % slices (legend still carries them).
         const isPie = type === 'pie'
+        // Leave a generous margin ring for the outside labels so they
+        // never clip the card edge.
+        const pieOuter = Math.max(36, Math.min(height, 360) / 2 - 64)
+        const pieInner = isPie ? 0 : Math.min(o.innerRadius, pieOuter - 12)
+        const RAD = Math.PI / 180
+        const renderSliceLabel = (props: {
+          cx?: number; cy?: number; midAngle?: number; outerRadius?: number
+          percent?: number; name?: string; index?: number
+        }) => {
+          const { cx = 0, cy = 0, midAngle = 0, outerRadius = 0, percent = 0, name = '' } = props
+          if (percent < 0.03) return null
+          const sin = Math.sin(-midAngle * RAD)
+          const cos = Math.cos(-midAngle * RAD)
+          const sx = cx + outerRadius * cos
+          const sy = cy + outerRadius * sin
+          const ex = cx + (outerRadius + 16) * cos
+          const ey = cy + (outerRadius + 16) * sin
+          const right = cos >= 0
+          const tx = ex + (right ? 12 : -12)
+          const fontSize = theme.tickFontSize * fs
+          return (
+            <g>
+              <path
+                d={`M${sx},${sy}L${ex},${ey}L${tx},${ey}`}
+                stroke={theme.mutedColor}
+                strokeWidth={0.75}
+                fill="none"
+                opacity={0.7}
+              />
+              <text
+                x={tx + (right ? 2 : -2)}
+                y={ey}
+                textAnchor={right ? 'start' : 'end'}
+                dominantBaseline="central"
+                fill={theme.textColor}
+                fontFamily={theme.bodyFont}
+                fontSize={fontSize}
+              >
+                {name}
+              </text>
+              <text
+                x={tx + (right ? 2 : -2)}
+                y={ey + fontSize + 1}
+                textAnchor={right ? 'start' : 'end'}
+                dominantBaseline="central"
+                fill={theme.mutedColor}
+                fontFamily={theme.bodyFont}
+                fontSize={fontSize * 0.9}
+              >
+                {(percent * 100).toFixed(1)}%
+              </text>
+            </g>
+          )
+        }
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <PieChart>
+            <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
               <Pie
                 data={data}
                 dataKey="value"
@@ -1895,11 +2099,13 @@ export default function DataVisualization() {
                 cx="50%"
                 cy="50%"
                 outerRadius={pieOuter}
-                innerRadius={isPie ? 0 : o.innerRadius}
-                label={pieLabel}
+                innerRadius={pieInner}
+                label={renderSliceLabel}
                 labelLine={false}
                 startAngle={o.startAngle}
                 endAngle={o.startAngle + 360}
+                stroke={theme.bg === 'transparent' ? 'rgba(0,0,0,0.25)' : theme.bg}
+                strokeWidth={1}
                 animationDuration={animDur}
               >
                 {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
@@ -1912,10 +2118,20 @@ export default function DataVisualization() {
 
       case 'radial_bar': {
         const rbData = data.map((d, i) => ({ ...d, fill: colors[i % colors.length] }))
+        // Upright value labels riding the inner end of each arc, in
+        // theme typography (the default Recharts radial label inherits
+        // no font and renders with the screen-token muted colour which
+        // is invisible on white journal backgrounds).
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <RadialBarChart data={rbData} cx="50%" cy="50%" innerRadius="20%" outerRadius="90%" startAngle={180} endAngle={0}>
-              <RadialBar dataKey="value" label={{ fill: 'var(--color-text-muted)', fontSize: 10 }} />
+            <RadialBarChart data={rbData} cx="50%" cy="50%" innerRadius="24%" outerRadius="92%" startAngle={180} endAngle={0} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+              <RadialBar
+                dataKey="value"
+                background={{ fill: theme.gridColor }}
+                cornerRadius={3}
+                label={{ position: 'insideStart', fill: theme.textColor, fontSize: theme.tickFontSize * fs, fontFamily: theme.bodyFont }}
+              />
+              <PolarAngleAxis type="number" domain={nice ? nice.domain : [0, 'auto']} tick={false} axisLine={false} />
               {tooltipEl}{legendEl}
             </RadialBarChart>
           </ResponsiveContainer>
@@ -1925,11 +2141,11 @@ export default function DataVisualization() {
       case 'polar_area':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <RadarChart data={data} cx="50%" cy="50%" outerRadius="70%">
-              <PolarGrid stroke="var(--color-border)" />
-              <PolarAngleAxis dataKey="label" tick={AXIS_TICK} />
-              <PolarRadiusAxis tick={AXIS_TICK} />
-              <Radar dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={0.5} />
+            <RadarChart data={data} cx="50%" cy="50%" outerRadius="68%" margin={{ top: 16, right: 16, bottom: 16, left: 16 }}>
+              <PolarGrid stroke={theme.gridColor} strokeWidth={theme.gridStrokeWidth} />
+              <PolarAngleAxis dataKey="label" tick={{ ...tickStyle }} />
+              <PolarRadiusAxis tick={{ ...tickStyle }} tickFormatter={yTickFmt} angle={90} stroke={theme.gridColor} axisLine={false} />
+              <Radar dataKey="value" stroke={colors[0]} fill={colors[0]} fillOpacity={0.5} strokeWidth={o.lineWidth} />
               {tooltipEl}
             </RadarChart>
           </ResponsiveContainer>
@@ -1938,54 +2154,70 @@ export default function DataVisualization() {
       case 'radar':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <RadarChart data={data} cx="50%" cy="50%" outerRadius="70%">
-              <PolarGrid stroke="var(--color-border)" />
-              <PolarAngleAxis dataKey="label" tick={AXIS_TICK} />
-              <PolarRadiusAxis tick={AXIS_TICK} />
+            <RadarChart data={data} cx="50%" cy="50%" outerRadius="68%" margin={{ top: 16, right: 16, bottom: 16, left: 16 }}>
+              <PolarGrid stroke={theme.gridColor} strokeWidth={theme.gridStrokeWidth} />
+              <PolarAngleAxis dataKey="label" tick={{ ...tickStyle }} />
+              <PolarRadiusAxis tick={{ ...tickStyle }} tickFormatter={yTickFmt} angle={90} stroke={theme.gridColor} axisLine={false} />
               <Radar dataKey="value" name="Series 1" stroke={colors[0]} fill={colors[0]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} />
               {data.some(d => d.value2 !== undefined) && (
                 <Radar dataKey="value2" name="Series 2" stroke={colors[1]} fill={colors[1]} fillOpacity={o.fillOpacity} strokeWidth={o.lineWidth} />
               )}
-              {tooltipEl}{legendEl}
+              {tooltipEl}{multiLegendEl}
             </RadarChart>
           </ResponsiveContainer>
         )
 
       // ── SCATTER / BUBBLE ────────────────────────────────────
-      case 'scatter':
+      case 'scatter': {
+        const scPts = data.map(d => ({ ...d, value2: d.value2 ?? d.value }))
+        const scXNice = niceValueAxis(scPts as unknown as Array<Record<string, unknown>>, ['value'], 6)
+        const scYNice = niceValueAxis(scPts as unknown as Array<Record<string, unknown>>, ['value2'], 6)
         return (
           <ResponsiveContainer width="100%" height={height}>
             <ScatterChart margin={chartMargin}>
               {gridEl}
-              <XAxis dataKey="value" name={o.xLabel || 'X'} tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" />
-              <YAxis dataKey="value2" name={o.yLabel || 'Y'} tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" />
-              {tooltipEl}
-              <Scatter data={data.map(d => ({ ...d, value2: d.value2 ?? d.value }))} fill={colors[0]}>
-                {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+              <XAxis dataKey="value" name={o.xLabel || 'X'} tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" tickMargin={6} tickFormatter={xTickFmt}
+                domain={scXNice ? scXNice.domain : ['auto', 'auto']} ticks={scXNice ? scXNice.ticks : undefined}
+                label={o.xLabel ? { value: o.xLabel, position: 'bottom', dy: 8, style: labelStyle } : undefined} />
+              <YAxis dataKey="value2" name={o.yLabel || 'Y'} tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" tickMargin={6} tickFormatter={yTickFmt}
+                domain={scYNice ? scYNice.domain : ['auto', 'auto']} ticks={scYNice ? scYNice.ticks : undefined}
+                label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : undefined} />
+              <Tooltip contentStyle={tooltipStyle} cursor={cursorStyle ? { strokeDasharray: '4 4', stroke: theme.mutedColor } : false} />
+              <Scatter data={scPts} fill={colors[0]} animationDuration={animDur}>
+                {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} fillOpacity={0.85} stroke={theme.bg === 'transparent' ? 'none' : theme.bg} strokeWidth={0.75} />)}
                 {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                 {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
               </Scatter>
             </ScatterChart>
           </ResponsiveContainer>
         )
+      }
 
-      case 'bubble':
+      case 'bubble': {
+        const buPts = data.map(d => ({ ...d, value2: d.value2 ?? d.value, size: d.size ?? d.value }))
+        const buXNice = niceValueAxis(buPts as unknown as Array<Record<string, unknown>>, ['value'], 6)
+        const buYNice = niceValueAxis(buPts as unknown as Array<Record<string, unknown>>, ['value2'], 6)
         return (
           <ResponsiveContainer width="100%" height={height}>
             <ScatterChart margin={chartMargin}>
               {gridEl}
-              <XAxis dataKey="value" name="X" tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" />
-              <YAxis dataKey="value2" name="Y" tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" />
-              <ZAxis dataKey="size" range={[40, 400]} name="Size" />
-              {tooltipEl}
-              <Scatter data={data.map(d => ({ ...d, value2: d.value2 ?? d.value, size: d.size ?? d.value }))} fill={colors[0]}>
-                {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} opacity={0.7} />)}
+              <XAxis dataKey="value" name={o.xLabel || 'X'} tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" tickMargin={6} tickFormatter={xTickFmt}
+                domain={buXNice ? buXNice.domain : ['auto', 'auto']} ticks={buXNice ? buXNice.ticks : undefined}
+                label={o.xLabel ? { value: o.xLabel, position: 'bottom', dy: 8, style: labelStyle } : undefined} />
+              <YAxis dataKey="value2" name={o.yLabel || 'Y'} tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} type="number" tickMargin={6} tickFormatter={yTickFmt}
+                domain={buYNice ? buYNice.domain : ['auto', 'auto']} ticks={buYNice ? buYNice.ticks : undefined}
+                label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : undefined} />
+              <ZAxis dataKey="size" range={[60, 500]} name="Size" />
+              <Tooltip contentStyle={tooltipStyle} cursor={cursorStyle ? { strokeDasharray: '4 4', stroke: theme.mutedColor } : false} />
+              <Scatter data={buPts} fill={colors[0]} animationDuration={animDur}>
+                {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} fillOpacity={0.6} stroke={colors[i % colors.length]} strokeWidth={1} />)}
                 {hasErrorPlus && <ErrorBar dataKey="errorPlus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
                 {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={4} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
               </Scatter>
             </ScatterChart>
           </ResponsiveContainer>
         )
+      }
 
       case 'scatter_3d': case 'bubble_3d': case 'line_3d': case 'bar_3d':
       case 'surface_3d': case 'wireframe_3d': case 'contour_3d': case 'trisurf_3d':
@@ -2027,16 +2259,34 @@ export default function DataVisualization() {
       // ── STATISTICAL ─────────────────────────────────────────
       case 'histogram': {
         const hist = computeHistogram(data.map(d => d.value))
+        const histNice = niceValueAxis(hist as unknown as Array<Record<string, unknown>>, ['count'], 6)
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <BarChart data={hist} margin={chartMargin}>
+            <BarChart data={hist} margin={chartMargin} barGap={0} barCategoryGap={1}>
               {gridEl}
-              <XAxis dataKey="label" tick={AXIS_TICK} />
-              <YAxis tick={AXIS_TICK} />
+              <XAxis
+                dataKey="label"
+                tick={tickStyle}
+                stroke={theme.axisColor}
+                strokeWidth={theme.axisStrokeWidth}
+                tickMargin={6}
+                label={o.xLabel ? { value: o.xLabel, position: 'bottom', dy: 8, style: labelStyle } : undefined}
+              />
+              <YAxis
+                tick={tickStyle}
+                stroke={theme.axisColor}
+                strokeWidth={theme.axisStrokeWidth}
+                tickMargin={6}
+                tickFormatter={yTickFmt}
+                domain={histNice ? histNice.domain : undefined}
+                ticks={histNice ? histNice.ticks : undefined}
+                allowDecimals={false}
+                label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : { value: 'Count', angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 }}
+              />
               {tooltipEl}
               {brushEl}
-              <Bar dataKey="count" fill={colors[0]} radius={[2, 2, 0, 0]}>
-                {hist.map((_, i) => <Cell key={i} fill={colors[0]} opacity={0.8} />)}
+              <Bar dataKey="count" fill={colors[0]} radius={[2, 2, 0, 0]} animationDuration={animDur}>
+                {hist.map((_, i) => <Cell key={i} fill={colors[0]} opacity={0.85} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -2103,14 +2353,20 @@ export default function DataVisualization() {
         const ySteps = 40
         const groupW = Math.min(120, (600 / Math.max(vEntries.length, 1)))
         const svgW = vEntries.length * groupW + 80
+        // Nice rounded Y ticks for the violin axis instead of raw
+        // toFixed(1) on an evenly-divided range (which produced ugly
+        // values like 2.13 / 4.27 / 6.40).
+        const vAxis = niceTicks(vMin - vPad, vMax + vPad, 5)
+        const vDomainLo = vAxis ? vAxis.domain[0] : vMin - vPad
+        const vDomainHi = vAxis ? vAxis.domain[1] : vMax + vPad
+        const vDomainSpan = (vDomainHi - vDomainLo) || 1
         return (
           <div style={{ overflowX: 'auto', height }}>
-            <svg width={svgW} height={height} style={{ fontFamily: 'var(--font-mono, monospace)' }}>
+            <svg width={svgW} height={height} style={{ fontFamily: theme.bodyFont }}>
               {/* Y axis */}
-              {Array.from({ length: 5 }, (_, i) => {
-                const val = vMin - vPad + (vRange + 2 * vPad) * (i / 4)
-                const y = height - 30 - ((i / 4) * (height - 50))
-                return <g key={i}><line x1={55} x2={svgW} y1={y} y2={y} stroke={theme.gridColor} strokeDasharray="2,2" /><text x={50} y={y + 4} textAnchor="end" fill={theme.mutedColor} fontFamily={theme.bodyFont} fontSize={theme.tickFontSize * fs}>{val.toFixed(1)}</text></g>
+              {(vAxis ? vAxis.ticks : Array.from({ length: 5 }, (_, i) => vDomainLo + vDomainSpan * (i / 4))).map((val, i) => {
+                const y = height - 30 - (((val - vDomainLo) / vDomainSpan) * (height - 50))
+                return <g key={i}><line x1={55} x2={svgW} y1={y} y2={y} stroke={theme.gridColor} strokeWidth={theme.gridStrokeWidth} strokeDasharray={theme.gridDash} /><text x={50} y={y + 4} textAnchor="end" fill={theme.mutedColor} fontFamily={theme.bodyFont} fontSize={theme.tickFontSize * fs}>{yTickFmt(val)}</text></g>
               })}
               {vEntries.map(([name, vals], gi) => {
                 const sorted = [...vals].sort((a, b) => a - b)
@@ -2143,7 +2399,9 @@ export default function DataVisualization() {
                   kde.push({ y: v, density: d })
                 }
                 const halfW = groupW * 0.4
-                const toY = (v: number) => height - 30 - ((v - vMin + vPad) / (vRange + 2 * vPad)) * (height - 50)
+                // Map values through the same nice domain as the Y
+                // gridlines so violin geometry aligns with the ticks.
+                const toY = (v: number) => height - 30 - (((v - vDomainLo) / vDomainSpan) * (height - 50))
                 const pathR = kde.map(k => `${cx + (k.density / maxD) * halfW},${toY(k.y)}`).join(' ')
                 const pathL = kde.map(k => `${cx - (k.density / maxD) * halfW},${toY(k.y)}`).reverse().join(' ')
                 const stats = computeBoxStats(vals)
@@ -2196,51 +2454,88 @@ export default function DataVisualization() {
           d /= vals.length
           kdeData.push({ x: parseFloat(x.toFixed(2)), density: parseFloat(d.toFixed(6)) })
         }
+        const kdeXNice = niceValueAxis(kdeData as unknown as Array<Record<string, unknown>>, ['x'], 6)
+        const kdeYNice = niceValueAxis(kdeData as unknown as Array<Record<string, unknown>>, ['density'], 5)
         return (
           <ResponsiveContainer width="100%" height={height}>
             <AreaChart data={kdeData} margin={chartMargin}>
               {gridEl}
-              <XAxis dataKey="x" tick={AXIS_TICK} />
-              <YAxis tick={AXIS_TICK} />
+              <XAxis
+                dataKey="x"
+                type="number"
+                tick={tickStyle}
+                stroke={theme.axisColor}
+                strokeWidth={theme.axisStrokeWidth}
+                tickMargin={6}
+                tickFormatter={xTickFmt}
+                domain={kdeXNice ? kdeXNice.domain : ['auto', 'auto']}
+                ticks={kdeXNice ? kdeXNice.ticks : undefined}
+                label={o.xLabel ? { value: o.xLabel, position: 'bottom', dy: 8, style: labelStyle } : undefined}
+              />
+              <YAxis
+                tick={tickStyle}
+                stroke={theme.axisColor}
+                strokeWidth={theme.axisStrokeWidth}
+                tickMargin={6}
+                tickFormatter={yTickFmt}
+                domain={kdeYNice ? kdeYNice.domain : undefined}
+                ticks={kdeYNice ? kdeYNice.ticks : undefined}
+                label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : { value: 'Density', angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 }}
+              />
               {tooltipEl}
-              <Area type="monotone" dataKey="density" stroke={colors[0]} fill={colors[0]} fillOpacity={0.2} strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey="density" stroke={colors[0]} fill={colors[0]} fillOpacity={Math.max(o.fillOpacity, 0.2)} strokeWidth={o.lineWidth} dot={false} animationDuration={animDur} />
               {bandEls}{annotationEls}
             </AreaChart>
           </ResponsiveContainer>
         )
       }
 
-      case 'error_bar':
+      case 'error_bar': {
+        // Y extent must include the whisker tips (value ± error), not
+        // just the bar heights, so the error bars never clip.
+        const ebRows = data.map(d => ({
+          hi: d.value + (d.errorPlus ?? 0),
+          lo: Math.min(d.value - (d.errorMinus ?? d.errorPlus ?? 0), d.value),
+        }))
+        const ebNice = niceValueAxis(ebRows as unknown as Array<Record<string, unknown>>, ['hi', 'lo'], 6)
         return (
           <ResponsiveContainer width="100%" height={height}>
             <BarChart data={data} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
-              <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]}>
-                <ErrorBar dataKey="errorPlus" width={4} strokeWidth={2} stroke={colors[1] || '#B07E8B'} />
+              {gridEl}{xAxisEl}
+              <YAxis tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} tickFormatter={yTickFmt} tickMargin={6}
+                domain={ebNice ? ebNice.domain : undefined} ticks={ebNice ? ebNice.ticks : undefined}
+                label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : undefined} />
+              {tooltipEl}
+              <Bar dataKey="value" fill={colors[0]} radius={[4, 4, 0, 0]} animationDuration={animDur}>
+                <ErrorBar dataKey="errorPlus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />
+                {hasErrorMinus && <ErrorBar dataKey="errorMinus" width={5} strokeWidth={1.5} stroke={errorBarColor} direction="y" />}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         )
+      }
 
       case 'candlestick': {
-        // value=open, value2=close, value3=high, errorPlus=low
+        // value=open, value2=close, value3=high, errorPlus=low. Y
+        // extent must span all four price fields so the high/low
+        // whiskers never clip the plot area.
+        const csNice = niceValueAxis(data as unknown as Array<Record<string, unknown>>, ['value', 'value2', 'value3', 'errorPlus'], 6)
         return (
           <ResponsiveContainer width="100%" height={height}>
             <ComposedChart data={data} margin={chartMargin}>
-              {gridEl}{xAxisEl}{yAxisEl}{tooltipEl}
+              {gridEl}{xAxisEl}
+              <YAxis tick={tickStyle} stroke={theme.axisColor} strokeWidth={theme.axisStrokeWidth} tickFormatter={yTickFmt} tickMargin={6}
+                domain={csNice ? csNice.domain : ['auto', 'auto']} ticks={csNice ? csNice.ticks : undefined}
+                label={o.yLabel ? { value: o.yLabel, angle: -90, position: 'insideLeft', style: labelStyle, offset: 0 } : undefined} />
+              {tooltipEl}
               <Bar dataKey="value" fill="transparent" />
-              {data.map((d, i) => {
-                const open = d.value, close = d.value2 ?? d.value
-                const color = close >= open ? '#6BA594' : '#B07E8B'
-                return <ReferenceLine key={i} y={close} stroke={color} strokeWidth={0} />
-              })}
               <Bar dataKey="value2" barSize={12}>
                 {data.map((d, i) => {
                   const open = d.value, close = d.value2 ?? d.value
                   return <Cell key={i} fill={close >= open ? '#6BA594' : '#B07E8B'} />
                 })}
               </Bar>
-              <Line type="linear" dataKey="value3" stroke="var(--color-text-muted)" strokeWidth={1} dot={{ r: 0 }} />
+              <Line type="linear" dataKey="value3" stroke={theme.mutedColor} strokeWidth={1} dot={{ r: 0 }} />
             </ComposedChart>
           </ResponsiveContainer>
         )
@@ -2311,16 +2606,19 @@ export default function DataVisualization() {
                 return (
                   <g>
                     <defs>
-                      <linearGradient id="heatmap-legend" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="rgba(59,130,246,0.9)" />
-                        <stop offset="50%" stopColor="rgba(180,180,180,0.15)" />
-                        <stop offset="100%" stopColor="rgba(239,68,68,0.9)" />
+                      {/* Muted-palette gradient — matches the cell
+                          colours (blue #5B8DB8 ↔ rose #B57170) instead
+                          of the old saturated primary blue/red. */}
+                      <linearGradient id={`heatmap-legend-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="rgba(91,141,184,0.85)" />
+                        <stop offset="50%" stopColor="rgba(180,180,180,0.12)" />
+                        <stop offset="100%" stopColor="rgba(181,113,112,0.85)" />
                       </linearGradient>
                     </defs>
-                    <rect x={gx} y={gy} width={gw} height={gh} fill="url(#heatmap-legend)" rx={2} />
-                    <text x={gx + gw + 4} y={gy + 4} fill="var(--color-text-muted)" fontSize={9}>+{maxVal.toFixed(1)}</text>
-                    <text x={gx + gw + 4} y={gy + gh / 2 + 3} fill="var(--color-text-muted)" fontSize={9}>0</text>
-                    <text x={gx + gw + 4} y={gy + gh} fill="var(--color-text-muted)" fontSize={9}>−{maxVal.toFixed(1)}</text>
+                    <rect x={gx} y={gy} width={gw} height={gh} fill={`url(#heatmap-legend-${chart.id})`} rx={2} stroke={theme.gridColor} strokeWidth={0.5} />
+                    <text x={gx + gw + 4} y={gy + 4} fill={theme.mutedColor} fontFamily={theme.bodyFont} fontSize={theme.tickFontSize * fs}>+{maxVal.toFixed(1)}</text>
+                    <text x={gx + gw + 4} y={gy + gh / 2 + 3} fill={theme.mutedColor} fontFamily={theme.bodyFont} fontSize={theme.tickFontSize * fs}>0</text>
+                    <text x={gx + gw + 4} y={gy + gh} fill={theme.mutedColor} fontFamily={theme.bodyFont} fontSize={theme.tickFontSize * fs}>−{maxVal.toFixed(1)}</text>
                   </g>
                 )
               })()}
@@ -2333,10 +2631,11 @@ export default function DataVisualization() {
       case 'funnel':
         return (
           <ResponsiveContainer width="100%" height={height}>
-            <FunnelChart>
+            <FunnelChart margin={{ top: 12, right: 96, bottom: 12, left: 24 }}>
               {tooltipEl}
-              <Funnel dataKey="value" data={data.map((d, i) => ({ ...d, fill: colors[i % colors.length] }))} isAnimationActive={o.animate}>
-                <LabelList position="right" fill="var(--color-text)" stroke="none" dataKey="label" fontSize={11} />
+              <Funnel dataKey="value" data={data.map((d, i) => ({ ...d, fill: colors[i % colors.length] }))} isAnimationActive={effectiveAnimate} stroke={theme.bg === 'transparent' ? 'rgba(0,0,0,0.2)' : theme.bg}>
+                <LabelList position="right" fill={theme.textColor} stroke="none" dataKey="label" fontSize={theme.tickFontSize * fs} fontFamily={theme.bodyFont} />
+                <LabelList position="inside" fill={theme.bg === 'transparent' ? '#FFFFFF' : '#FFFFFF'} stroke="none" dataKey="value" fontSize={theme.tickFontSize * fs} fontFamily={theme.bodyFont} formatter={yTickFmt} />
               </Funnel>
             </FunnelChart>
           </ResponsiveContainer>
@@ -2347,11 +2646,14 @@ export default function DataVisualization() {
           <ResponsiveContainer width="100%" height={height}>
             <Treemap
               data={data.map((d, i) => ({ name: d.label, size: d.value, fill: colors[i % colors.length] }))}
-              dataKey="size" aspectRatio={4 / 3} stroke="var(--color-border)"
+              dataKey="size" aspectRatio={4 / 3} stroke={theme.bg === 'transparent' ? 'rgba(0,0,0,0.25)' : theme.bg}
+              isAnimationActive={effectiveAnimate}
               content={({ x, y, width, height: h, name, fill }: { x?: number; y?: number; width?: number; height?: number; name?: string; fill?: string }) => (
                 <g>
-                  <rect x={x} y={y} width={width} height={h} fill={fill} stroke="var(--color-border)" strokeWidth={1} rx={4} />
-                  {(width ?? 0) > 40 && (h ?? 0) > 20 && <text x={(x ?? 0) + (width ?? 0) / 2} y={(y ?? 0) + (h ?? 0) / 2} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11}>{name}</text>}
+                  <rect x={x} y={y} width={width} height={h} fill={fill} stroke={theme.bg === 'transparent' ? 'rgba(0,0,0,0.25)' : theme.bg} strokeWidth={1.5} rx={4} />
+                  {(width ?? 0) > 44 && (h ?? 0) > 22 && (
+                    <text x={(x ?? 0) + (width ?? 0) / 2} y={(y ?? 0) + (h ?? 0) / 2} fill="#FFFFFF" textAnchor="middle" dominantBaseline="central" fontSize={theme.tickFontSize * fs} fontFamily={theme.bodyFont}>{name}</text>
+                  )}
                 </g>
               )}
             />
