@@ -19,7 +19,6 @@ import { Canvas, useFrame } from '@react-three/fiber'
 // into the bundle and breaks the rollup build. Importing each component
 // from its own file keeps SpotLight out of Chart3D's import graph.
 import { OrbitControls } from '@react-three/drei/core/OrbitControls'
-import { Line } from '@react-three/drei/core/Line'
 import { Text } from '@react-three/drei/core/Text'
 import { Billboard } from '@react-three/drei/core/Billboard'
 import * as THREE from 'three'
@@ -200,6 +199,41 @@ interface AxesProps {
   chrome: Chart3DChrome
   xLabel: string; yLabel: string; zLabel: string
 }
+// Core-three.js polyline — replaces drei's <Line>. drei's <Line> is a
+// "fat line" built on three-stdlib's Line2 / LineMaterial, which
+// reference three exports removed in three 0.182 and threw at render
+// time for EVERY 3D chart (the Axes draw their grid + axis lines with
+// it). A plain THREE.Line has no three-stdlib dependency. WebGL core
+// lines are always 1px wide — `lineWidth` is accepted for drop-in
+// parity but not honoured, which is fine for axes/grid/contour lines.
+function PolyLine({
+  points, color, opacity = 1,
+}: {
+  points: ([number, number, number] | THREE.Vector3)[]
+  color: string
+  opacity?: number
+  lineWidth?: number
+  transparent?: boolean
+}) {
+  // Built as a concrete THREE.Line + rendered via <primitive> — the
+  // lowercase <line> JSX intrinsic collides with the SVG <line> element
+  // in TS, so <primitive> is the unambiguous path for THREE.Line.
+  const obj = useMemo(() => {
+    const arr: number[] = []
+    for (const p of points) {
+      if (p instanceof THREE.Vector3) arr.push(p.x, p.y, p.z)
+      else arr.push(p[0], p[1], p[2])
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3))
+    const m = new THREE.LineBasicMaterial({
+      color, transparent: opacity < 1, opacity,
+    })
+    return new THREE.Line(g, m)
+  }, [points, color, opacity])
+  return <primitive object={obj} />
+}
+
 function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
   const h = CUBE / 2
   const { mx, my, mz } = mapper
@@ -224,20 +258,20 @@ function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
     <group>
       {/* gridded floor */}
       {gridLines.map((seg, i) => (
-        <Line key={`g${i}`} points={seg} color={chrome.grid} lineWidth={0.6} transparent opacity={0.5} />
+        <PolyLine key={`g${i}`} points={seg} color={chrome.grid} lineWidth={0.6} transparent opacity={0.5} />
       ))}
 
       {/* three axis lines meeting at the back-bottom corner */}
-      <Line points={[[-h, -h, -h], [h, -h, -h]]} color={chrome.axis} lineWidth={1.4} />
-      <Line points={[[-h, -h, -h], [-h, h, -h]]} color={chrome.axis} lineWidth={1.4} />
-      <Line points={[[-h, -h, -h], [-h, -h, h]]} color={chrome.axis} lineWidth={1.4} />
+      <PolyLine points={[[-h, -h, -h], [h, -h, -h]]} color={chrome.axis} lineWidth={1.4} />
+      <PolyLine points={[[-h, -h, -h], [-h, h, -h]]} color={chrome.axis} lineWidth={1.4} />
+      <PolyLine points={[[-h, -h, -h], [-h, -h, h]]} color={chrome.axis} lineWidth={1.4} />
 
       {/* X ticks (data-x → scene-x), labels just below the floor */}
       {xTicks.map((t, i) => {
         const sx = mx(t)
         return (
           <group key={`xt${i}`}>
-            <Line points={[[sx, -h, -h], [sx, -h - 0.25, -h]]} color={chrome.axis} lineWidth={1} />
+            <PolyLine points={[[sx, -h, -h], [sx, -h - 0.25, -h]]} color={chrome.axis} lineWidth={1} />
             <Billboard position={[sx, -h - 0.7, -h]}>
               <Text fontSize={0.42} color={chrome.text} anchorX="center" anchorY="middle">
                 {fmtTick(t)}
@@ -251,7 +285,7 @@ function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
         const sz = my(t)
         return (
           <group key={`yt${i}`}>
-            <Line points={[[-h, -h, sz], [-h - 0.25, -h, sz]]} color={chrome.axis} lineWidth={1} />
+            <PolyLine points={[[-h, -h, sz], [-h - 0.25, -h, sz]]} color={chrome.axis} lineWidth={1} />
             <Billboard position={[-h - 0.7, -h - 0.2, sz]}>
               <Text fontSize={0.42} color={chrome.text} anchorX="center" anchorY="middle">
                 {fmtTick(t)}
@@ -265,7 +299,7 @@ function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
         const sy = mz(t)
         return (
           <group key={`zt${i}`}>
-            <Line points={[[-h, sy, -h], [-h - 0.25, sy, -h]]} color={chrome.axis} lineWidth={1} />
+            <PolyLine points={[[-h, sy, -h], [-h - 0.25, sy, -h]]} color={chrome.axis} lineWidth={1} />
             <Billboard position={[-h - 0.9, sy, -h]}>
               <Text fontSize={0.42} color={chrome.text} anchorX="center" anchorY="middle">
                 {fmtTick(t)}
@@ -438,7 +472,7 @@ function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind
         return (
           <group key={i}>
             {kind === 'stem' && (
-              <Line
+              <PolyLine
                 points={[[px, mapper.floorY, pz], [px, py, pz]]}
                 color={chrome.axis}
                 lineWidth={1}
@@ -743,7 +777,7 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
         </lineSegments>
       )}
       {contourLines.map((ln, i) => (
-        <Line key={i} points={ln} color="#000000" lineWidth={1.2} transparent opacity={0.55} />
+        <PolyLine key={i} points={ln} color="#000000" lineWidth={1.2} transparent opacity={0.55} />
       ))}
     </group>
   )
