@@ -1596,13 +1596,30 @@ export default function DataVisualization() {
       cursor: 'pointer',
       fontFamily: theme.bodyFont,
       color: theme.textColor,
+      lineHeight: 1.6,
+      // Breathing room between the legend row and the plot box so the
+      // swatches never crowd the top axis / X-label.
+      paddingTop: legendVAlign === 'top' ? 0 : 6,
+      paddingBottom: legendVAlign === 'top' ? 6 : 0,
     }
+    // Legend marker must match the rendered mark: filled-area charts
+    // (bar / area / waterfall / pie / treemap / histogram …) draw a
+    // solid swatch; line-family charts (line / spline / step / stem /
+    // scatter) draw a short line / point. A line swatch next to a bar
+    // series reads as wrong in a published figure.
+    const FILLED_MARK_TYPES = new Set([
+      'bar', 'horizontal_bar', 'grouped_bar', 'stacked_bar', 'stacked_bar_100',
+      'waterfall', 'area', 'stacked_area', 'stream', 'band', 'pie', 'donut',
+      'radial_bar', 'polar_area', 'funnel', 'treemap', 'histogram', 'box_plot',
+      'violin', 'density', 'heatmap', 'error_bar', 'radar',
+    ])
+    const legendIconType: 'rect' | 'plainline' = FILLED_MARK_TYPES.has(type) ? 'rect' : 'plainline'
     const legendEl = o.showLegend ? (
       <Legend
         verticalAlign={legendVAlign}
         align={legendAlign}
-        iconType="plainline"
-        iconSize={10}
+        iconType={legendIconType}
+        iconSize={legendIconType === 'rect' ? 11 : 14}
         wrapperStyle={legendWrapperStyle}
         onClick={handleLegendClick}
         formatter={(value: string) => (
@@ -1610,6 +1627,8 @@ export default function DataVisualization() {
             opacity: hidden.has(value) ? 0.3 : 1,
             textDecoration: hidden.has(value) ? 'line-through' : 'none',
             color: theme.textColor,
+            marginRight: 10,
+            verticalAlign: 'middle',
           }}>{value}</span>
         )}
       />
@@ -1706,14 +1725,15 @@ export default function DataVisualization() {
         strokeWidth={1.5} label={{ value: ann.label, position: 'insideTopRight', style: { fontSize: 10 * fs, fill: ann.color, fontWeight: 600, fontFamily: theme.bodyFont } }} />
     ))
 
-    // Auto error-bar support — when DataPoint.errorPlus / errorMinus
-    // are populated (CSV import or manual entry), render whisker
-    // overlays inside the relevant series. Previously only the
-    // dedicated `error_bar` chart type used these fields, so a user
-    // adding error data to a regular bar chart got a silently
-    // ignored input. Standard publication-grade convention.
-    const hasErrorPlus = data.some(d => typeof d.errorPlus === 'number')
-    const hasErrorMinus = data.some(d => typeof d.errorMinus === 'number')
+    // Error-bar whiskers are scoped to the dedicated `error_bar` chart
+    // type only. A prior pass auto-rendered whiskers on ANY chart whose
+    // data carried errorPlus / errorMinus fields, which meant a plain
+    // bar / line / scatter silently sprouted whiskers — a journal
+    // reviewer reads that as a different (error-bar) figure. Authors
+    // who want error bars choose the `error_bar` type explicitly.
+    const isErrorBarChart = type === 'error_bar'
+    const hasErrorPlus = isErrorBarChart && data.some(d => typeof d.errorPlus === 'number')
+    const hasErrorMinus = isErrorBarChart && data.some(d => typeof d.errorMinus === 'number')
     const errorBarColor = theme.textColor === '#E5E7EB' ? '#A8B0BA' : '#333333'
 
     const renderChartSwitch = (): React.ReactNode => { switch (type) {
@@ -2711,18 +2731,29 @@ export default function DataVisualization() {
     // wrapper carries the SVG color-blind simulator filter when the
     // user enables a CB preview, plus an optional watermark layer.
     const aspectRatio = ASPECT_RATIO[o.aspect || 'free']
+    // The figure wrapper always carries uniform internal padding so the
+    // in-figure title, plot box and caption never crowd the panel edge
+    // — including on the transparent `screen` theme, where the panel
+    // border / shadow is supplied by the card body around it. The
+    // panel background fills the inset card body completely.
     const wrapperStyle: React.CSSProperties = {
-      background: theme.bg,
+      background: theme.bg === 'transparent' ? 'var(--color-surface-solid)' : theme.bg,
       color: theme.textColor,
       fontFamily: theme.bodyFont,
-      padding: theme.bg === 'transparent' ? 0 : 16,
-      borderRadius: theme.bg === 'transparent' ? 0 : 6,
+      padding: '18px 20px 16px',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
       filter: o.cbSim && o.cbSim !== 'none' ? CB_SIM_FILTER[o.cbSim] : undefined,
       position: 'relative',
     }
+    // The plot box keeps a fixed pixel height (every ResponsiveContainer
+    // is height={height}); the wrapper is a flex column so the title
+    // sits above and caption below without the plot stretching into
+    // empty space.
     const containerStyle: React.CSSProperties = aspectRatio
       ? { aspectRatio: String(aspectRatio), width: '100%' }
-      : { height }
+      : { height, width: '100%', flexShrink: 0 }
 
     return (
       <div style={wrapperStyle}>
@@ -2742,10 +2773,12 @@ export default function DataVisualization() {
           </defs>
         </svg>
 
-        {/* Title block — typography from the per-theme baseline so a
-            Nature-themed chart renders with a 10pt title not 16pt. */}
+        {/* Title block — the single, canonical figure title (the card
+            header deliberately omits it to avoid a duplicated heading).
+            Typography comes from the per-theme baseline so a Nature
+            chart renders a 10pt title, screen a 16pt one. */}
         {o.showTitle && (chart.title || chart.subtitle) && (
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 14, flexShrink: 0 }}>
             {chart.title && (
               <h3 style={{
                 margin: 0,
@@ -2754,14 +2787,16 @@ export default function DataVisualization() {
                 fontFamily: theme.titleFont,
                 color: theme.textColor,
                 letterSpacing: o.pubTheme === 'ieee' ? 0 : '-0.01em',
+                lineHeight: 1.25,
               }}>{chart.title}</h3>
             )}
             {chart.subtitle && (
               <p style={{
-                margin: '2px 0 0',
+                margin: '3px 0 0',
                 fontSize: theme.subtitleFontSize * fs,
                 color: theme.mutedColor,
                 fontFamily: theme.bodyFont,
+                lineHeight: 1.4,
               }}>
                 {chart.subtitle}
               </p>
@@ -2775,6 +2810,7 @@ export default function DataVisualization() {
             background: theme.bg === 'transparent' ? 'var(--glass-bg)' : '#F8F8F8',
             border: `1px solid ${theme.gridColor}`,
             borderRadius: 4,
+            flexShrink: 0,
             padding: '4px 8px',
           }}>
             <span>Downsampled from {chart.data.length} to {displayData.length} points for display</span>
@@ -2800,7 +2836,7 @@ export default function DataVisualization() {
 
         {/* Caption + source */}
         {o.showCaption && (chart.caption || chart.source) && (
-          <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${theme.gridColor}` }}>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${theme.gridColor}`, flexShrink: 0 }}>
             {chart.caption && (
               <p style={{ margin: 0, fontSize: 11 * fs, lineHeight: 1.4, color: theme.textColor, fontFamily: theme.bodyFont }}>
                 {chart.caption}
@@ -3444,13 +3480,18 @@ export default function DataVisualization() {
         ) : (
           <div className={`max-w-7xl mx-auto ${expandedChart ? '' : 'grid grid-cols-1 lg:grid-cols-2 gap-6'}`}>
             {charts.filter(c => !expandedChart || c.id === expandedChart).map(chart => (
-              <div key={chart.id} className="glass-card group">
-                {/* Chart header */}
-                <div className="flex items-center justify-between p-4 pb-0">
+              <div key={chart.id} className="glass-card group overflow-hidden flex flex-col">
+                {/* Chart header — the chart's own publication title is
+                    rendered INSIDE the figure (renderChart's title
+                    block), so the header carries only the type chip +
+                    affordances; repeating the title here read as a
+                    duplicated heading. */}
+                <div className="flex items-center justify-between gap-2 px-4 pt-3.5 pb-2.5">
                   <div className="flex items-center gap-2 min-w-0">
-                    <FiBarChart2 className="w-4 h-4 flex-shrink-0 text-[var(--color-text-muted)]" />
-                    <h3 className="text-sm font-medium truncate">{chart.title}</h3>
-                    <span className="text-xxs px-1.5 py-0.5 rounded bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-md bg-[var(--glass-bg)] flex-shrink-0">
+                      <FiBarChart2 className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+                    </span>
+                    <span className="text-[11px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full bg-[var(--glass-bg)] text-[var(--color-text-secondary)] border border-[var(--glass-border)]">
                       {CHART_TYPES.find(t => t.value === chart.type)?.label || chart.type}
                     </span>
                   </div>
@@ -3521,27 +3562,27 @@ export default function DataVisualization() {
                   </div>
                 </div>
 
-                {/* Chart body — bg is controlled by the chart's own
-                    pubTheme.bg now. The earlier chartBgTheme override
-                    flipped only the wrapper background to white but
-                    left the SVG text fills resolving to
-                    var(--color-text) (white in dark mode), which
-                    rendered the chart's text invisible on the white
-                    background. Removed the override; users pick a
-                    journal theme via Settings → Pub Theme to get a
-                    paper background with matching dark text. */}
+                {/* Chart body — the figure panel is a single inset
+                    card that fills the body edge-to-edge with uniform
+                    margins, so the figure no longer floats as a small
+                    white box adrift in dark padding. The chart's own
+                    pubTheme.bg paints the panel; renderChart's wrapper
+                    handles internal figure padding. */}
                 <div
-                  className="p-4 transition-colors"
+                  className="mx-4 mb-3 flex-1 overflow-hidden rounded-xl border border-[var(--glass-border)]"
                   ref={el => { chartRefs.current[chart.id] = el }}
-                  style={{ borderRadius: 10 }}
+                  style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.18)' }}
                 >
-                  {renderChart(chart, expandedChart === chart.id ? 500 : 280)}
+                  {renderChart(chart, expandedChart === chart.id ? 480 : 300)}
                 </div>
 
-                {/* Footer */}
-                <div className="px-4 pb-3 flex flex-wrap items-center gap-3 text-xxs text-[var(--color-text-muted)]">
+                {/* Footer — a single tidy metadata strip with
+                    dotted separators. Stat / trend / annotation chips
+                    only appear when relevant so the line never wraps
+                    awkwardly on a plain chart. */}
+                <div className="px-4 pb-3.5 pt-0.5 flex flex-wrap items-center text-xxs text-[var(--color-text-muted)] [&>span]:after:content-['·'] [&>span]:after:mx-2 [&>span]:after:opacity-40 [&>span:last-child]:after:content-none">
                   <span>{chart.data.length} pts</span>
-                  <span>{chart.options.colorPalette}</span>
+                  <span className="font-mono">{chart.options.colorPalette}</span>
                   <span>{formatDate(chart.createdAt)}</span>
                   {chart.options.trendLine === 'linear' && chart.data.length >= 2 && (() => {
                     const { r2 } = computeLinearRegression(chart.data)
@@ -3552,12 +3593,12 @@ export default function DataVisualization() {
                     const s = computeStats(chart.data)
                     if (!s) return null
                     return (
-                      <span className="flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                        μ={s.mean.toFixed(2)} · σ={s.std.toFixed(2)} · med={s.median.toFixed(2)} · [{s.min.toFixed(1)}, {s.max.toFixed(1)}]
+                      <span style={{ color: 'var(--color-text)' }}>
+                        μ={s.mean.toFixed(2)} σ={s.std.toFixed(2)} med={s.median.toFixed(2)} [{s.min.toFixed(1)}, {s.max.toFixed(1)}]
                       </span>
                     )
                   })()}
-                  {chart.options.showLegend && <span style={{ opacity: 0.5 }}>click legend to toggle series</span>}
+                  {chart.options.showLegend && <span className="opacity-50 italic">click legend to toggle series</span>}
                 </div>
 
                 {/* Settings panel */}

@@ -12,7 +12,7 @@
  * and stays on Plotly's SVG renderer.
  */
 import { useMemo, useRef, useState } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 // Deep imports (not the `@react-three/drei` barrel): drei 9.96 ships a
 // SpotLight module that imports `LinearEncoding` from three, a symbol
 // removed in three 0.182. The barrel's re-export graph drags SpotLight
@@ -29,38 +29,41 @@ import ChartErrorBoundary from './ChartErrorBoundary'
 // resolve, so (mirroring PlotlyPlot3D's PLOT3D_CHROME) the 3D scene
 // chrome is a concrete-hex table keyed by publication theme.
 interface Chart3DChrome {
-  bg: string          // canvas clear backdrop (transparent-friendly)
+  bg: string          // canvas clear backdrop — matches the figure card
   axis: string        // axis line + tick color
   grid: string        // floor grid color
+  panel: string       // back/side wall panel fill
   text: string        // tick + axis-title text
   title: string       // chart-title text
+  halo: string        // contrast outline behind 3D labels
+  dark: boolean       // true for the screen (dark) theme
   titleFamily: string
   bodyFamily: string
 }
 const CHART3D_CHROME: Record<PublicationTheme, Chart3DChrome> = {
   screen: {
-    bg: 'transparent', axis: '#8a8a92', grid: '#3a3a42',
-    text: '#c8c8cc', title: '#e4e4e8',
+    bg: '#1c1c20', axis: '#9a9aa3', grid: '#3a3a42', panel: '#26262c',
+    text: '#e8e8ec', title: '#f2f2f5', halo: '#1c1c20', dark: true,
     titleFamily: THEMES.screen.titleFont, bodyFamily: THEMES.screen.bodyFont,
   },
   paper: {
-    bg: '#FFFFFF', axis: '#444444', grid: '#dcdcdc',
-    text: '#222222', title: '#111111',
+    bg: '#FFFFFF', axis: '#3a3a3a', grid: '#e2e2e2', panel: '#f6f6f6',
+    text: '#1a1a1a', title: '#0a0a0a', halo: '#FFFFFF', dark: false,
     titleFamily: THEMES.paper.titleFont, bodyFamily: THEMES.paper.bodyFont,
   },
   nature: {
-    bg: '#FFFFFF', axis: '#333333', grid: '#dadada',
-    text: '#111111', title: '#000000',
+    bg: '#FFFFFF', axis: '#2c2c2c', grid: '#e0e0e0', panel: '#f5f5f5',
+    text: '#0d0d0d', title: '#000000', halo: '#FFFFFF', dark: false,
     titleFamily: THEMES.nature.titleFont, bodyFamily: THEMES.nature.bodyFont,
   },
   science: {
-    bg: '#FFFFFF', axis: '#222222', grid: '#d6d6d6',
-    text: '#111111', title: '#000000',
+    bg: '#FFFFFF', axis: '#1f1f1f', grid: '#dcdcdc', panel: '#f4f4f4',
+    text: '#0a0a0a', title: '#000000', halo: '#FFFFFF', dark: false,
     titleFamily: THEMES.science.titleFont, bodyFamily: THEMES.science.bodyFont,
   },
   ieee: {
-    bg: '#FFFFFF', axis: '#222222', grid: '#dadada',
-    text: '#111111', title: '#000000',
+    bg: '#FFFFFF', axis: '#1f1f1f', grid: '#e0e0e0', panel: '#f5f5f5',
+    text: '#0a0a0a', title: '#000000', halo: '#FFFFFF', dark: false,
     titleFamily: THEMES.ieee.titleFont, bodyFamily: THEMES.ieee.bodyFont,
   },
 }
@@ -239,13 +242,21 @@ function PolyLine({
 // down every 3D chart (the axes are labelled with it). A THREE.Sprite
 // with a canvas texture has no troika/three-stdlib dependency and a
 // sprite always faces the camera, so <Billboard> isn't needed either.
+//
+// The canvas is rendered at high resolution (large fontPx + a device-
+// pixel multiplier) with anisotropic filtering so the text stays crisp
+// at 4K. A subtle contrasting halo keeps labels legible against either
+// the surface mesh or the background, whichever the label happens to
+// sit over.
 function Label3D({
-  position, text, color, fontSize = 0.42,
+  position, text, color, fontSize = 0.5, weight = 600, halo,
 }: {
   position: [number, number, number]
   text: string | number | undefined
   color: string
   fontSize?: number
+  weight?: number
+  halo?: string
 }) {
   const sprite = useMemo(() => {
     const txt = String(text ?? '').trim()
@@ -253,27 +264,46 @@ function Label3D({
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
-    const fontPx = 64
-    const font = `600 ${fontPx}px Inter, system-ui, sans-serif`
+    // High-res glyph atlas: large base size keeps the texture sharp
+    // when the camera is close.
+    const fontPx = 128
+    const pad = Math.round(fontPx * 0.5)
+    const font = `${weight} ${fontPx}px Inter, "Helvetica Neue", Arial, sans-serif`
     ctx.font = font
     const w = Math.max(1, Math.ceil(ctx.measureText(txt).width))
-    canvas.width = w + 20
-    canvas.height = fontPx + 20
+    canvas.width = w + pad * 2
+    canvas.height = fontPx + pad
     // resizing the canvas resets the 2D context — re-apply state.
     ctx.font = font
-    ctx.fillStyle = color
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(txt, canvas.width / 2, canvas.height / 2)
+    const cx = canvas.width / 2
+    const cy = canvas.height / 2
+    // contrast halo so the label reads over any backdrop
+    if (halo) {
+      ctx.lineJoin = 'round'
+      ctx.miterLimit = 2
+      ctx.strokeStyle = halo
+      ctx.lineWidth = Math.round(fontPx * 0.16)
+      ctx.strokeText(txt, cx, cy)
+    }
+    ctx.fillStyle = color
+    ctx.fillText(txt, cx, cy)
     const tex = new THREE.CanvasTexture(canvas)
-    tex.minFilter = THREE.LinearFilter
+    tex.minFilter = THREE.LinearMipmapLinearFilter
+    tex.magFilter = THREE.LinearFilter
+    tex.anisotropy = 8
+    tex.generateMipmaps = true
     tex.needsUpdate = true
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })
+    const mat = new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthTest: false, depthWrite: false,
+    })
     const s = new THREE.Sprite(mat)
+    s.renderOrder = 999
     const aspect = canvas.width / canvas.height
     s.scale.set(fontSize * aspect, fontSize, 1)
     return s
-  }, [text, color, fontSize])
+  }, [text, color, fontSize, weight, halo])
   if (!sprite) return null
   return <primitive object={sprite} position={position} />
 }
@@ -285,66 +315,106 @@ function Axes({ bounds, mapper, chrome, xLabel, yLabel, zLabel }: AxesProps) {
   const yTicks = useMemo(() => niceTicks(bounds.yMin, bounds.yMax), [bounds])
   const zTicks = useMemo(() => niceTicks(bounds.zMin, bounds.zMax), [bounds])
 
-  // Floor grid (drei drei <Grid> needs r3f-postprocessing-ish setup; a
-  // plain THREE.GridHelper-equivalent is simpler & dependency-free).
-  const gridLines = useMemo(() => {
-    const segs: [THREE.Vector3, THREE.Vector3][] = []
+  // Floor + back/side wall grids — a three-walled "box" framing the
+  // data (the journal-standard 3D plot enclosure). Grid lines on the
+  // floor and the two far walls.
+  const grids = useMemo(() => {
     const n = 8
+    const floor: [THREE.Vector3, THREE.Vector3][] = []
+    const backWall: [THREE.Vector3, THREE.Vector3][] = []
+    const sideWall: [THREE.Vector3, THREE.Vector3][] = []
     for (let i = 0; i <= n; i++) {
       const t = (i / n - 0.5) * CUBE
-      segs.push([new THREE.Vector3(-h, -h, t), new THREE.Vector3(h, -h, t)])
-      segs.push([new THREE.Vector3(t, -h, -h), new THREE.Vector3(t, -h, h)])
+      floor.push([new THREE.Vector3(-h, -h, t), new THREE.Vector3(h, -h, t)])
+      floor.push([new THREE.Vector3(t, -h, -h), new THREE.Vector3(t, -h, h)])
+      // back wall (z = -h plane): verticals + horizontals
+      backWall.push([new THREE.Vector3(t, -h, -h), new THREE.Vector3(t, h, -h)])
+      backWall.push([new THREE.Vector3(-h, t, -h), new THREE.Vector3(h, t, -h)])
+      // side wall (x = -h plane)
+      sideWall.push([new THREE.Vector3(-h, -h, t), new THREE.Vector3(-h, h, t)])
+      sideWall.push([new THREE.Vector3(-h, t, -h), new THREE.Vector3(-h, t, h)])
     }
-    return segs
+    return { floor, backWall, sideWall }
   }, [h])
 
+  const tickFont = 0.92
+  const titleFont = 1.3
+
+  // The default camera looks from the +X,+Y,+Z octant, so the box's
+  // FRONT edges are those at +x / +z. Tick labels are placed on those
+  // front-facing edges (never occluded by the box panels) and the
+  // numeric scale on a front vertical edge.
   return (
     <group>
-      {/* gridded floor */}
-      {gridLines.map((seg, i) => (
-        <PolyLine key={`g${i}`} points={seg} color={chrome.grid} lineWidth={0.6} transparent opacity={0.5} />
+      {/* solid panels behind the grid lines so the box reads as a
+          contiguous figure surface, not floating wires */}
+      <mesh position={[0, -h - 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[CUBE, CUBE]} />
+        <meshBasicMaterial color={chrome.panel} side={THREE.DoubleSide} transparent opacity={chrome.dark ? 0.55 : 0.85} />
+      </mesh>
+      <mesh position={[0, 0, -h - 0.01]}>
+        <planeGeometry args={[CUBE, CUBE]} />
+        <meshBasicMaterial color={chrome.panel} side={THREE.DoubleSide} transparent opacity={chrome.dark ? 0.4 : 0.7} />
+      </mesh>
+      <mesh position={[-h - 0.01, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[CUBE, CUBE]} />
+        <meshBasicMaterial color={chrome.panel} side={THREE.DoubleSide} transparent opacity={chrome.dark ? 0.4 : 0.7} />
+      </mesh>
+
+      {/* grid lines on the three enclosure walls */}
+      {grids.floor.map((seg, i) => (
+        <PolyLine key={`gf${i}`} points={seg} color={chrome.grid} transparent opacity={0.9} />
+      ))}
+      {grids.backWall.map((seg, i) => (
+        <PolyLine key={`gb${i}`} points={seg} color={chrome.grid} transparent opacity={0.6} />
+      ))}
+      {grids.sideWall.map((seg, i) => (
+        <PolyLine key={`gs${i}`} points={seg} color={chrome.grid} transparent opacity={0.6} />
       ))}
 
-      {/* three axis lines meeting at the back-bottom corner */}
-      <PolyLine points={[[-h, -h, -h], [h, -h, -h]]} color={chrome.axis} lineWidth={1.4} />
-      <PolyLine points={[[-h, -h, -h], [-h, h, -h]]} color={chrome.axis} lineWidth={1.4} />
-      <PolyLine points={[[-h, -h, -h], [-h, -h, h]]} color={chrome.axis} lineWidth={1.4} />
+      {/* the three labelled axis lines, drawn on the front-facing edges */}
+      {/* X axis — front-bottom edge (z = +h) */}
+      <PolyLine points={[[-h, -h, h], [h, -h, h]]} color={chrome.axis} />
+      {/* Y axis — right-bottom edge (x = +h) */}
+      <PolyLine points={[[h, -h, -h], [h, -h, h]]} color={chrome.axis} />
+      {/* Z axis — front-left vertical edge (x = -h, z = +h) */}
+      <PolyLine points={[[-h, -h, h], [-h, h, h]]} color={chrome.axis} />
 
-      {/* X ticks (data-x → scene-x), labels just below the floor */}
+      {/* X ticks → scene-x, on the front-bottom edge, labels below */}
       {xTicks.map((t, i) => {
         const sx = mx(t)
         return (
           <group key={`xt${i}`}>
-            <PolyLine points={[[sx, -h, -h], [sx, -h - 0.25, -h]]} color={chrome.axis} lineWidth={1} />
-            <Label3D position={[sx, -h - 0.7, -h]} text={fmtTick(t)} color={chrome.text} fontSize={0.42} />
+            <PolyLine points={[[sx, -h, h], [sx, -h - 0.34, h + 0.18]]} color={chrome.axis} />
+            <Label3D position={[sx, -h - 1.0, h + 0.55]} text={fmtTick(t)} color={chrome.text} fontSize={tickFont} halo={chrome.halo} />
           </group>
         )
       })}
-      {/* Y ticks (data-y → scene-z), labels off the near-floor edge */}
+      {/* Y ticks → scene-z, on the right-bottom edge, labels outside */}
       {yTicks.map((t, i) => {
         const sz = my(t)
         return (
           <group key={`yt${i}`}>
-            <PolyLine points={[[-h, -h, sz], [-h - 0.25, -h, sz]]} color={chrome.axis} lineWidth={1} />
-            <Label3D position={[-h - 0.7, -h - 0.2, sz]} text={fmtTick(t)} color={chrome.text} fontSize={0.42} />
+            <PolyLine points={[[h, -h, sz], [h + 0.34, -h - 0.34, sz]]} color={chrome.axis} />
+            <Label3D position={[h + 1.2, -h - 0.95, sz]} text={fmtTick(t)} color={chrome.text} fontSize={tickFont} halo={chrome.halo} />
           </group>
         )
       })}
-      {/* Z ticks (data-z → scene-y, the vertical axis) */}
+      {/* Z ticks → scene-y, on the front-left vertical edge */}
       {zTicks.map((t, i) => {
         const sy = mz(t)
         return (
           <group key={`zt${i}`}>
-            <PolyLine points={[[-h, sy, -h], [-h - 0.25, sy, -h]]} color={chrome.axis} lineWidth={1} />
-            <Label3D position={[-h - 0.9, sy, -h]} text={fmtTick(t)} color={chrome.text} fontSize={0.42} />
+            <PolyLine points={[[-h, sy, h], [-h - 0.34, sy, h + 0.18]]} color={chrome.axis} />
+            <Label3D position={[-h - 1.25, sy, h + 0.55]} text={fmtTick(t)} color={chrome.text} fontSize={tickFont} halo={chrome.halo} />
           </group>
         )
       })}
 
-      {/* axis titles */}
-      <Label3D position={[0, -h - 1.7, -h]} text={xLabel} color={chrome.text} fontSize={0.6} />
-      <Label3D position={[-h - 1.9, -h - 0.2, 0]} text={yLabel} color={chrome.text} fontSize={0.6} />
-      <Label3D position={[-h - 2.0, 0, -h]} text={zLabel} color={chrome.text} fontSize={0.6} />
+      {/* axis titles — larger, bold, set well clear of the tick labels */}
+      <Label3D position={[0, -h - 2.15, h + 1.0]} text={xLabel} color={chrome.title} fontSize={titleFont} weight={700} halo={chrome.halo} />
+      <Label3D position={[h + 2.7, -h - 1.0, 0]} text={yLabel} color={chrome.title} fontSize={titleFont} weight={700} halo={chrome.halo} />
+      <Label3D position={[-h - 2.9, 0, h + 1.0]} text={zLabel} color={chrome.title} fontSize={titleFont} weight={700} halo={chrome.halo} />
     </group>
   )
 }
@@ -723,38 +793,76 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
   // wireframe edge geometry
   const wireGeo = useMemo(() => new THREE.WireframeGeometry(geo), [geo])
 
-  // contour lines: iso-z polylines projected on the surface
-  const contourLines = useMemo(() => {
-    if (kind !== 'contour') return []
-    const lines: THREE.Vector3[][] = []
+  // contour iso-lines via marching-squares. Each grid cell that an iso
+  // level passes through emits an INDEPENDENT 2-point segment (a prior
+  // version concatenated every crossing into one polyline, producing a
+  // zig-zag scribble). Segments are drawn through THREE.LineSegments so
+  // they stay disjoint, giving clean MATLAB-style contour rings.
+  const contourSegments = useMemo(() => {
+    if (kind !== 'contour') return null
     const span = safeSpan(zb.lo, zb.hi)
-    const levels = 7
-    // sample along grid rows at fixed scene-Y heights (level slabs)
+    const levels = 8
+    const verts: number[] = []
+    // scene-Y of a data-z value
+    const sy = (z: number) => ((z - zb.lo) / span) * CUBE - CUBE / 2
+    // edge interpolation: where on a cell edge value `iso` crosses
+    const lerp = (za: number, zb2: number, iso: number) => {
+      const d = zb2 - za
+      return Math.abs(d) < 1e-9 ? 0.5 : (iso - za) / d
+    }
     for (let l = 1; l < levels; l++) {
-      const yLevel = (l / levels - 0.5) * CUBE
-      const segPts: THREE.Vector3[] = []
-      for (let row = 0; row < res; row++) {
+      const iso = zb.lo + (l / levels) * span
+      const yL = sy(iso) + 0.04
+      for (let row = 0; row < res - 1; row++) {
         for (let c = 0; c < res - 1; c++) {
-          const z0 = grid.z[row][c], z1 = grid.z[row][c + 1]
-          const s0 = ((z0 - zb.lo) / span) * CUBE - CUBE / 2
-          const s1 = ((z1 - zb.lo) / span) * CUBE - CUBE / 2
-          if ((s0 - yLevel) * (s1 - yLevel) < 0) {
-            const f = (yLevel - s0) / (s1 - s0)
-            const x = (-0.5 + (c + f) / (res - 1)) * CUBE
-            const zc = (-0.5 + row / (res - 1)) * CUBE
-            segPts.push(new THREE.Vector3(x, yLevel + 0.02, zc))
+          const v00 = grid.z[row][c]
+          const v10 = grid.z[row][c + 1]
+          const v11 = grid.z[row + 1][c + 1]
+          const v01 = grid.z[row + 1][c]
+          // scene coords of the four cell corners
+          const x0 = (-0.5 + c / (res - 1)) * CUBE
+          const x1 = (-0.5 + (c + 1) / (res - 1)) * CUBE
+          const z0 = (-0.5 + row / (res - 1)) * CUBE
+          const z1 = (-0.5 + (row + 1) / (res - 1)) * CUBE
+          // marching-squares case index
+          let idx = 0
+          if (v00 > iso) idx |= 1
+          if (v10 > iso) idx |= 2
+          if (v11 > iso) idx |= 4
+          if (v01 > iso) idx |= 8
+          if (idx === 0 || idx === 15) continue
+          // crossing point on each of the four edges (if any)
+          const eB: [number, number] = [x0 + (x1 - x0) * lerp(v00, v10, iso), z0] // bottom
+          const eR: [number, number] = [x1, z0 + (z1 - z0) * lerp(v10, v11, iso)] // right
+          const eT: [number, number] = [x0 + (x1 - x0) * lerp(v01, v11, iso), z1] // top
+          const eL: [number, number] = [x0, z0 + (z1 - z0) * lerp(v00, v01, iso)] // left
+          const push = (a: [number, number], b: [number, number]) => {
+            verts.push(a[0], yL, a[1], b[0], yL, b[1])
+          }
+          // segment(s) for each of the 16 cases (ambiguous saddles split)
+          switch (idx) {
+            case 1: case 14: push(eL, eB); break
+            case 2: case 13: push(eB, eR); break
+            case 3: case 12: push(eL, eR); break
+            case 4: case 11: push(eR, eT); break
+            case 5: push(eL, eT); push(eB, eR); break
+            case 6: case 9: push(eB, eT); break
+            case 7: case 8: push(eL, eT); break
+            case 10: push(eL, eB); push(eR, eT); break
           }
         }
       }
-      if (segPts.length > 1) lines.push(segPts)
     }
-    return lines
+    if (verts.length === 0) return null
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+    return g
   }, [grid, zb, kind])
 
   if (kind === 'wireframe') {
     return (
       <lineSegments geometry={wireGeo}>
-        <lineBasicMaterial color="#3D5A80" linewidth={1} />
+        <lineBasicMaterial color={chrome.dark ? '#7FA8C9' : '#3D5A80'} />
       </lineSegments>
     )
   }
@@ -799,12 +907,22 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
       </mesh>
       {kind === 'surface' && (
         <lineSegments geometry={wireGeo}>
-          <lineBasicMaterial color="#000000" transparent opacity={0.18} />
+          <lineBasicMaterial
+            color={chrome.dark ? '#000000' : '#1a1a1a'}
+            transparent
+            opacity={chrome.dark ? 0.28 : 0.16}
+          />
         </lineSegments>
       )}
-      {contourLines.map((ln, i) => (
-        <PolyLine key={i} points={ln} color="#000000" lineWidth={1.2} transparent opacity={0.55} />
-      ))}
+      {kind === 'contour' && contourSegments && (
+        <lineSegments geometry={contourSegments}>
+          <lineBasicMaterial
+            color={chrome.dark ? '#f0f0f0' : '#101010'}
+            transparent
+            opacity={chrome.dark ? 0.85 : 0.7}
+          />
+        </lineSegments>
+      )}
     </group>
   )
 }
@@ -845,7 +963,11 @@ function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
         <meshStandardMaterial vertexColors roughness={0.45} metalness={0.06} side={THREE.DoubleSide} />
       </mesh>
       <lineSegments geometry={wireGeo}>
-        <lineBasicMaterial color="#000000" transparent opacity={0.2} />
+        <lineBasicMaterial
+          color={chrome.dark ? '#000000' : '#1a1a1a'}
+          transparent
+          opacity={chrome.dark ? 0.32 : 0.2}
+        />
       </lineSegments>
       {/* vertex markers */}
       {pts.map((d, i) => (
@@ -943,25 +1065,29 @@ function QuiverRenderer({ data, mapper, colorFn }: RenderProps) {
   // reduce (not spread) — spreading a large array into Math.max can
   // overflow the call stack with RangeError.
   const maxMag = arrows.reduce((m, a) => Math.max(m, a.mag), 1e-6)
-  const len = 1.4
+  // arrows scaled to be clearly legible inside the 10-unit cube
+  const len = 3.2
   return (
     <group>
       {arrows.map((a, i) => {
         const t = a.mag / maxMag
         const col = colorFn(t)
-        const L = len * (0.45 + 0.55 * t)
+        const L = len * (0.5 + 0.5 * t)
+        const headLen = L * 0.34
+        const shaftLen = L - headLen
         const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), a.dir)
-        const shaftMid = a.origin.clone().add(a.dir.clone().multiplyScalar(L * 0.4))
-        const headPos = a.origin.clone().add(a.dir.clone().multiplyScalar(L * 0.8))
+        // arrow grows out FROM the data point along the vector
+        const shaftMid = a.origin.clone().add(a.dir.clone().multiplyScalar(shaftLen * 0.5))
+        const headPos = a.origin.clone().add(a.dir.clone().multiplyScalar(shaftLen + headLen * 0.5))
         return (
           <group key={i}>
             <mesh position={shaftMid} quaternion={quat}>
-              <cylinderGeometry args={[0.04, 0.04, L * 0.8, 8]} />
-              <meshStandardMaterial color={col} roughness={0.5} />
+              <cylinderGeometry args={[0.085, 0.085, shaftLen, 12]} />
+              <meshStandardMaterial color={col} roughness={0.45} metalness={0.05} />
             </mesh>
             <mesh position={headPos} quaternion={quat}>
-              <coneGeometry args={[0.13, L * 0.4, 12]} />
-              <meshStandardMaterial color={col} roughness={0.5} />
+              <coneGeometry args={[0.26, headLen, 16]} />
+              <meshStandardMaterial color={col} roughness={0.45} metalness={0.05} />
             </mesh>
           </group>
         )
@@ -1017,23 +1143,98 @@ function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
         const mid = (s.start + s.end) / 2
         const explode = 0.4
         const col = s.color ? new THREE.Color(s.color) : colorFn(s.idx / Math.max(1, slices.length - 1))
-        const labelR = R + 1.0
+        // Labels sit on a single ring well clear of the pie rim, all
+        // lifted to a common height above the pie plane — at a large
+        // radius the 12 labels separate cleanly around the circle. A
+        // thin leader line ties each label back to its wedge edge.
+        const labelR = R + 3.0
+        const labelY = depth + 3.0
+        const edge: [number, number, number] = [Math.cos(mid) * R, depth, -Math.sin(mid) * R]
+        const labelPos: [number, number, number] = [
+          Math.cos(mid) * labelR, labelY, -Math.sin(mid) * labelR,
+        ]
         return (
           <group key={s.idx} position={[Math.cos(mid) * explode, 0, -Math.sin(mid) * explode]}>
             <mesh geometry={s.geo} position={[0, -depth / 2, 0]}>
-              <meshStandardMaterial color={col} roughness={0.45} metalness={0.08} />
+              <meshStandardMaterial color={col} roughness={0.42} metalness={0.04} />
             </mesh>
+            <PolyLine
+              points={[edge, labelPos]}
+              color={chrome.axis}
+              transparent
+              opacity={0.5}
+            />
             <Label3D
-              position={[Math.cos(mid) * labelR, depth, -Math.sin(mid) * labelR]}
-              text={`${s.label} ${(s.frac * 100).toFixed(0)}%`}
-              color={chrome.text}
-              fontSize={0.5}
+              position={labelPos}
+              text={`${s.label}  ${(s.frac * 100).toFixed(0)}%`}
+              color={chrome.title}
+              fontSize={1.05}
+              weight={600}
+              halo={chrome.halo}
             />
           </group>
         )
       })}
     </group>
   )
+}
+
+// ════════════════════════════════════════════════════════════════════
+// CAMERA RIG — frames the whole figure (geometry box + axis labels)
+// so nothing is clipped and the default view is a pleasing 3/4 angle.
+// Runs once after mount: the scene extent is deterministic (the CUBE
+// plus a fixed label margin), so a single fit is exact and stable.
+// ════════════════════════════════════════════════════════════════════
+function CameraRig({
+  hasAxes, controls,
+}: {
+  hasAxes: boolean
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controls: React.MutableRefObject<any>
+}) {
+  const { camera, size } = useThree()
+  const fitted = useRef(false)
+  useFrame(() => {
+    if (fitted.current) return
+    fitted.current = true
+    const cam = camera as THREE.PerspectiveCamera
+    // Tight framing — the chart should fill the figure area, not float
+    // in a sea of white. The figure's payload is the CUBE; the axis
+    // tick labels + titles hang ≈3u off the bottom + the two FRONT
+    // (+x / +z) faces. Centring a touch low and toward +x/+z balances
+    // that overhang so the box sits centred and large in the viewport.
+    // pie (no axes) needs room for its outer stagger of leader labels.
+    const halfExtent = hasAxes ? CUBE / 2 + 2.4 : CUBE * 0.82
+    const center = new THREE.Vector3(
+      hasAxes ? 0.9 : 0,
+      hasAxes ? -1.6 : 0,
+      hasAxes ? 0.9 : 0,
+    )
+    const radius = halfExtent * Math.SQRT2
+    const aspect = size.width / Math.max(1, size.height)
+    const vFov = (cam.fov * Math.PI) / 180
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.min(1, aspect))
+    const fitFov = Math.min(vFov, hFov)
+    const dist = (radius / Math.sin(fitFov / 2)) * 1.02
+    // axis charts: pleasing 3/4 isometric (azimuth ~45°, modest
+    // elevation). pie (no axes): a steeper near-overhead tilt so the
+    // ring of slice labels projects to a wide, well-separated ellipse.
+    const dir = hasAxes
+      ? new THREE.Vector3(0.82, 0.6, 1.0).normalize()
+      : new THREE.Vector3(0.32, 1.15, 0.62).normalize()
+    cam.position.copy(center).addScaledVector(dir, dist)
+    cam.near = Math.max(0.1, dist - radius * 2.2)
+    cam.far = dist + radius * 3
+    cam.lookAt(center)
+    cam.updateProjectionMatrix()
+    // hand the same target to OrbitControls so orbiting pivots about
+    // the figure centre, not the world origin.
+    if (controls.current) {
+      controls.current.target.copy(center)
+      controls.current.update()
+    }
+  })
+  return null
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1106,53 +1307,173 @@ function Scene({
   }
 
   const showAxes = resolvedType !== 'pie_3d'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controls = useRef<any>(null)
 
   return (
-    <group ref={groupRef}>
-      {showAxes && (
-        <Axes
-          bounds={bounds}
-          mapper={mapper}
-          chrome={chrome}
-          xLabel={xLabel}
-          yLabel={yLabel}
-          zLabel={zLabel}
-        />
-      )}
-      {body}
-    </group>
+    <>
+      <group ref={groupRef}>
+        {showAxes && (
+          <Axes
+            bounds={bounds}
+            mapper={mapper}
+            chrome={chrome}
+            xLabel={xLabel}
+            yLabel={yLabel}
+            zLabel={zLabel}
+          />
+        )}
+        {body}
+      </group>
+      <CameraRig hasAxes={showAxes} controls={controls} />
+      <OrbitControls
+        ref={controls}
+        makeDefault
+        enableDamping
+        dampingFactor={0.08}
+        rotateSpeed={0.7}
+        enablePan={false}
+        minDistance={CUBE * 0.7}
+        maxDistance={CUBE * 6}
+      />
+    </>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════
-// CATEGORY LEGEND OVERLAY (HTML, not WebGL — crisper text)
+// LEGENDS (HTML overlay — crisper text than WebGL sprites)
+//
+// A legend is shown ONLY when it carries meaning:
+//  • category swatch legend — scatter/bubble/stem/bar/voxel when the
+//    points carry ≥2 distinct `category` values AND the colour scheme
+//    is categorical (otherwise colour encodes z, not category).
+//  • z-value colour-bar — surface-family + trisurf/ribbon/line/quiver,
+//    where colour is a continuous mapping of the z axis.
+// Nothing is drawn otherwise. Both sit clear of the plot in the
+// top-right gutter, inside a translucent card, never overlapping the
+// geometry (the camera fit leaves a comfortable margin there).
 // ════════════════════════════════════════════════════════════════════
-function Legend({ data, chrome }: { data: DataPoint3D[]; chrome: Chart3DChrome }) {
-  const cats = useMemo(
-    () => [...new Set(data.map(d => d.category).filter(Boolean))] as string[],
-    [data],
-  )
-  if (cats.length < 2) return null
+
+// chart families whose colour is a continuous z encoding → colour-bar
+const COLORBAR_TYPES = new Set<string>([
+  'surface_3d', 'wireframe_3d', 'contour_3d', 'slice_3d', 'isosurface_3d',
+  'trisurf_3d', 'ribbon_3d', 'line_3d', 'streamline_3d', 'quiver_3d',
+])
+// chart families that can carry a discrete category swatch legend
+const CATEGORY_TYPES = new Set<string>([
+  'scatter_3d', 'bubble_3d', 'stem_3d', 'bar_3d', 'voxel_3d',
+])
+
+function legendCardStyle(chrome: Chart3DChrome): React.CSSProperties {
+  return {
+    position: 'absolute', top: 12, right: 12,
+    background: chrome.dark ? 'rgba(40,40,46,0.82)' : 'rgba(255,255,255,0.9)',
+    border: `1px solid ${chrome.dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'}`,
+    borderRadius: 7, padding: '8px 10px',
+    fontFamily: chrome.bodyFamily, pointerEvents: 'none',
+    boxShadow: chrome.dark ? 'none' : '0 1px 4px rgba(0,0,0,0.08)',
+    zIndex: 3,
+  }
+}
+
+function CategoryLegend({ cats, chrome }: { cats: string[]; chrome: Chart3DChrome }) {
   return (
-    <div
-      style={{
-        position: 'absolute', top: 8, right: 10, display: 'flex',
-        flexDirection: 'column', gap: 3, padding: '6px 9px',
-        background: 'rgba(0,0,0,0.04)', borderRadius: 6,
-        fontFamily: chrome.bodyFamily, fontSize: 10, pointerEvents: 'none',
-      }}
-    >
+    <div style={{ ...legendCardStyle(chrome), display: 'flex', flexDirection: 'column', gap: 5 }}>
       {cats.map((c, i) => (
-        <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span style={{
-            width: 9, height: 9, borderRadius: 2,
+            width: 12, height: 12, borderRadius: 3, flexShrink: 0,
             background: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
           }} />
-          <span style={{ color: chrome.text }}>{c}</span>
+          <span style={{ color: chrome.text, fontSize: 11.5, fontWeight: 500 }}>{c}</span>
         </div>
       ))}
     </div>
   )
+}
+
+function ColorBar({
+  scheme, zMin, zMax, zLabel, chrome,
+}: {
+  scheme: ColorScheme; zMin: number; zMax: number; zLabel: string; chrome: Chart3DChrome
+}) {
+  const colorFn = useMemo(() => makeColorFn(scheme), [scheme])
+  // CSS gradient sampled from the same stops the mesh uses
+  const stops = useMemo(() => {
+    const n = 12
+    return Array.from({ length: n }, (_, i) => {
+      const c = colorFn(i / (n - 1))
+      const pct = (i / (n - 1)) * 100
+      return `rgb(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)}) ${pct}%`
+    }).join(', ')
+  }, [colorFn])
+  const lo = Number.isFinite(zMin) ? zMin : 0
+  const hi = Number.isFinite(zMax) ? zMax : 1
+  const mid = (lo + hi) / 2
+  return (
+    <div style={{ ...legendCardStyle(chrome), display: 'flex', alignItems: 'stretch', gap: 8 }}>
+      <div style={{
+        width: 16, borderRadius: 3,
+        background: `linear-gradient(to top, ${stops})`,
+        border: `1px solid ${chrome.dark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
+      }} />
+      <div style={{
+        display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+        fontSize: 10.5, color: chrome.text, minHeight: 96, fontWeight: 500,
+      }}>
+        <span>{fmtTick(hi)}</span>
+        <span style={{ fontWeight: 600, color: chrome.title }}>{zLabel}</span>
+        <span>{fmtTick(mid)}</span>
+        <span>{fmtTick(lo)}</span>
+      </div>
+    </div>
+  )
+}
+
+function Legend({
+  data, chrome, resolvedType, colorScheme, zLabel,
+}: {
+  data: DataPoint3D[]; chrome: Chart3DChrome; resolvedType: Chart3DType
+  colorScheme: ColorScheme; zLabel: string
+}) {
+  const cats = useMemo(
+    () => [...new Set(data.map(d => d.category).filter(Boolean))] as string[],
+    [data],
+  )
+  const zRange = useMemo(() => {
+    let lo = Infinity, hi = -Infinity
+    for (const d of data) {
+      if (Number.isFinite(d.z)) { if (d.z < lo) lo = d.z; if (d.z > hi) hi = d.z }
+    }
+    return { lo, hi }
+  }, [data])
+
+  // category legend wins when the chart type supports it AND colour
+  // actually encodes category (categorical scheme + ≥2 categories)
+  if (
+    CATEGORY_TYPES.has(resolvedType) &&
+    colorScheme === 'categorical' &&
+    cats.length >= 2
+  ) {
+    return <CategoryLegend cats={cats} chrome={chrome} />
+  }
+  // colour-bar for continuous-z chart families with a valid z span
+  if (
+    COLORBAR_TYPES.has(resolvedType) &&
+    Number.isFinite(zRange.lo) && Number.isFinite(zRange.hi) &&
+    zRange.hi > zRange.lo
+  ) {
+    return (
+      <ColorBar
+        scheme={colorScheme}
+        zMin={zRange.lo}
+        zMax={zRange.hi}
+        zLabel={zLabel}
+        chrome={chrome}
+      />
+    )
+  }
+  return null
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1174,38 +1495,57 @@ export default function Chart3D({
 }: PlotlyPlot3DProps) {
   const resolvedType: Chart3DType = chartType || type || 'scatter_3d'
   const chrome = CHART3D_CHROME[theme] || CHART3D_CHROME.screen
-  // Camera fitted to the normalised cube — CUBE-sized scene, ~1.9×
-  // distance gives a comfortable isometric framing with room for the
-  // axis tick labels that hang off the floor.
-  const camDist = CUBE * 1.95
   const [ready] = useState(true)
 
   return (
-    <div style={{ width: '100%', height, position: 'relative' }}>
+    <div
+      style={{
+        width: '100%', height, position: 'relative',
+        // the canvas is alpha:true, so this fill IS the figure ground —
+        // white for journal themes, dark for screen — making the chart
+        // read as one figure inside the card, not a box on white.
+        background: chrome.bg,
+        borderRadius: 4, overflow: 'hidden',
+      }}
+    >
       <ChartErrorBoundary resetKey={`${title}:${data.length}:${resolvedType}:${theme}`}>
         {title && (
           <div
             style={{
-              position: 'absolute', top: 6, left: 0, right: 0, textAlign: 'center',
-              fontFamily: chrome.titleFamily, fontSize: 13, fontWeight: 600,
+              position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center',
+              fontFamily: chrome.titleFamily, fontSize: 14, fontWeight: 600,
+              letterSpacing: '0.01em',
               color: chrome.title, pointerEvents: 'none', zIndex: 2,
             }}
           >
             {title}
           </div>
         )}
-        <Legend data={data} chrome={chrome} />
+        <Legend
+          data={data}
+          chrome={chrome}
+          resolvedType={resolvedType}
+          colorScheme={colorScheme}
+          zLabel={zLabel}
+        />
         {ready && (
           <Canvas
-            dpr={[1, 2]}
+            // crisp at 4K: render up to 3× device pixels, AA on
+            dpr={[1, 3]}
             gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
-            camera={{ position: [camDist * 0.62, camDist * 0.5, camDist * 0.62], fov: 42, near: 0.1, far: 1000 }}
+            camera={{ position: [16, 13, 20], fov: 38, near: 0.1, far: 1000 }}
             style={{ width: '100%', height: '100%' }}
           >
-            {/* tasteful lighting: soft ambient fill + two directionals */}
-            <ambientLight intensity={0.72} />
-            <directionalLight position={[18, 26, 14]} intensity={0.85} />
-            <directionalLight position={[-16, 10, -12]} intensity={0.35} />
+            {/* journal-grade lighting: bright even ambient fill + a
+                soft key + gentle fill + rim — no harsh speculars, the
+                materials are matte so highlights stay tasteful */}
+            <ambientLight intensity={chrome.dark ? 0.85 : 1.05} />
+            <hemisphereLight
+              args={[chrome.dark ? '#5a5a66' : '#ffffff', chrome.dark ? '#101014' : '#d8d8dc', chrome.dark ? 0.5 : 0.7]}
+            />
+            <directionalLight position={[16, 24, 12]} intensity={chrome.dark ? 0.7 : 0.55} />
+            <directionalLight position={[-14, 12, -10]} intensity={0.28} />
+            <directionalLight position={[-8, 6, 18]} intensity={0.22} />
             <Scene
               data={data}
               resolvedType={resolvedType}
@@ -1216,13 +1556,6 @@ export default function Chart3D({
               yLabel={yLabel}
               zLabel={zLabel}
               surfaceFunction={surfaceFunction}
-            />
-            <OrbitControls
-              enableDamping
-              dampingFactor={0.08}
-              rotateSpeed={0.7}
-              minDistance={CUBE * 0.6}
-              maxDistance={CUBE * 5}
             />
           </Canvas>
         )}

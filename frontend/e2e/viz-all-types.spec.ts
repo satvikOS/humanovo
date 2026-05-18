@@ -41,25 +41,26 @@ const IS_3D = new Set<string>(CHART_TYPES_3D)
 const ALL_TYPES = [...CHART_TYPES_2D, ...CHART_TYPES_3D]
 
 // One deterministic dataset that populates every field any chart type
-// reads — 2D (label/value/value2/value3/category/error/size) AND 3D
-// (x/y/z/vx/vy/vz). No Math.random so screenshots are reproducible.
+// reads. DataVisualization maps 3D charts from value/value2/value3, so
+// those THREE must be mutually independent (different frequencies) —
+// otherwise the 3D points fall on a line and every 3D chart looks
+// degenerate. No Math.random so screenshots are reproducible.
 const DATA = Array.from({ length: 12 }, (_, i) => {
-  const angle = (i / 12) * Math.PI * 2
-  const baseline = 50 + 30 * Math.sin(angle)
+  const a = (i / 12) * Math.PI * 2
   return {
     label: `Q${i + 1}`,
-    value: Math.round(baseline + 3),
-    value2: Math.round(baseline * 0.7 + 2),
-    value3: Math.round(baseline * 0.4 + 1),
+    value: Math.round(45 + 38 * (0.5 + 0.5 * Math.sin(a))),
+    value2: Math.round(35 + 40 * (0.5 + 0.5 * Math.sin(a * 2.3 + 1))),
+    value3: Math.round(25 + 34 * (0.5 + 0.5 * Math.cos(a * 1.7 + 0.6))),
     category: i < 4 ? 'Cohort A' : i < 8 ? 'Cohort B' : 'Cohort C',
     errorPlus: 3 + (i % 3),
     errorMinus: 2 + (i % 2),
     size: 5 + (i % 5),
-    x: +(Math.cos(angle) * 4).toFixed(3),
-    y: +(Math.sin(angle) * 4).toFixed(3),
-    z: +(baseline / 18).toFixed(3),
-    vx: +(Math.cos(angle) * 0.5).toFixed(3),
-    vy: +(Math.sin(angle) * 0.5).toFixed(3),
+    x: +(Math.cos(a) * 4).toFixed(3),
+    y: +(Math.sin(a) * 4).toFixed(3),
+    z: +(2 + 1.5 * Math.sin(a * 2)).toFixed(3),
+    vx: +(Math.cos(a) * 0.5).toFixed(3),
+    vy: +(Math.sin(a) * 0.5).toFixed(3),
     vz: 0.4,
   }
 })
