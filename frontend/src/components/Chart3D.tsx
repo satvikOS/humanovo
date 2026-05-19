@@ -11,7 +11,7 @@
  * Sankey is intentionally NOT handled here — it is a 2D flow diagram
  * and stays on Plotly's SVG renderer.
  */
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 // Deep imports (not the `@react-three/drei` barrel): drei 9.96 ships a
 // SpotLight module that imports `LinearEncoding` from three, a symbol
@@ -1251,10 +1251,27 @@ interface SceneProps {
   xLabel: string; yLabel: string; zLabel: string
   surfaceFunction?: (x: number, y: number) => number
 }
+// Entrance animation — the whole chart scales up from a point with an
+// ease-out cubic over ~0.7s on mount, so the figure "assembles" itself
+// instead of snapping in. Pure useFrame, no animation library.
+function EntranceGroup({ children }: { children: ReactNode }) {
+  const ref = useRef<THREE.Group>(null)
+  const t = useRef(0)
+  useFrame((_, delta) => {
+    if (t.current >= 1) return
+    t.current = Math.min(1, t.current + delta / 0.7)
+    const e = 1 - Math.pow(1 - t.current, 3)
+    ref.current?.scale.setScalar(0.001 + 0.999 * e)
+  })
+  return <group ref={ref} scale={0.001}>{children}</group>
+}
+
 function Scene({
   data, resolvedType, colorScheme, pointSize, chrome,
   xLabel, yLabel, zLabel, surfaceFunction,
 }: SceneProps) {
+  // Idle auto-rotation pauses while the user is dragging/zooming.
+  const [userInteracting, setUserInteracting] = useState(false)
   const groupRef = useRef<THREE.Group>(null)
   const bounds = useMemo(() => computeBounds(data), [data])
   const mapper = useMemo(() => makeMapper(bounds), [bounds])
@@ -1313,17 +1330,19 @@ function Scene({
   return (
     <>
       <group ref={groupRef}>
-        {showAxes && (
-          <Axes
-            bounds={bounds}
-            mapper={mapper}
-            chrome={chrome}
-            xLabel={xLabel}
-            yLabel={yLabel}
-            zLabel={zLabel}
-          />
-        )}
-        {body}
+        <EntranceGroup>
+          {showAxes && (
+            <Axes
+              bounds={bounds}
+              mapper={mapper}
+              chrome={chrome}
+              xLabel={xLabel}
+              yLabel={yLabel}
+              zLabel={zLabel}
+            />
+          )}
+          {body}
+        </EntranceGroup>
       </group>
       <CameraRig hasAxes={showAxes} controls={controls} />
       <OrbitControls
@@ -1332,7 +1351,11 @@ function Scene({
         enableDamping
         dampingFactor={0.08}
         rotateSpeed={0.7}
-        enablePan={false}
+        enablePan
+        autoRotate={!userInteracting}
+        autoRotateSpeed={0.5}
+        onStart={() => setUserInteracting(true)}
+        onEnd={() => setUserInteracting(false)}
         minDistance={CUBE * 0.7}
         maxDistance={CUBE * 6}
       />
