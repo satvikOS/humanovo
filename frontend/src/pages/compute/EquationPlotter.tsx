@@ -841,10 +841,10 @@ export default function EquationPlotter() {
             const fmtY = makeTickFormatter(ctx.tickFormatY, 2)
             return (
               <ResponsiveContainer width="100%" height={Math.max(280, (chartHostRef.current?.clientHeight || 320) - 80)}>
-                <LineChart data={chartDataWithDerivative} margin={{ top: 12, right: 24, bottom: 32, left: 24 }}>
-                  <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} />
-                  <XAxis dataKey="x" tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtX} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} />
-                  <YAxis tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtY} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} width={56} />
+                <LineChart data={chartDataWithDerivative} margin={{ top: 16, right: 28, bottom: 40, left: 28 }}>
+                  <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.7} />
+                  <XAxis dataKey="x" tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtX} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} tickMargin={6} label={{ value: 'x', position: 'insideBottom', offset: -14, fontSize: 11 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
+                  <YAxis tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtY} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} width={60} tickMargin={4} label={{ value: 'f(x)', angle: -90, position: 'insideLeft', fontSize: 11 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
                   <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} labelStyle={{ color: axisCol }} formatter={(value: unknown, name: unknown) => { const n = typeof value === 'number' ? value : Number(value); return [isFinite(n) ? n.toFixed(4) : 'NaN', name === 'dy' ? "f'(x)" : ''] }} labelFormatter={(label: unknown) => `x = ${label}`} />
                   <Legend wrapperStyle={{ fontSize: 10 * ctx.fs, color: textCol, fontFamily: ts.bodyFont }} />
                   {quadrantInfo.showXRef && <ReferenceLine y={0} stroke={axisCol} strokeDasharray="4 4" strokeOpacity={0.5} />}
@@ -1008,14 +1008,14 @@ export default function EquationPlotter() {
               const fmtY = makeTickFormatter(ctx.tickFormatY, 2)
               return (
                 <ResponsiveContainer width="100%" height={Math.max(280, (chartHostRef.current?.clientHeight || 320) - 80)}>
-                  <LineChart data={odeChartData} margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
-                    <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.5} />
-                    <XAxis dataKey="t" tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtX} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: 'Time', position: 'insideBottom', offset: -2, fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
-                    <YAxis tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtY} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} width={56} />
+                  <LineChart data={odeChartData} margin={{ top: 16, right: 28, bottom: 40, left: 28 }}>
+                    <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.7} />
+                    <XAxis dataKey="t" tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtX} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} tickMargin={6} label={{ value: 'Time', position: 'insideBottom', offset: -14, fontSize: 11 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
+                    <YAxis tick={{ fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} tickFormatter={fmtY} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} width={60} tickMargin={4} label={{ value: 'State', angle: -90, position: 'insideLeft', fontSize: 11 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
                     <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} />
                     <Legend wrapperStyle={{ fontSize: 10 * ctx.fs, color: textCol, fontFamily: ts.bodyFont }} />
                     {activeODE.vars.map((v, i) => (
-                      <Line key={v} type="monotone" dataKey={v} stroke={ODE_COLORS[i % ODE_COLORS.length]} strokeWidth={1.5} strokeOpacity={0.7} dot={false} name={v} isAnimationActive={false} />
+                      <Line key={v} type="monotone" dataKey={v} stroke={ODE_COLORS[i % ODE_COLORS.length]} strokeWidth={2} strokeOpacity={0.9} dot={false} name={v} isAnimationActive={false} />
                     ))}
                     <Brush dataKey="t" height={14} stroke={axisCol} fill="var(--glass-bg)" travellerWidth={6} />
                   </LineChart>

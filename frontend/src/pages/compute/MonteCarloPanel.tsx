@@ -945,8 +945,8 @@ export default function MonteCarloPanel() {
       <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
         {/* ── Left panel: reactive sliders ─────────────────────────── */}
-        <div style={{ ...styles.panel, width: 280, flexShrink: 0, overflowY: 'auto' }}>
-          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 2 }}>
+        <div style={{ ...styles.panel, width: 280, flexShrink: 0, overflowY: 'auto', gap: 16 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1.2, color: 'var(--color-text-muted)', marginBottom: 0, paddingBottom: 10, borderBottom: '1px solid var(--glass-border)' }}>
             Parameters
           </div>
 
@@ -954,9 +954,9 @@ export default function MonteCarloPanel() {
             const val = currentParams[p.key];
             const pct = ((val - p.min) / (p.max - p.min)) * 100;
             return (
-              <div key={p.key} style={{ marginBottom: 4 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                  <label style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500 }}>{p.label}</label>
+              <div key={p.key}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontWeight: 500 }}>{p.label}</label>
                   <input
                     type="number"
                     style={{ ...styles.input, width: 72, fontSize: 11 }}
@@ -1035,7 +1035,7 @@ export default function MonteCarloPanel() {
           {/* Stats cards row */}
           {results && stats ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
                 {[
                   { label: 'Mean', value: fmt(stats.mean), color: '#5B8DB8' },
                   { label: 'Median', value: fmt(stats.median), color: '#8B7EAF' },
@@ -1045,14 +1045,14 @@ export default function MonteCarloPanel() {
                   <div key={s.label} style={{
                     background: 'var(--glass-bg)',
                     border: '1px solid var(--glass-border)',
-                    borderRadius: 8,
-                    padding: '10px 12px',
-                    borderLeft: `3px solid ${s.color}`,
+                    borderRadius: 6,
+                    padding: '11px 13px',
+                    borderLeft: `2px solid ${s.color}`,
                   }}>
-                    <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                    <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-muted)', marginBottom: 5 }}>
                       {s.label}
                     </div>
-                    <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: 'var(--color-text)', lineHeight: 1.2 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, fontFamily: "'JetBrains Mono', 'SF Mono', monospace", color: 'var(--color-text)', lineHeight: 1.15, letterSpacing: '-0.01em', fontVariantNumeric: 'tabular-nums' }}>
                       {s.value}
                     </div>
                   </div>
@@ -1117,6 +1117,33 @@ export default function MonteCarloPanel() {
                     const medianBin = snap(stats.median)
                     const ciLoBin = snap(stats.ci95Low)
                     const ciHiBin = snap(stats.ci95High)
+                    // Staggered reference-line labels — Mean and Median
+                    // frequently snap to adjacent (or identical) bins, so
+                    // a shared `position:'top'` collides them into garbled
+                    // text. Each label is rendered at its own vertical
+                    // offset and anchored left/right of the line so the
+                    // four annotations never overlap.
+                    const refLabel = (
+                      text: string, color: string, dy: number,
+                      anchor: 'start' | 'end', font: string,
+                    ) => (props: { viewBox?: { x?: number; y?: number; width?: number; height?: number } }) => {
+                      const vb = props.viewBox || {}
+                      const x = vb.x ?? 0
+                      const y = (vb.y ?? 0) + dy
+                      return (
+                        <g>
+                          <text
+                            x={anchor === 'end' ? x - 4 : x + 4}
+                            y={y}
+                            textAnchor={anchor}
+                            fontSize={9}
+                            fontFamily={font}
+                            fontWeight={600}
+                            fill={color}
+                          >{text}</text>
+                        </g>
+                      )
+                    }
                     return (
                       <PublicationFigure
                         title={`Distribution: ${activeSim?.name || 'Monte Carlo'}`}
@@ -1137,16 +1164,19 @@ export default function MonteCarloPanel() {
                         {/* Generous margins so ReferenceLine labels
                             ("Mean", "Median", "2.5%", "97.5%") and the
                             axis labels don't get clipped. */}
-                        <BarChart data={histogramEnriched} margin={{ top: 28, right: 36, bottom: 38, left: 36 }}>
-                          <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.4} />
+                        <BarChart data={histogramEnriched} margin={{ top: 32, right: 40, bottom: 40, left: 40 }}>
+                          {/* Horizontal gridlines only — vertical lines
+                              behind histogram bars read as clutter
+                              (Nature/matplotlib convention). */}
+                          <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.35} vertical={false} />
                           <XAxis dataKey="bin" tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} interval="preserveStartEnd" stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
                           <YAxis tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: 'Count', angle: -90, position: 'insideLeft', fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
                           <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} />
-                          {ciLoBin && <ReferenceLine x={ciLoBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '2.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />}
-                          {ciHiBin && <ReferenceLine x={ciHiBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={{ value: '97.5%', position: 'top', fontSize: 8, fill: '#6BA594' }} />}
-                          {medianBin && <ReferenceLine x={medianBin} stroke="#8B7EAF" strokeWidth={1.5} strokeDasharray="3 3" label={{ value: 'Median', position: 'top', fontSize: 9, fill: '#8B7EAF' }} />}
-                          {meanBin && <ReferenceLine x={meanBin} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={{ value: 'Mean', position: 'top', fontSize: 9, fill: '#5B8DB8' }} />}
-                          <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.35} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                          {ciLoBin && <ReferenceLine x={ciLoBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={refLabel('2.5%', '#6BA594', 4, 'start', ts.bodyFont)} />}
+                          {ciHiBin && <ReferenceLine x={ciHiBin} stroke="#6BA594" strokeWidth={1} strokeDasharray="2 3" label={refLabel('97.5%', '#6BA594', 4, 'end', ts.bodyFont)} />}
+                          {medianBin && <ReferenceLine x={medianBin} stroke="#8B7EAF" strokeWidth={1.5} strokeDasharray="3 3" label={refLabel('Median', '#8B7EAF', 4, 'end', ts.bodyFont)} />}
+                          {meanBin && <ReferenceLine x={meanBin} stroke="#5B8DB8" strokeWidth={2} strokeDasharray="4 3" label={refLabel('Mean', '#5B8DB8', 16, 'start', ts.bodyFont)} />}
+                          <Bar dataKey="count" fill="#5B8DB8" fillOpacity={0.42} stroke="#5B8DB8" strokeOpacity={0.5} strokeWidth={0.75} radius={[1, 1, 0, 0]} isAnimationActive={false} />
                           {histogramEnriched.length > 8 && <Brush dataKey="bin" height={16} stroke="#5B8DB8" fill="var(--glass-bg)" travellerWidth={6} />}
                         </BarChart>
                       </ResponsiveContainer>
@@ -1178,7 +1208,7 @@ export default function MonteCarloPanel() {
                       {/* ComposedChart so the ±1.96·SEM band renders
                           behind the running-mean line. */}
                       <ComposedChart data={results.convergence} margin={{ top: 28, right: 64, bottom: 38, left: 36 }}>
-                        <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.4} />
+                        <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.35} />
                         <XAxis dataKey="iteration" tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: 'Iteration', position: 'insideBottom', offset: -12, fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
                         <YAxis tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} label={{ value: 'Running Mean', angle: -90, position: 'insideLeft', fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} domain={['auto', 'auto']} />
                         <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} />
@@ -1216,7 +1246,7 @@ export default function MonteCarloPanel() {
                       {/* Generous right margin so the "Median"
                           ReferenceLine label isn't clipped. */}
                       <AreaChart data={cdfData} margin={{ top: 28, right: 64, bottom: 38, left: 36 }}>
-                        <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.4} />
+                        <CartesianGrid strokeDasharray={ts.gridDash ?? '3 3'} stroke={gridCol} strokeOpacity={0.35} />
                         <XAxis dataKey="value" tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} type="number" label={{ value: results.label, position: 'insideBottom', offset: -12, fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
                         <YAxis tick={{ fontSize: 9 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} stroke={axisCol} strokeWidth={ts.axisStrokeWidth} domain={[0, 100]} label={{ value: 'Percentile (%)', angle: -90, position: 'insideLeft', fontSize: 10 * ctx.fs, fill: axisCol, fontFamily: ts.bodyFont }} />
                         <Tooltip contentStyle={{ background: ts.tooltipBg, border: '1px solid var(--glass-border)', borderRadius: 6, fontSize: 11, color: textCol, fontFamily: ts.bodyFont }} cursor={{ stroke: axisCol, strokeDasharray: '4 4' }} formatter={(v) => `${Number(v ?? 0).toFixed(1)}%`} />
