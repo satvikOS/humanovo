@@ -11,8 +11,11 @@
  * Sankey is intentionally NOT handled here — it is a 2D flow diagram
  * and stays on Plotly's SVG renderer.
  */
-import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import {
+  useMemo, useRef, useState, useContext, createContext, useCallback,
+  type ReactNode,
+} from 'react'
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 // Deep imports (not the `@react-three/drei` barrel): drei 9.96 ships a
 // SpotLight module that imports `LinearEncoding` from three, a symbol
 // removed in three 0.182. The barrel's re-export graph drags SpotLight
@@ -523,6 +526,10 @@ interface RenderProps {
   scheme: ColorScheme
   pointSize: number
   chrome: Chart3DChrome
+  // axis labels — threaded through so tooltips can name x/y/z rows
+  xLabel: string
+  yLabel: string
+  zLabel: string
 }
 
 // normalise a data-z to [0,1] for colour lookup
@@ -547,14 +554,173 @@ function safeSpan(lo: number, hi: number): number {
   return Number.isFinite(s) && s > 0 ? s : 1
 }
 
+// ════════════════════════════════════════════════════════════════════
+// INTERACTIVITY — hover highlight + click-to-select, "like the
+// Knowledge Graph". Hover/selection state lives in <Scene> and is
+// threaded to every renderer through this context so renderers stay
+// prop-light. Each interactive element gets a stable string `id`
+// ("<kind>-<index>"); hovered/selected are compared against it.
+//
+// The HTML tooltip is NOT a drei <Html> (three-stdlib/troika are
+// broken on three 0.182 in this project) — it is a plain absolutely-
+// positioned <div> owned by the top-level <Chart3D>, updated through
+// the `setTooltip` callback carried on this context.
+// ════════════════════════════════════════════════════════════════════
+
+interface TooltipState {
+  visible: boolean
+  x: number
+  y: number
+  // pre-rendered rows: [label, value] pairs
+  rows: [string, string][]
+  title: string
+}
+
+interface InteractCtx {
+  hovered: string | null
+  selected: string | null
+  setHovered: (id: string | null) => void
+  // toggle selection (clicking the selected element again clears it)
+  toggleSelected: (id: string | null) => void
+  // push tooltip content to the DOM overlay (null hides it)
+  showTooltip: (t: { x: number; y: number; title: string; rows: [string, string][] } | null) => void
+}
+
+const InteractContext = createContext<InteractCtx | null>(null)
+function useInteract(): InteractCtx {
+  const ctx = useContext(InteractContext)
+  // a no-op fallback keeps renderers safe if ever mounted bare
+  return ctx ?? {
+    hovered: null, selected: null,
+    setHovered: () => {}, toggleSelected: () => {}, showTooltip: () => {},
+  }
+}
+
+// Per-element visual state derived from hover/selection. `dim` desat-
+// urates + fades non-selected elements once something is selected;
+// `active` (hovered OR selected) gets an emissive boost + scale-up.
+function elementVisual(
+  ctx: InteractCtx, id: string,
+): { active: boolean; dim: boolean; emissive: number; scale: number; opacityMul: number } {
+  const isHover = ctx.hovered === id
+  const isSel = ctx.selected === id
+  const active = isHover || isSel
+  const dim = ctx.selected != null && !isSel
+  return {
+    active,
+    dim,
+    emissive: isSel ? 0.55 : isHover ? 0.35 : 0,
+    scale: active ? 1.18 : 1,
+    opacityMul: dim ? 0.28 : 1,
+  }
+}
+
+// Build the [label,value] rows shown in the tooltip for a data point.
+function pointTooltipRows(
+  d: DataPoint3D, xLabel: string, yLabel: string, zLabel: string,
+): [string, string][] {
+  const rows: [string, string][] = [
+    [xLabel, fmtTick(d.x)],
+    [yLabel, fmtTick(d.y)],
+    [zLabel, fmtTick(d.z)],
+  ]
+  if (d.category) rows.push(['Category', d.category])
+  if (Number.isFinite(d.size as number)) rows.push(['Size', fmtTick(d.size as number)])
+  return rows
+}
+
+// Inverse of the Mapper: a scene-space hit point → data coordinates.
+// Continuous renderers (surface/wireframe/contour/etc.) can't do true
+// per-vertex picking cheaply, so they map the cursor's world-space hit
+// back to data x/y/z and read off the nearest data point.
+function sceneToData(mapper: Mapper, p: THREE.Vector3): { x: number; y: number; z: number } {
+  const b = mapper.bounds
+  const sx = (b.xMax - b.xMin) || 1
+  const sy = (b.yMax - b.yMin) || 1
+  const sz = (b.zMax - b.zMin) || 1
+  // mx: ((x-xMin)/sx - .5)*CUBE  → invert
+  const x = b.xMin + (p.x / CUBE + 0.5) * sx
+  // my maps data-y → scene-z
+  const y = b.yMin + (p.z / CUBE + 0.5) * sy
+  // mz maps data-z → scene-y
+  const z = b.zMin + ((p.y + CUBE / 2) / CUBE) * sz
+  return { x, y, z }
+}
+
+// Hook returning whole-mesh pointer handlers for a CONTINUOUS chart.
+// The tooltip shows the world-space cursor point mapped to data coords
+// (full per-vertex picking is out of scope).
+function useContinuousHover(
+  id: string, mapper: Mapper,
+  xLabel: string, yLabel: string, zLabel: string,
+) {
+  const ix = useInteract()
+  const make = (e: ThreeEvent<PointerEvent>) => {
+    const d = sceneToData(mapper, e.point)
+    const rows: [string, string][] = [
+      [xLabel, fmtTick(d.x)],
+      [yLabel, fmtTick(d.y)],
+      [zLabel, fmtTick(d.z)],
+    ]
+    ix.showTooltip({ x: e.clientX, y: e.clientY, title: 'Surface point', rows })
+  }
+  return {
+    handlers: {
+      onPointerOver: (e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation(); ix.setHovered(id); make(e)
+      },
+      onPointerMove: (e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation(); make(e)
+      },
+      onPointerOut: (e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation(); ix.setHovered(null); ix.showTooltip(null)
+      },
+      onClick: (e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation(); ix.toggleSelected(id)
+      },
+    },
+    // emissive boost when the whole mesh is hovered/selected
+    active: ix.hovered === id || ix.selected === id,
+  }
+}
+
+// Apply hover/select emissive + dim onto a meshStandardMaterial. Used
+// by every discrete-element renderer so the look is uniform.
+function interactiveStandardMaterial(
+  baseColor: THREE.Color, vis: ReturnType<typeof elementVisual>,
+  extra?: { roughness?: number; metalness?: number; transparent?: boolean; baseOpacity?: number },
+) {
+  const roughness = extra?.roughness ?? 0.45
+  const metalness = extra?.metalness ?? 0.05
+  const baseOpacity = extra?.baseOpacity ?? 1
+  const opacity = baseOpacity * vis.opacityMul
+  const transparent = (extra?.transparent ?? false) || opacity < 1
+  // dimming desaturates toward grey so the selected element pops
+  const col = vis.dim
+    ? baseColor.clone().lerp(new THREE.Color('#8a8a8a'), 0.6)
+    : baseColor
+  return (
+    <meshStandardMaterial
+      color={col}
+      emissive={vis.active ? baseColor : new THREE.Color('#000000')}
+      emissiveIntensity={vis.emissive}
+      roughness={roughness}
+      metalness={metalness}
+      transparent={transparent}
+      opacity={opacity}
+    />
+  )
+}
+
 // ── POINTS family: scatter / bubble / stem ──────────────────────────
-function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind }: RenderProps & { kind: 'scatter' | 'bubble' | 'stem' }) {
+function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind, xLabel, yLabel, zLabel }: RenderProps & { kind: 'scatter' | 'bubble' | 'stem' }) {
   const b = mapper.bounds
   const pts = useMemo(() => finitePoints(data), [data])
   const cats = useMemo(() => [...new Set(pts.map(d => d.category).filter(Boolean))] as string[], [pts])
   const catColor = (c?: string) => CATEGORY_COLORS[Math.max(0, cats.indexOf(c || '')) % CATEGORY_COLORS.length]
   const safePS = Number.isFinite(pointSize) && pointSize > 0 ? pointSize : 4
   const baseR = 0.12 + safePS * 0.03
+  const ix = useInteract()
   return (
     <group>
       {pts.map((d, i) => {
@@ -565,6 +731,10 @@ function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind
         const r = kind === 'bubble'
           ? baseR * (0.6 + 1.6 * (rawSize / Math.max(safePS, 1)))
           : baseR
+        const id = `${kind}-${i}`
+        const vis = elementVisual(ix, id)
+        const rows = pointTooltipRows(d, xLabel, yLabel, zLabel)
+        const tipTitle = d.label || `Point ${i + 1}`
         return (
           <group key={i}>
             {kind === 'stem' && (
@@ -576,9 +746,30 @@ function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind
                 opacity={0.55}
               />
             )}
-            <mesh position={[px, py, pz]}>
+            <mesh
+              position={[px, py, pz]}
+              scale={vis.scale}
+              onPointerOver={(e: ThreeEvent<PointerEvent>) => {
+                e.stopPropagation()
+                ix.setHovered(id)
+                ix.showTooltip({ x: e.clientX, y: e.clientY, title: tipTitle, rows })
+              }}
+              onPointerMove={(e: ThreeEvent<PointerEvent>) => {
+                e.stopPropagation()
+                ix.showTooltip({ x: e.clientX, y: e.clientY, title: tipTitle, rows })
+              }}
+              onPointerOut={(e: ThreeEvent<PointerEvent>) => {
+                e.stopPropagation()
+                ix.setHovered(null)
+                ix.showTooltip(null)
+              }}
+              onClick={(e: ThreeEvent<MouseEvent>) => {
+                e.stopPropagation()
+                ix.toggleSelected(id)
+              }}
+            >
               <sphereGeometry args={[r, 20, 20]} />
-              <meshStandardMaterial color={col} roughness={0.45} metalness={0.05} />
+              {interactiveStandardMaterial(col, vis)}
             </mesh>
           </group>
         )
@@ -588,12 +779,13 @@ function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind
 }
 
 // ── LINES family: line / streamline ─────────────────────────────────
-function LineRenderer({ data, mapper, colorFn, pointSize, kind }: RenderProps & { kind: 'line' | 'streamline' }) {
+function LineRenderer({ data, mapper, colorFn, pointSize, kind, xLabel, yLabel, zLabel }: RenderProps & { kind: 'line' | 'streamline' }) {
   const b = mapper.bounds
   const pts = useMemo(
     () => finitePoints(data).map(d => new THREE.Vector3(mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y))),
     [data, mapper],
   )
+  const lineHover = useContinuousHover(`line-${kind}`, mapper, xLabel, yLabel, zLabel)
   const tubeR = kind === 'streamline' ? 0.16 : 0.11
   // ALL hooks run unconditionally (no early return before them) — the
   // <2-point case is handled in the returned JSX, not by skipping hooks.
@@ -630,8 +822,14 @@ function LineRenderer({ data, mapper, colorFn, pointSize, kind }: RenderProps & 
   }
   return (
     <group>
-      <mesh geometry={colors}>
-        <meshStandardMaterial vertexColors roughness={0.4} metalness={0.1} />
+      <mesh geometry={colors} {...lineHover.handlers}>
+        <meshStandardMaterial
+          vertexColors
+          roughness={0.4}
+          metalness={0.1}
+          emissiveIntensity={lineHover.active ? 0.4 : 0}
+          emissive={lineHover.active ? new THREE.Color('#ffffff') : new THREE.Color('#000000')}
+        />
       </mesh>
       {/* end-point markers for orientation */}
       {[pts[0], pts[pts.length - 1]].map((p, i) => (
@@ -649,11 +847,37 @@ function LineRenderer({ data, mapper, colorFn, pointSize, kind }: RenderProps & 
 }
 
 // ── BARS family: bar / voxel / waterfall ────────────────────────────
-function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind }: RenderProps & { kind: 'bar' | 'voxel' | 'waterfall' }) {
+function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind, xLabel, yLabel, zLabel }: RenderProps & { kind: 'bar' | 'voxel' | 'waterfall' }) {
   const b = mapper.bounds
   const pts = useMemo(() => finitePoints(data), [data])
   const cats = useMemo(() => [...new Set(pts.map(d => d.category).filter(Boolean))] as string[], [pts])
   const catColor = (c?: string) => CATEGORY_COLORS[Math.max(0, cats.indexOf(c || '')) % CATEGORY_COLORS.length]
+  const ix = useInteract()
+  // shared mesh interaction handlers for one bar `id`/`d`
+  const barHandlers = (id: string, d: DataPoint3D) => {
+    const rows = pointTooltipRows(d, xLabel, yLabel, zLabel)
+    const tipTitle = d.label || 'Bar'
+    return {
+      onPointerOver: (e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation()
+        ix.setHovered(id)
+        ix.showTooltip({ x: e.clientX, y: e.clientY, title: tipTitle, rows })
+      },
+      onPointerMove: (e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation()
+        ix.showTooltip({ x: e.clientX, y: e.clientY, title: tipTitle, rows })
+      },
+      onPointerOut: (e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation()
+        ix.setHovered(null)
+        ix.showTooltip(null)
+      },
+      onClick: (e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation()
+        ix.toggleSelected(id)
+      },
+    }
+  }
 
   // bar footprint sized to the typical x/y spacing
   const bw = useMemo(() => {
@@ -682,10 +906,18 @@ function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind }: RenderProp
           const yHi = mapper.mz(Math.max(lo, hi))
           const ch = Math.max(0.02, yHi - yLo)
           const col = d.z < 0 ? new THREE.Color('#c97575') : colorFn(i / Math.max(1, pts.length - 1))
+          const id = `waterfall-${i}`
+          const vis = elementVisual(ix, id)
+          // grow only in footprint (x/z) so the bar keeps its base/top
           return (
-            <mesh key={i} position={[mapper.mx(d.x), yLo + ch / 2, mapper.my(d.y)]}>
+            <mesh
+              key={i}
+              position={[mapper.mx(d.x), yLo + ch / 2, mapper.my(d.y)]}
+              scale={[vis.scale, 1, vis.scale]}
+              {...barHandlers(id, d)}
+            >
               <boxGeometry args={[bw, ch, bw]} />
-              <meshStandardMaterial color={col} roughness={0.5} metalness={0.05} />
+              {interactiveStandardMaterial(col, vis, { roughness: 0.5 })}
             </mesh>
           )
         })}
@@ -702,10 +934,17 @@ function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind }: RenderProp
           const col = scheme === 'categorical' && d.category
             ? new THREE.Color(catColor(d.category))
             : colorFn(zNorm(d, b))
+          const id = `voxel-${i}`
+          const vis = elementVisual(ix, id)
           return (
-            <mesh key={i} position={[mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y)]}>
+            <mesh
+              key={i}
+              position={[mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y)]}
+              scale={vis.scale}
+              {...barHandlers(id, d)}
+            >
               <boxGeometry args={[vs, vs, vs]} />
-              <meshStandardMaterial color={col} roughness={0.55} metalness={0.05} transparent opacity={0.92} />
+              {interactiveStandardMaterial(col, vis, { roughness: 0.55, transparent: true, baseOpacity: 0.92 })}
             </mesh>
           )
         })}
@@ -722,10 +961,17 @@ function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind }: RenderProp
         const col = scheme === 'categorical' && d.category
           ? new THREE.Color(catColor(d.category))
           : colorFn(zNorm(d, b))
+        const id = `bar-${i}`
+        const vis = elementVisual(ix, id)
         return (
-          <mesh key={i} position={[mapper.mx(d.x), mapper.floorY + h / 2, mapper.my(d.y)]}>
+          <mesh
+            key={i}
+            position={[mapper.mx(d.x), mapper.floorY + h / 2, mapper.my(d.y)]}
+            scale={[vis.scale, 1, vis.scale]}
+            {...barHandlers(id, d)}
+          >
             <boxGeometry args={[bw, h, bw]} />
-            <meshStandardMaterial color={col} roughness={0.5} metalness={0.05} />
+            {interactiveStandardMaterial(col, vis, { roughness: 0.5 })}
             {chrome ? null : null}
           </mesh>
         )
@@ -741,10 +987,11 @@ interface SurfaceProps extends RenderProps {
   kind: 'surface' | 'wireframe' | 'contour' | 'isosurface' | 'slice'
   surfaceFunction?: (x: number, y: number) => number
 }
-function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction }: SurfaceProps) {
+function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction, xLabel, yLabel, zLabel }: SurfaceProps) {
   const b = mapper.bounds
   const res = 44
   const pts = useMemo(() => finitePoints(data), [data])
+  const surfHover = useContinuousHover(`surface-${kind}`, mapper, xLabel, yLabel, zLabel)
 
   // grid of data-space z values. Every cell is forced finite so a NaN
   // never propagates into a BufferAttribute.
@@ -860,10 +1107,21 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
   }, [grid, zb, kind])
 
   if (kind === 'wireframe') {
+    // an invisible solid surface sits under the wires purely to catch
+    // pointer rays — core-three lines barely register raycasts.
     return (
-      <lineSegments geometry={wireGeo}>
-        <lineBasicMaterial color={chrome.dark ? '#7FA8C9' : '#3D5A80'} />
-      </lineSegments>
+      <group>
+        <mesh geometry={geo} {...surfHover.handlers}>
+          <meshBasicMaterial visible={false} side={THREE.DoubleSide} />
+        </mesh>
+        <lineSegments geometry={wireGeo}>
+          <lineBasicMaterial
+            color={surfHover.active
+              ? '#ffffff'
+              : (chrome.dark ? '#7FA8C9' : '#3D5A80')}
+          />
+        </lineSegments>
+      </group>
     )
   }
 
@@ -871,7 +1129,7 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
     // a translucent shell — render the surface double-sided & glassy
     return (
       <group>
-        <mesh geometry={geo}>
+        <mesh geometry={geo} {...surfHover.handlers}>
           <meshStandardMaterial
             vertexColors
             transparent
@@ -879,6 +1137,8 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
             roughness={0.25}
             metalness={0.1}
             side={THREE.DoubleSide}
+            emissiveIntensity={surfHover.active ? 0.4 : 0}
+            emissive={surfHover.active ? new THREE.Color('#ffffff') : new THREE.Color('#000000')}
           />
         </mesh>
         {/* source points peeking through */}
@@ -896,13 +1156,15 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
   // iso-lines, surface adds a faint wireframe overlay (MATLAB `surf`).
   return (
     <group>
-      <mesh geometry={geo}>
+      <mesh geometry={geo} {...surfHover.handlers}>
         <meshStandardMaterial
           vertexColors
           roughness={0.4}
           metalness={0.08}
           side={THREE.DoubleSide}
           flatShading={false}
+          emissiveIntensity={surfHover.active ? 0.32 : 0}
+          emissive={surfHover.active ? new THREE.Color('#ffffff') : new THREE.Color('#000000')}
         />
       </mesh>
       {kind === 'surface' && (
@@ -928,9 +1190,10 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction 
 }
 
 // ── TRISURF — Delaunay-triangulated mesh of the actual scattered pts ─
-function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
+function TrisurfRenderer({ data, mapper, colorFn, chrome, xLabel, yLabel, zLabel }: RenderProps) {
   const b = mapper.bounds
   const pts = useMemo(() => finitePoints(data), [data])
+  const triHover = useContinuousHover('trisurf', mapper, xLabel, yLabel, zLabel)
   // Surface + wireframe geometry computed together in ONE top-level
   // useMemo. (A prior version called useMemo inline inside the JSX for
   // the wireframe — a Rules-of-Hooks violation that crashed the chart.)
@@ -959,8 +1222,15 @@ function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
   }, [pts, mapper, b, colorFn])
   return (
     <group>
-      <mesh geometry={surfGeo}>
-        <meshStandardMaterial vertexColors roughness={0.45} metalness={0.06} side={THREE.DoubleSide} />
+      <mesh geometry={surfGeo} {...triHover.handlers}>
+        <meshStandardMaterial
+          vertexColors
+          roughness={0.45}
+          metalness={0.06}
+          side={THREE.DoubleSide}
+          emissiveIntensity={triHover.active ? 0.32 : 0}
+          emissive={triHover.active ? new THREE.Color('#ffffff') : new THREE.Color('#000000')}
+        />
       </mesh>
       <lineSegments geometry={wireGeo}>
         <lineBasicMaterial
@@ -981,8 +1251,9 @@ function TrisurfRenderer({ data, mapper, colorFn, chrome }: RenderProps) {
 }
 
 // ── RIBBON — each y-row becomes a narrow surface strip ──────────────
-function RibbonRenderer({ data, mapper, colorFn }: RenderProps) {
+function RibbonRenderer({ data, mapper, colorFn, xLabel, yLabel, zLabel }: RenderProps) {
   const b = mapper.bounds
+  const ribHover = useContinuousHover('ribbon', mapper, xLabel, yLabel, zLabel)
   // All ribbon-strip geometries are built ONCE in a top-level useMemo
   // (a prior shape created `new THREE.BufferGeometry()` inside the JSX
   // `.map()`, churning GPU buffers every render).
@@ -1027,8 +1298,15 @@ function RibbonRenderer({ data, mapper, colorFn }: RenderProps) {
   return (
     <group>
       {geos.map((g, ri) => g && (
-        <mesh key={ri} geometry={g}>
-          <meshStandardMaterial vertexColors roughness={0.4} metalness={0.08} side={THREE.DoubleSide} />
+        <mesh key={ri} geometry={g} {...ribHover.handlers}>
+          <meshStandardMaterial
+            vertexColors
+            roughness={0.4}
+            metalness={0.08}
+            side={THREE.DoubleSide}
+            emissiveIntensity={ribHover.active ? 0.32 : 0}
+            emissive={ribHover.active ? new THREE.Color('#ffffff') : new THREE.Color('#000000')}
+          />
         </mesh>
       ))}
     </group>
@@ -1036,8 +1314,9 @@ function RibbonRenderer({ data, mapper, colorFn }: RenderProps) {
 }
 
 // ── QUIVER — 3D vector field arrows ─────────────────────────────────
-function QuiverRenderer({ data, mapper, colorFn }: RenderProps) {
+function QuiverRenderer({ data, mapper, colorFn, xLabel, yLabel, zLabel }: RenderProps) {
   const b = mapper.bounds
+  const ix = useInteract()
   // arrows: shaft (cylinder) + head (cone), oriented to the vector
   const arrows = useMemo(() => {
     const fin = (v: number, fallback: number) => (Number.isFinite(v) ? v : fallback)
@@ -1059,6 +1338,7 @@ function QuiverRenderer({ data, mapper, colorFn }: RenderProps) {
         origin: new THREE.Vector3(mapper.mx(d.x), mapper.mz(d.z), mapper.my(d.y)),
         dir,
         mag,
+        src: d,
       }
     })
   }, [data, mapper, b])
@@ -1079,15 +1359,42 @@ function QuiverRenderer({ data, mapper, colorFn }: RenderProps) {
         // arrow grows out FROM the data point along the vector
         const shaftMid = a.origin.clone().add(a.dir.clone().multiplyScalar(shaftLen * 0.5))
         const headPos = a.origin.clone().add(a.dir.clone().multiplyScalar(shaftLen + headLen * 0.5))
+        const id = `quiver-${i}`
+        const vis = elementVisual(ix, id)
+        const d = a.src
+        const rows: [string, string][] = [
+          [xLabel, fmtTick(d.x)],
+          [yLabel, fmtTick(d.y)],
+          [zLabel, fmtTick(d.z)],
+          ['Vector', `(${fmtTick(d.vx ?? 0)}, ${fmtTick(d.vy ?? 0)}, ${fmtTick(d.vz ?? 0)})`],
+          ['Magnitude', fmtTick(a.mag)],
+        ]
+        const tipTitle = d.label || `Vector ${i + 1}`
+        const handlers = {
+          onPointerOver: (e: ThreeEvent<PointerEvent>) => {
+            e.stopPropagation(); ix.setHovered(id)
+            ix.showTooltip({ x: e.clientX, y: e.clientY, title: tipTitle, rows })
+          },
+          onPointerMove: (e: ThreeEvent<PointerEvent>) => {
+            e.stopPropagation()
+            ix.showTooltip({ x: e.clientX, y: e.clientY, title: tipTitle, rows })
+          },
+          onPointerOut: (e: ThreeEvent<PointerEvent>) => {
+            e.stopPropagation(); ix.setHovered(null); ix.showTooltip(null)
+          },
+          onClick: (e: ThreeEvent<MouseEvent>) => {
+            e.stopPropagation(); ix.toggleSelected(id)
+          },
+        }
         return (
-          <group key={i}>
-            <mesh position={shaftMid} quaternion={quat}>
+          <group key={i} scale={vis.scale}>
+            <mesh position={shaftMid} quaternion={quat} {...handlers}>
               <cylinderGeometry args={[0.085, 0.085, shaftLen, 12]} />
-              <meshStandardMaterial color={col} roughness={0.45} metalness={0.05} />
+              {interactiveStandardMaterial(col, vis)}
             </mesh>
-            <mesh position={headPos} quaternion={quat}>
+            <mesh position={headPos} quaternion={quat} {...handlers}>
               <coneGeometry args={[0.26, headLen, 16]} />
-              <meshStandardMaterial color={col} roughness={0.45} metalness={0.05} />
+              {interactiveStandardMaterial(col, vis)}
             </mesh>
           </group>
         )
@@ -1100,6 +1407,7 @@ function QuiverRenderer({ data, mapper, colorFn }: RenderProps) {
 function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
   const R = CUBE * 0.42
   const depth = CUBE * 0.18
+  const ix = useInteract()
   // Slice metadata AND extruded geometry are built together in ONE
   // top-level useMemo — geometry must not be rebuilt every render, and
   // every value fed to it is forced finite (a NaN `z`/`size` would
@@ -1133,6 +1441,7 @@ function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
       return {
         start, end, frac, geo,
         label: d.label || `Slice ${i + 1}`, color: d.color, idx: i,
+        value: vals[i],
       }
     })
   }, [data, R, depth])
@@ -1141,8 +1450,15 @@ function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
     <group rotation={[0, 0, 0]}>
       {slices.map((s) => {
         const mid = (s.start + s.end) / 2
-        const explode = 0.4
+        const id = `pie-${s.idx}`
+        const vis = elementVisual(ix, id)
+        // selected/hovered wedge pops out a touch further
+        const explode = 0.4 + (vis.active ? 0.9 : 0)
         const col = s.color ? new THREE.Color(s.color) : colorFn(s.idx / Math.max(1, slices.length - 1))
+        const rows: [string, string][] = [
+          ['Value', fmtTick(s.value)],
+          ['Share', `${(s.frac * 100).toFixed(1)}%`],
+        ]
         // Labels sit on a single ring well clear of the pie rim, all
         // lifted to a common height above the pie plane — at a large
         // radius the 12 labels separate cleanly around the circle. A
@@ -1155,8 +1471,26 @@ function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
         ]
         return (
           <group key={s.idx} position={[Math.cos(mid) * explode, 0, -Math.sin(mid) * explode]}>
-            <mesh geometry={s.geo} position={[0, -depth / 2, 0]}>
-              <meshStandardMaterial color={col} roughness={0.42} metalness={0.04} />
+            <mesh
+              geometry={s.geo}
+              position={[0, -depth / 2, 0]}
+              scale={[1, vis.active ? 1.12 : 1, 1]}
+              onPointerOver={(e: ThreeEvent<PointerEvent>) => {
+                e.stopPropagation(); ix.setHovered(id)
+                ix.showTooltip({ x: e.clientX, y: e.clientY, title: s.label, rows })
+              }}
+              onPointerMove={(e: ThreeEvent<PointerEvent>) => {
+                e.stopPropagation()
+                ix.showTooltip({ x: e.clientX, y: e.clientY, title: s.label, rows })
+              }}
+              onPointerOut={(e: ThreeEvent<PointerEvent>) => {
+                e.stopPropagation(); ix.setHovered(null); ix.showTooltip(null)
+              }}
+              onClick={(e: ThreeEvent<MouseEvent>) => {
+                e.stopPropagation(); ix.toggleSelected(id)
+              }}
+            >
+              {interactiveStandardMaterial(col, vis, { roughness: 0.42, metalness: 0.04 })}
             </mesh>
             <PolyLine
               points={[edge, labelPos]}
@@ -1250,6 +1584,11 @@ interface SceneProps {
   chrome: Chart3DChrome
   xLabel: string; yLabel: string; zLabel: string
   surfaceFunction?: (x: number, y: number) => number
+  // hover/select state lifted to <Chart3D> so the HTML tooltip overlay
+  // and the "selected" detail chip live in the DOM, not the canvas.
+  onTooltip: (t: TooltipState | null) => void
+  selected: string | null
+  onSelect: (id: string | null) => void
 }
 // Entrance animation — the whole chart scales up from a point with an
 // ease-out cubic over ~0.7s on mount, so the figure "assembles" itself
@@ -1269,9 +1608,13 @@ function EntranceGroup({ children }: { children: ReactNode }) {
 function Scene({
   data, resolvedType, colorScheme, pointSize, chrome,
   xLabel, yLabel, zLabel, surfaceFunction,
+  onTooltip, selected, onSelect,
 }: SceneProps) {
   // Idle auto-rotation pauses while the user is dragging/zooming.
   const [userInteracting, setUserInteracting] = useState(false)
+  // hovered element id — local to the canvas; selection is lifted so
+  // the DOM "selected" chip can read it.
+  const [hovered, setHovered] = useState<string | null>(null)
   const groupRef = useRef<THREE.Group>(null)
   const bounds = useMemo(() => computeBounds(data), [data])
   const mapper = useMemo(() => makeMapper(bounds), [bounds])
@@ -1281,7 +1624,26 @@ function Scene({
   // the hook so the frame loop is warm for resize correctness.
   useFrame(() => { autoRotateNoop() })
 
-  const rp: RenderProps = { data, mapper, colorFn, scheme: colorScheme, pointSize, chrome }
+  // tooltip pushes are routed up to <Chart3D>'s DOM overlay.
+  const showTooltip = useCallback((
+    t: { x: number; y: number; title: string; rows: [string, string][] } | null,
+  ) => {
+    onTooltip(t ? { visible: true, x: t.x, y: t.y, title: t.title, rows: t.rows } : null)
+  }, [onTooltip])
+
+  // clicking the already-selected element clears the selection
+  const toggleSelected = useCallback((id: string | null) => {
+    onSelect(id != null && id === selected ? null : id)
+  }, [onSelect, selected])
+
+  const interact: InteractCtx = useMemo(() => ({
+    hovered, selected, setHovered, toggleSelected, showTooltip,
+  }), [hovered, selected, toggleSelected, showTooltip])
+
+  const rp: RenderProps = {
+    data, mapper, colorFn, scheme: colorScheme, pointSize, chrome,
+    xLabel, yLabel, zLabel,
+  }
 
   let body: JSX.Element
   switch (resolvedType) {
@@ -1328,8 +1690,11 @@ function Scene({
   const controls = useRef<any>(null)
 
   return (
-    <>
-      <group ref={groupRef}>
+    <InteractContext.Provider value={interact}>
+      {/* clicking empty space clears the selection (like deselecting a
+          node in the Knowledge Graph) — onPointerMissed fires for any
+          click that hits no interactive mesh. */}
+      <group ref={groupRef} onPointerMissed={() => onSelect(null)}>
         <EntranceGroup>
           {showAxes && (
             <Axes
@@ -1359,7 +1724,7 @@ function Scene({
         minDistance={CUBE * 0.7}
         maxDistance={CUBE * 6}
       />
-    </>
+    </InteractContext.Provider>
   )
 }
 
@@ -1500,6 +1865,104 @@ function Legend({
 }
 
 // ════════════════════════════════════════════════════════════════════
+// HOVER TOOLTIP — a plain absolutely-positioned <div> overlay on top
+// of the <Canvas> (NOT drei's <Html>). Positioned at the cursor's
+// clientX/clientY, offset relative to the chart container.
+// ════════════════════════════════════════════════════════════════════
+function HoverTooltip({
+  tooltip, chrome, containerRef,
+}: {
+  tooltip: TooltipState | null
+  chrome: Chart3DChrome
+  containerRef: React.RefObject<HTMLDivElement>
+}) {
+  if (!tooltip || !tooltip.visible) return null
+  // clientX/clientY are viewport coords — convert to container-local so
+  // the tooltip rides with the chart even when the page is scrolled.
+  const rect = containerRef.current?.getBoundingClientRect()
+  const localX = tooltip.x - (rect?.left ?? 0)
+  const localY = tooltip.y - (rect?.top ?? 0)
+  // flip the tooltip to the left/up when near the right/bottom edge
+  const w = rect?.width ?? 0
+  const h = rect?.height ?? 0
+  const flipX = localX > w - 180
+  const flipY = localY > h - 120
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: localX + (flipX ? -14 : 14),
+        top: localY + (flipY ? -14 : 14),
+        transform: `translate(${flipX ? '-100%' : '0'}, ${flipY ? '-100%' : '0'})`,
+        background: chrome.dark ? 'rgba(28,28,32,0.96)' : 'rgba(255,255,255,0.98)',
+        border: `1px solid ${chrome.dark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.14)'}`,
+        borderRadius: 7,
+        padding: '7px 9px',
+        fontFamily: chrome.bodyFamily,
+        pointerEvents: 'none',
+        boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+        zIndex: 10,
+        maxWidth: 220,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <div style={{
+        fontSize: 12, fontWeight: 700, color: chrome.title, marginBottom: 4,
+      }}>
+        {tooltip.title}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {tooltip.rows.map(([k, v], i) => (
+          <div key={i} style={{ display: 'flex', gap: 10, justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, color: chrome.text, opacity: 0.7 }}>{k}</span>
+            <span style={{ fontSize: 11, color: chrome.text, fontWeight: 600 }}>{v}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SELECTED CHIP — a small detail chip naming the currently-selected
+// element. Sits bottom-left, clear of the legend gutter.
+// ════════════════════════════════════════════════════════════════════
+function SelectedChip({
+  label, chrome, onClear,
+}: {
+  label: string
+  chrome: Chart3DChrome
+  onClear: () => void
+}) {
+  return (
+    <div
+      style={{
+        position: 'absolute', bottom: 12, left: 12,
+        display: 'flex', alignItems: 'center', gap: 8,
+        background: chrome.dark ? 'rgba(40,40,46,0.92)' : 'rgba(255,255,255,0.95)',
+        border: `1px solid ${chrome.dark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+        borderRadius: 7, padding: '6px 9px',
+        fontFamily: chrome.bodyFamily, zIndex: 4,
+        boxShadow: chrome.dark ? 'none' : '0 1px 4px rgba(0,0,0,0.1)',
+      }}
+    >
+      <span style={{ fontSize: 11, color: chrome.text, opacity: 0.7 }}>Selected</span>
+      <span style={{ fontSize: 11.5, color: chrome.title, fontWeight: 700 }}>{label}</span>
+      <button
+        onClick={onClear}
+        style={{
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          color: chrome.text, fontSize: 14, lineHeight: 1, padding: '0 2px',
+        }}
+        aria-label="Clear selection"
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════
 // PUBLIC COMPONENT
 // ════════════════════════════════════════════════════════════════════
 export default function Chart3D({
@@ -1520,8 +1983,34 @@ export default function Chart3D({
   const chrome = CHART3D_CHROME[theme] || CHART3D_CHROME.screen
   const [ready] = useState(true)
 
+  // Interactivity state lifted here so the HTML tooltip overlay + the
+  // "selected" detail chip live in the DOM on top of the <Canvas>
+  // (drei's <Html> is broken on three 0.182 — a plain <div> instead).
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
+  // a click on the same element clears it — handled in <Scene>; here we
+  // just hold the value and reset it when the chart type/data changes.
+  const selKey = `${resolvedType}:${data.length}`
+  const lastSelKey = useRef(selKey)
+  if (lastSelKey.current !== selKey) {
+    lastSelKey.current = selKey
+    if (selected !== null) setSelected(null)
+    if (tooltip !== null) setTooltip(null)
+  }
+  const containerRef = useRef<HTMLDivElement>(null)
+  // human-readable label for the selected element id ("scatter-3" → …)
+  const selectedLabel = useMemo(() => {
+    if (!selected) return null
+    const dash = selected.lastIndexOf('-')
+    const idx = dash >= 0 ? parseInt(selected.slice(dash + 1), 10) : NaN
+    const d = Number.isFinite(idx) ? data[idx] : undefined
+    if (!d) return selected
+    return d.label || `${selected.slice(0, dash)} #${idx + 1}`
+  }, [selected, data])
+
   return (
     <div
+      ref={containerRef}
       style={{
         width: '100%', height, position: 'relative',
         // the canvas is alpha:true, so this fill IS the figure ground —
@@ -1579,8 +2068,21 @@ export default function Chart3D({
               yLabel={yLabel}
               zLabel={zLabel}
               surfaceFunction={surfaceFunction}
+              onTooltip={setTooltip}
+              selected={selected}
+              onSelect={setSelected}
             />
           </Canvas>
+        )}
+        {/* HTML interactivity overlays — drawn on top of the WebGL
+            canvas, in the DOM, so text stays crisp and selectable */}
+        <HoverTooltip tooltip={tooltip} chrome={chrome} containerRef={containerRef} />
+        {selected && selectedLabel && (
+          <SelectedChip
+            label={selectedLabel}
+            chrome={chrome}
+            onClear={() => setSelected(null)}
+          />
         )}
       </ChartErrorBoundary>
     </div>
