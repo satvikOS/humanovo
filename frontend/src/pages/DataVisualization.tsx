@@ -4,7 +4,7 @@ import {
   FiBarChart2, FiPlus, FiTrash2,
   FiDownload, FiUpload, FiSettings, FiX,
   FiMaximize2, FiMinimize2, FiCopy,
-  FiClipboard, FiCheck, FiChevronDown,
+  FiClipboard, FiCheck, FiChevronDown, FiLayers,
 } from 'react-icons/fi'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -22,7 +22,7 @@ import * as XLSX from 'xlsx'
 import { getPlotBlob } from '../utils/plotExport'
 import { persistGet, persistSet, formatDate, logActivity } from '../utils/persistence'
 import PlotlyPlot3D, { type Chart3DType } from '../components/PlotlyPlot3D'
-import Chart3D from '../components/Chart3D'
+import Chart3D, { type Chart3DCaptureHandle } from '../components/Chart3D'
 import ConfirmDeleteDialog from '../components/ConfirmDeleteDialog'
 import { toast } from '../contexts/ToastContext'
 import { modalBackdropProps } from '../utils/clickable'
@@ -1030,6 +1030,28 @@ export default function DataVisualization() {
   const [expandedChart, setExpandedChart] = useState<string | null>(null)
   const chartRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Per-chart imperative handles to the 3D renderer. Calling
+  // .snapToDefault() returns a Chart3D's OrbitControls camera to its
+  // canonical pose (and stops auto-rotation) so a clipboard copy or
+  // PNG/PDF export is captured from a fixed angle, never mid-rotation.
+  // Each 3D chart card gets a stable per-id ref via get3DCaptureRef.
+  const chart3DCaptureRefs = useRef<Record<string, React.MutableRefObject<Chart3DCaptureHandle | null>>>({})
+  const get3DCaptureRef = (id: string) => {
+    if (!chart3DCaptureRefs.current[id]) {
+      chart3DCaptureRefs.current[id] = { current: null }
+    }
+    return chart3DCaptureRefs.current[id]
+  }
+  // Snap a 3D chart to its default camera pose, then wait for the
+  // OrbitControls damping to settle so the capture is on the canonical
+  // frame. Resolves immediately for non-3D charts. ~450 ms covers the
+  // re-fit frame plus the damped settle.
+  const prepareChartForCapture = useCallback(async (id: string) => {
+    const handle = chart3DCaptureRefs.current[id]?.current
+    if (!handle) return
+    handle.snapToDefault()
+    await new Promise<void>(resolve => setTimeout(resolve, 450))
+  }, [])
 
   // ─── Interactivity state ────────────────────────────────────
   const [hiddenSeries, setHiddenSeries] = useState<Record<string, Set<string>>>({})
@@ -1177,6 +1199,9 @@ export default function DataVisualization() {
   const exportPng = useCallback(async (id: string, title: string) => {
     const el = chartRefs.current[id]
     if (!el) return
+    // Snap any 3D chart back to its canonical camera pose first so the
+    // exported raster is at a fixed angle, not mid auto-rotation.
+    await prepareChartForCapture(id)
     // 3D charts render via Plotly (WebGL + SVG overlay). html2canvas
     // captures only the overlay — the main scene ends up blank. Route
     // those through plotExport which calls Plotly.toImage for a complete
@@ -1296,6 +1321,8 @@ export default function DataVisualization() {
     const el = chartRefs.current[chart.id]
     if (!el) return
     try {
+      // Fix any 3D chart at its canonical camera pose before capture.
+      await prepareChartForCapture(chart.id)
       const isPlotly = !!el.querySelector('.js-plotly-plot')
       let dataUrl: string
       if (isPlotly) {
@@ -1375,6 +1402,8 @@ export default function DataVisualization() {
   const exportHighDpiPng = useCallback(async (id: string, title: string) => {
     const el = chartRefs.current[id]
     if (!el) return
+    // Snap any 3D chart to its canonical pose before the high-DPI grab.
+    await prepareChartForCapture(id)
     const isPlotly = !!el.querySelector('.js-plotly-plot')
     try {
       if (isPlotly) {
@@ -1421,6 +1450,11 @@ export default function DataVisualization() {
   const copyChartToClipboard = useCallback(async (id: string) => {
     const el = chartRefs.current[id]
     if (!el) return
+    // 3D charts auto-rotate; snap the camera back to its canonical pose
+    // and let the motion settle so the clipboard image is taken at a
+    // fixed, reproducible angle rather than wherever the spin happened
+    // to be. No-op for 2D charts.
+    await prepareChartForCapture(id)
     // 3D charts: bypass html2canvas and use Plotly's native rasterizer
     // so the WebGL scene actually comes through on the clipboard image.
     const isPlotly = !!el.querySelector('.js-plotly-plot')
@@ -2268,6 +2302,12 @@ export default function DataVisualization() {
             height={height}
             theme={o.pubTheme || 'screen'}
             colorScheme={data.some(d => d.category) ? 'categorical' : 'viridis'}
+            // The page's palette selector recolours 3D charts too:
+            // `colors` is the resolved active palette (named palette
+            // with any per-series custom overrides applied). Chart3D
+            // uses it for both categorical swatches and the z gradient.
+            customColors={colors}
+            captureRef={get3DCaptureRef(chart.id)}
             pointSize={o.markerSize || 3}
             surfaceFunction={type.includes('surface') || type === 'wireframe_3d' || type === 'contour_3d'
               ? (x: number, y: number) => Math.sin(x * 2) * Math.cos(y * 2) * 1.5
@@ -2932,7 +2972,7 @@ export default function DataVisualization() {
             />
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-3 mt-2">
+        <div className="grid grid-cols-3 gap-3 mt-2">
           <div>
             <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">X tick format</label>
             <GlassSelect
@@ -2969,20 +3009,11 @@ export default function DataVisualization() {
               value={chart.options.decimalPlaces}
               onChange={e => updateChartOptions(chart.id, { decimalPlaces: Math.max(0, Math.min(6, parseInt(e.target.value) || 0)) })} />
           </div>
-          <div>
-            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Watermark</label>
-            <input className="input text-xs w-full" value={chart.options.watermark} placeholder="(empty)"
-              onChange={e => updateChartOptions(chart.id, { watermark: e.target.value })} />
-          </div>
         </div>
         <div className="flex gap-3 mt-2 flex-wrap text-xxs">
           <label className="flex items-center gap-1 cursor-pointer">
             <input type="checkbox" checked={chart.options.showTitle} onChange={e => updateChartOptions(chart.id, { showTitle: e.target.checked })} />
             <span>Render title</span>
-          </label>
-          <label className="flex items-center gap-1 cursor-pointer">
-            <input type="checkbox" checked={chart.options.showCaption} onChange={e => updateChartOptions(chart.id, { showCaption: e.target.checked })} />
-            <span>Render caption + source</span>
           </label>
           <label className="flex items-center gap-1 cursor-pointer">
             <input type="checkbox" checked={chart.options.showCI} onChange={e => updateChartOptions(chart.id, { showCI: e.target.checked })} />
@@ -3051,6 +3082,9 @@ export default function DataVisualization() {
           <input type="range" min={1} max={5} step={0.5} value={chart.options.lineWidth} onChange={e => updateChartOptions(chart.id, { lineWidth: parseFloat(e.target.value) })} className="w-full" />
         </div>
       </div>
+      {/* Marker / fill controls. Donut Inner R and Bar Gap show only
+          for the chart families they actually affect — they were
+          no-ops on the other ~45 types and just padded the panel. */}
       <div className="grid grid-cols-4 gap-3">
         <div>
           <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Marker Size</label>
@@ -3060,14 +3094,19 @@ export default function DataVisualization() {
           <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Fill Opacity</label>
           <input type="range" min={0} max={1} step={0.05} value={chart.options.fillOpacity} onChange={e => updateChartOptions(chart.id, { fillOpacity: parseFloat(e.target.value) })} className="w-full" />
         </div>
-        <div>
-          <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Donut Inner R</label>
-          <input type="range" min={20} max={100} step={5} value={chart.options.innerRadius} onChange={e => updateChartOptions(chart.id, { innerRadius: parseInt(e.target.value) })} className="w-full" />
-        </div>
-        <div>
-          <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Bar Gap</label>
-          <input type="range" min={0} max={20} step={1} value={chart.options.barGap} onChange={e => updateChartOptions(chart.id, { barGap: parseInt(e.target.value) })} className="w-full" />
-        </div>
+        {chart.type === 'donut' && (
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Donut Inner R</label>
+            <input type="range" min={20} max={100} step={5} value={chart.options.innerRadius} onChange={e => updateChartOptions(chart.id, { innerRadius: parseInt(e.target.value) })} className="w-full" />
+          </div>
+        )}
+        {(chart.type === 'bar' || chart.type === 'horizontal_bar' || chart.type === 'grouped_bar'
+          || chart.type === 'stacked_bar' || chart.type === 'stacked_bar_100' || chart.type === 'waterfall') && (
+          <div>
+            <label className="text-xxs text-[var(--color-text-muted)] block mb-0.5">Bar Gap</label>
+            <input type="range" min={0} max={20} step={1} value={chart.options.barGap} onChange={e => updateChartOptions(chart.id, { barGap: parseInt(e.target.value) })} className="w-full" />
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-4 text-xs">
         <label className="flex items-center gap-1.5 cursor-pointer">
@@ -3253,7 +3292,7 @@ export default function DataVisualization() {
               {charts.length} chart{charts.length !== 1 ? 's' : ''} — {CHART_TYPES.length} types (2D + 3D + Sankey), publication-ready exports (PDF · 4× PNG · SVG), 5 themes (Screen / Paper / Nature / Science / IEEE), CB-safe palettes
             </p>
             <p className="text-xxs text-[var(--color-text-muted)] mt-1 opacity-80">
-              Per-chart settings: gear icon → Publication panel for theme · subtitle · caption · source · CI bands · reference bands · custom colors · color-blind preview · watermark.
+              Per-chart settings: gear icon → Publication panel for theme · subtitle · caption · source · CI bands · reference bands · custom colors · color-blind preview.
             </p>
           </div>
           <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
@@ -3544,16 +3583,24 @@ export default function DataVisualization() {
                         <button onClick={() => exportXlsx(chart)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center justify-between gap-3">
                           <span>Data</span><span className="text-xxs text-[var(--color-text-muted)] font-mono">XLSX</span>
                         </button>
-                        <div className="border-t" style={{ borderColor: 'var(--color-border)' }} />
-                        <button onClick={() => copyChartToClipboard(chart.id)} className="w-full text-left text-xs px-3 py-1.5 hover:bg-[var(--glass-bg)] flex items-center gap-2">
-                          {copiedChart === chart.id ? <FiCheck className="w-3 h-3 text-[var(--color-success)]" /> : <FiClipboard className="w-3 h-3" />}
-                          <span>Copy to clipboard</span>
-                        </button>
                       </div>
                     </details>
+                    {/* Copy to clipboard — copies the chart as a PNG
+                        image via the async Clipboard API. Uses the
+                        two-squares glyph, the universal copy icon. */}
+                    <button onClick={() => copyChartToClipboard(chart.id)}
+                      className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                      title="Copy chart to clipboard (PNG)">
+                      {copiedChart === chart.id
+                        ? <FiCheck className="w-3.5 h-3.5 text-[var(--color-success)]" />
+                        : <FiCopy className="w-3.5 h-3.5" />}
+                    </button>
+                    {/* Duplicate — clones the chart config. Uses the
+                        layers glyph (distinct from the copy icon, which
+                        now belongs to the Copy-to-clipboard button). */}
                     <button onClick={() => duplicateChart(chart)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Duplicate">
-                      <FiCopy className="w-3.5 h-3.5" />
+                      <FiLayers className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => deleteChart(chart.id)}
                       className="p-1.5 rounded hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-error)]" title="Delete">

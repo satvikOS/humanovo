@@ -13,6 +13,7 @@
  */
 import {
   useMemo, useRef, useState, useContext, createContext, useCallback,
+  useEffect,
   type ReactNode,
 } from 'react'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
@@ -26,6 +27,23 @@ import * as THREE from 'three'
 import type { DataPoint3D, Chart3DType, PlotlyPlot3DProps } from './PlotlyPlot3D'
 import { THEMES, type PublicationTheme } from '../utils/publicationTheme'
 import ChartErrorBoundary from './ChartErrorBoundary'
+
+// Chart3D extends the shared 3D-plot prop contract with two extras:
+//  • customColors — a user-selected palette (hex list) that recolours
+//    BOTH the categorical swatches and the continuous z gradient, so
+//    the page's palette selector drives 3D charts the same way it
+//    drives the 2D Recharts charts.
+//  • captureRef — an imperative handle the host fills in; calling
+//    .snapToDefault() returns the OrbitControls camera to its canonical
+//    pose and halts auto-rotation, so a clipboard/export capture is
+//    always taken from the same angle rather than mid-rotation.
+export interface Chart3DCaptureHandle {
+  snapToDefault: () => void
+}
+interface Chart3DProps extends PlotlyPlot3DProps {
+  customColors?: string[]
+  captureRef?: React.MutableRefObject<Chart3DCaptureHandle | null>
+}
 
 // ── Theme chrome ────────────────────────────────────────────────────
 // three.js draws to a WebGL canvas where CSS custom properties don't
@@ -71,10 +89,17 @@ const CHART3D_CHROME: Record<PublicationTheme, Chart3DChrome> = {
   },
 }
 
-const CATEGORY_COLORS = [
+const CATEGORY_COLORS_DEFAULT = [
   '#5B8DB8', '#8B7EAF', '#6BA594', '#C4956A', '#B07E8B',
   '#7BA7B8', '#A89B6E', '#8598AD', '#7E9B8A', '#9B8EAD',
 ]
+
+// The active categorical-swatch palette. Defaults to the curated set
+// above but is overridden, through this context, by the `customColors`
+// prop so the Data Visualization page's palette selector recolours 3D
+// charts the same way it recolours the 2D Recharts charts. Both the
+// in-canvas renderers and the HTML CategoryLegend read it.
+const CategoryColorContext = createContext<string[]>(CATEGORY_COLORS_DEFAULT)
 
 // ── Color scales ────────────────────────────────────────────────────
 // Compact viridis / plasma anchor stops, linearly interpolated. Gives
@@ -110,7 +135,21 @@ function sampleStops(stops: number[][], t: number): THREE.Color {
 }
 
 type ColorScheme = 'viridis' | 'plasma' | 'categorical' | 'gradient'
-function makeColorFn(scheme: ColorScheme): (t: number) => THREE.Color {
+// Build linear-rgb anchor stops from a list of hex colours so a user
+// palette can drive the continuous z gradient on surface/contour/etc.
+function hexStops(hexes: string[]): number[][] {
+  const stops = hexes.map(h => {
+    const c = new THREE.Color(h)
+    return [c.r, c.g, c.b]
+  })
+  return stops.length >= 2 ? stops : VIRIDIS_STOPS
+}
+function makeColorFn(scheme: ColorScheme, customStops?: number[][]): (t: number) => THREE.Color {
+  // A user-selected palette (customStops) takes precedence for the
+  // continuous z encoding — keeps 3D charts in sync with the 2D ones.
+  if (customStops && customStops.length >= 2) {
+    return (t) => sampleStops(customStops, t)
+  }
   switch (scheme) {
     case 'plasma': return (t) => sampleStops(PLASMA_STOPS, t)
     case 'gradient': return (t) => sampleStops(GRADIENT_STOPS, t)
@@ -717,7 +756,8 @@ function PointsRenderer({ data, mapper, colorFn, scheme, pointSize, chrome, kind
   const b = mapper.bounds
   const pts = useMemo(() => finitePoints(data), [data])
   const cats = useMemo(() => [...new Set(pts.map(d => d.category).filter(Boolean))] as string[], [pts])
-  const catColor = (c?: string) => CATEGORY_COLORS[Math.max(0, cats.indexOf(c || '')) % CATEGORY_COLORS.length]
+  const catPalette = useContext(CategoryColorContext)
+  const catColor = (c?: string) => catPalette[Math.max(0, cats.indexOf(c || '')) % catPalette.length]
   const safePS = Number.isFinite(pointSize) && pointSize > 0 ? pointSize : 4
   const baseR = 0.12 + safePS * 0.03
   const ix = useInteract()
@@ -851,7 +891,8 @@ function BarRenderer({ data, mapper, colorFn, scheme, chrome, kind, xLabel, yLab
   const b = mapper.bounds
   const pts = useMemo(() => finitePoints(data), [data])
   const cats = useMemo(() => [...new Set(pts.map(d => d.category).filter(Boolean))] as string[], [pts])
-  const catColor = (c?: string) => CATEGORY_COLORS[Math.max(0, cats.indexOf(c || '')) % CATEGORY_COLORS.length]
+  const catPalette = useContext(CategoryColorContext)
+  const catColor = (c?: string) => catPalette[Math.max(0, cats.indexOf(c || '')) % catPalette.length]
   const ix = useInteract()
   // shared mesh interaction handlers for one bar `id`/`d`
   const barHandlers = (id: string, d: DataPoint3D) => {
@@ -1037,56 +1078,90 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction,
     return g
   }, [grid, zb, colorFn])
 
-  // wireframe edge geometry
+  // wireframe edge geometry — used as a faint overlay on the filled
+  // `surface` kind only.
   const wireGeo = useMemo(() => new THREE.WireframeGeometry(geo), [geo])
 
-  // contour iso-lines via marching-squares. Each grid cell that an iso
-  // level passes through emits an INDEPENDENT 2-point segment (a prior
-  // version concatenated every crossing into one polyline, producing a
-  // zig-zag scribble). Segments are drawn through THREE.LineSegments so
-  // they stay disjoint, giving clean MATLAB-style contour rings.
-  const contourSegments = useMemo(() => {
+  // Clean rectangular mesh grid for the `wireframe` kind: only the
+  // row + column iso-parametric lines (NO triangle diagonals, which
+  // THREE.WireframeGeometry emits and which make the mesh read as a
+  // busy hatched scribble). Each line is z-displaced and vertex-
+  // coloured, giving a crisp publication-grade lattice. A coarser
+  // stride than the 44×44 colour mesh keeps the lattice readable.
+  const wireGridGeo = useMemo(() => {
+    if (kind !== 'wireframe') return null
+    const span = safeSpan(zb.lo, zb.hi)
+    const sy = (zv: number) => ((zv - zb.lo) / span) * CUBE - CUBE / 2
+    const verts: number[] = []
+    const cols: number[] = []
+    const STRIDE = 2 // draw every 2nd grid line → ~22×22 visible lattice
+    const xc = (i: number) => (-0.5 + i / (res - 1)) * CUBE
+    const zc = (i: number) => (-0.5 + i / (res - 1)) * CUBE
+    const pushVtx = (x: number, zv: number, z: number) => {
+      verts.push(x, sy(zv), z)
+      const c = colorFn((zv - zb.lo) / span)
+      cols.push(c.r, c.g, c.b)
+    }
+    // row lines (constant data-row, varying column)
+    for (let row = 0; row < res; row += STRIDE) {
+      for (let c = 0; c < res - 1; c++) {
+        pushVtx(xc(c), grid.z[row][c], zc(row))
+        pushVtx(xc(c + 1), grid.z[row][c + 1], zc(row))
+      }
+    }
+    // column lines (constant data-column, varying row)
+    for (let c = 0; c < res; c += STRIDE) {
+      for (let row = 0; row < res - 1; row++) {
+        pushVtx(xc(c), grid.z[row][c], zc(row))
+        pushVtx(xc(c), grid.z[row + 1][c], zc(row + 1))
+      }
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+    g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+    return g
+  }, [grid, zb, colorFn, kind])
+
+  // Floor-projected contour rings for the `contour` kind — the classic
+  // publication "contour map": iso-lines drawn flat on the base plane,
+  // colour-coded by level, sitting under the translucent surface.
+  const floorContours = useMemo(() => {
     if (kind !== 'contour') return null
     const span = safeSpan(zb.lo, zb.hi)
-    const levels = 8
-    const verts: number[] = []
-    // scene-Y of a data-z value
-    const sy = (z: number) => ((z - zb.lo) / span) * CUBE - CUBE / 2
-    // edge interpolation: where on a cell edge value `iso` crosses
+    const levels = 14
+    const floorY = -CUBE / 2 + 0.02
     const lerp = (za: number, zb2: number, iso: number) => {
       const d = zb2 - za
       return Math.abs(d) < 1e-9 ? 0.5 : (iso - za) / d
     }
+    const byLevel: { y: number; geo: THREE.BufferGeometry; color: THREE.Color }[] = []
     for (let l = 1; l < levels; l++) {
-      const iso = zb.lo + (l / levels) * span
-      const yL = sy(iso) + 0.04
+      const t = l / levels
+      const iso = zb.lo + t * span
+      const verts: number[] = []
       for (let row = 0; row < res - 1; row++) {
         for (let c = 0; c < res - 1; c++) {
           const v00 = grid.z[row][c]
           const v10 = grid.z[row][c + 1]
           const v11 = grid.z[row + 1][c + 1]
           const v01 = grid.z[row + 1][c]
-          // scene coords of the four cell corners
           const x0 = (-0.5 + c / (res - 1)) * CUBE
           const x1 = (-0.5 + (c + 1) / (res - 1)) * CUBE
           const z0 = (-0.5 + row / (res - 1)) * CUBE
           const z1 = (-0.5 + (row + 1) / (res - 1)) * CUBE
-          // marching-squares case index
           let idx = 0
           if (v00 > iso) idx |= 1
           if (v10 > iso) idx |= 2
           if (v11 > iso) idx |= 4
           if (v01 > iso) idx |= 8
           if (idx === 0 || idx === 15) continue
-          // crossing point on each of the four edges (if any)
-          const eB: [number, number] = [x0 + (x1 - x0) * lerp(v00, v10, iso), z0] // bottom
-          const eR: [number, number] = [x1, z0 + (z1 - z0) * lerp(v10, v11, iso)] // right
-          const eT: [number, number] = [x0 + (x1 - x0) * lerp(v01, v11, iso), z1] // top
-          const eL: [number, number] = [x0, z0 + (z1 - z0) * lerp(v00, v01, iso)] // left
+          const eB: [number, number] = [x0 + (x1 - x0) * lerp(v00, v10, iso), z0]
+          const eR: [number, number] = [x1, z0 + (z1 - z0) * lerp(v10, v11, iso)]
+          const eT: [number, number] = [x0 + (x1 - x0) * lerp(v01, v11, iso), z1]
+          const eL: [number, number] = [x0, z0 + (z1 - z0) * lerp(v00, v01, iso)]
           const push = (a: [number, number], b: [number, number]) => {
-            verts.push(a[0], yL, a[1], b[0], yL, b[1])
+            verts.push(a[0], floorY, a[1], b[0], floorY, b[1])
           }
-          // segment(s) for each of the 16 cases (ambiguous saddles split)
           switch (idx) {
             case 1: case 14: push(eL, eB); break
             case 2: case 13: push(eB, eR); break
@@ -1099,12 +1174,76 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction,
           }
         }
       }
+      if (verts.length === 0) continue
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+      byLevel.push({ y: floorY, geo: g, color: colorFn(t) })
     }
-    if (verts.length === 0) return null
-    const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-    return g
-  }, [grid, zb, kind])
+    return byLevel.length > 0 ? byLevel : null
+  }, [grid, zb, colorFn, kind])
+
+  // On-surface iso-lines via marching-squares — one INDEPENDENT
+  // geometry per level so each contour ring is drawn in its own
+  // level colour (a single concatenated buffer could only carry one
+  // colour). Segments are disjoint LineSegments → clean MATLAB-style
+  // rings, never a connect-the-dots scribble.
+  const contourLevels = useMemo(() => {
+    if (kind !== 'contour') return null
+    const span = safeSpan(zb.lo, zb.hi)
+    const levels = 14
+    const sy = (z: number) => ((z - zb.lo) / span) * CUBE - CUBE / 2
+    const lerp = (za: number, zb2: number, iso: number) => {
+      const d = zb2 - za
+      return Math.abs(d) < 1e-9 ? 0.5 : (iso - za) / d
+    }
+    const out: { geo: THREE.BufferGeometry; color: THREE.Color }[] = []
+    for (let l = 1; l < levels; l++) {
+      const t = l / levels
+      const iso = zb.lo + t * span
+      const yL = sy(iso) + 0.05
+      const verts: number[] = []
+      for (let row = 0; row < res - 1; row++) {
+        for (let c = 0; c < res - 1; c++) {
+          const v00 = grid.z[row][c]
+          const v10 = grid.z[row][c + 1]
+          const v11 = grid.z[row + 1][c + 1]
+          const v01 = grid.z[row + 1][c]
+          const x0 = (-0.5 + c / (res - 1)) * CUBE
+          const x1 = (-0.5 + (c + 1) / (res - 1)) * CUBE
+          const z0 = (-0.5 + row / (res - 1)) * CUBE
+          const z1 = (-0.5 + (row + 1) / (res - 1)) * CUBE
+          let idx = 0
+          if (v00 > iso) idx |= 1
+          if (v10 > iso) idx |= 2
+          if (v11 > iso) idx |= 4
+          if (v01 > iso) idx |= 8
+          if (idx === 0 || idx === 15) continue
+          const eB: [number, number] = [x0 + (x1 - x0) * lerp(v00, v10, iso), z0]
+          const eR: [number, number] = [x1, z0 + (z1 - z0) * lerp(v10, v11, iso)]
+          const eT: [number, number] = [x0 + (x1 - x0) * lerp(v01, v11, iso), z1]
+          const eL: [number, number] = [x0, z0 + (z1 - z0) * lerp(v00, v01, iso)]
+          const push = (a: [number, number], b: [number, number]) => {
+            verts.push(a[0], yL, a[1], b[0], yL, b[1])
+          }
+          switch (idx) {
+            case 1: case 14: push(eL, eB); break
+            case 2: case 13: push(eB, eR); break
+            case 3: case 12: push(eL, eR); break
+            case 4: case 11: push(eR, eT); break
+            case 5: push(eL, eT); push(eB, eR); break
+            case 6: case 9: push(eB, eT); break
+            case 7: case 8: push(eL, eT); break
+            case 10: push(eL, eB); push(eR, eT); break
+          }
+        }
+      }
+      if (verts.length === 0) continue
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+      out.push({ geo: g, color: colorFn(t) })
+    }
+    return out.length > 0 ? out : null
+  }, [grid, zb, colorFn, kind])
 
   if (kind === 'wireframe') {
     // an invisible solid surface sits under the wires purely to catch
@@ -1114,13 +1253,18 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction,
         <mesh geometry={geo} {...surfHover.handlers}>
           <meshBasicMaterial visible={false} side={THREE.DoubleSide} />
         </mesh>
-        <lineSegments geometry={wireGeo}>
-          <lineBasicMaterial
-            color={surfHover.active
-              ? '#ffffff'
-              : (chrome.dark ? '#7FA8C9' : '#3D5A80')}
-          />
-        </lineSegments>
+        {/* clean iso-parametric lattice — rows + columns only, vertex-
+            coloured by height; no triangle diagonals. */}
+        {wireGridGeo && (
+          <lineSegments geometry={wireGridGeo}>
+            <lineBasicMaterial
+              vertexColors={!surfHover.active}
+              color={surfHover.active ? '#ffffff' : '#ffffff'}
+              transparent
+              opacity={surfHover.active ? 1 : 0.95}
+            />
+          </lineSegments>
+        )}
       </group>
     )
   }
@@ -1152,17 +1296,23 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction,
     )
   }
 
-  // surface / contour / slice all render the filled mesh; contour adds
-  // iso-lines, surface adds a faint wireframe overlay (MATLAB `surf`).
+  // surface / contour / slice all render the filled mesh; surface adds
+  // a faint wireframe overlay (MATLAB `surf`); contour renders a
+  // semi-transparent surface with per-level iso-lines drawn ON the
+  // surface AND projected flat onto the base plane — the classic
+  // publication contour map.
+  const isContour = kind === 'contour'
   return (
     <group>
       <mesh geometry={geo} {...surfHover.handlers}>
         <meshStandardMaterial
           vertexColors
-          roughness={0.4}
+          roughness={isContour ? 0.55 : 0.4}
           metalness={0.08}
           side={THREE.DoubleSide}
           flatShading={false}
+          transparent={isContour}
+          opacity={isContour ? 0.78 : 1}
           emissiveIntensity={surfHover.active ? 0.32 : 0}
           emissive={surfHover.active ? new THREE.Color('#ffffff') : new THREE.Color('#000000')}
         />
@@ -1176,15 +1326,25 @@ function SurfaceRenderer({ data, mapper, colorFn, chrome, kind, surfaceFunction,
           />
         </lineSegments>
       )}
-      {kind === 'contour' && contourSegments && (
-        <lineSegments geometry={contourSegments}>
+      {/* on-surface iso-lines — one LineSegments per level, in the
+          level's own colour, drawn over a dark/light halo so the
+          rings stay crisp against the coloured surface. */}
+      {isContour && contourLevels && contourLevels.map((lv, i) => (
+        <lineSegments key={`cs-${i}`} geometry={lv.geo}>
           <lineBasicMaterial
-            color={chrome.dark ? '#f0f0f0' : '#101010'}
+            color={chrome.dark ? '#0c0c0e' : '#fbfbfb'}
             transparent
-            opacity={chrome.dark ? 0.85 : 0.7}
+            opacity={chrome.dark ? 0.5 : 0.55}
           />
         </lineSegments>
-      )}
+      ))}
+      {/* floor-projected contour map — bright per-level rings on the
+          base plane, the reference "topographic" read of the data. */}
+      {isContour && floorContours && floorContours.map((lv, i) => (
+        <lineSegments key={`cf-${i}`} geometry={lv.geo}>
+          <lineBasicMaterial color={lv.color} />
+        </lineSegments>
+      ))}
     </group>
   )
 }
@@ -1520,15 +1680,25 @@ function Pie3DRenderer({ data, colorFn, chrome }: RenderProps) {
 // plus a fixed label margin), so a single fit is exact and stable.
 // ════════════════════════════════════════════════════════════════════
 function CameraRig({
-  hasAxes, controls,
+  hasAxes, controls, snapTick,
 }: {
   hasAxes: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   controls: React.MutableRefObject<any>
+  // bumped by the host to request a re-snap to the canonical pose
+  snapTick: number
 }) {
   const { camera, size } = useThree()
   const fitted = useRef(false)
+  const lastSnap = useRef(snapTick)
   useFrame(() => {
+    // A bump of snapTick forces a re-fit: this returns the camera to
+    // the exact canonical pose before a clipboard/export capture, so
+    // the rasterised image never lands mid auto-rotation.
+    if (lastSnap.current !== snapTick) {
+      lastSnap.current = snapTick
+      fitted.current = false
+    }
     if (fitted.current) return
     fitted.current = true
     const cam = camera as THREE.PerspectiveCamera
@@ -1580,6 +1750,7 @@ interface SceneProps {
   data: DataPoint3D[]
   resolvedType: Chart3DType
   colorScheme: ColorScheme
+  customStops?: number[][]
   pointSize: number
   chrome: Chart3DChrome
   xLabel: string; yLabel: string; zLabel: string
@@ -1589,6 +1760,10 @@ interface SceneProps {
   onTooltip: (t: TooltipState | null) => void
   selected: string | null
   onSelect: (id: string | null) => void
+  // capture support: snapTick re-fits the camera; frozen disables
+  // auto-rotation entirely (set true once the host requests a snap).
+  snapTick: number
+  frozen: boolean
 }
 // Entrance animation — the whole chart scales up from a point with an
 // ease-out cubic over ~0.7s on mount, so the figure "assembles" itself
@@ -1606,9 +1781,9 @@ function EntranceGroup({ children }: { children: ReactNode }) {
 }
 
 function Scene({
-  data, resolvedType, colorScheme, pointSize, chrome,
+  data, resolvedType, colorScheme, customStops, pointSize, chrome,
   xLabel, yLabel, zLabel, surfaceFunction,
-  onTooltip, selected, onSelect,
+  onTooltip, selected, onSelect, snapTick, frozen,
 }: SceneProps) {
   // Idle auto-rotation pauses while the user is dragging/zooming.
   const [userInteracting, setUserInteracting] = useState(false)
@@ -1618,7 +1793,7 @@ function Scene({
   const groupRef = useRef<THREE.Group>(null)
   const bounds = useMemo(() => computeBounds(data), [data])
   const mapper = useMemo(() => makeMapper(bounds), [bounds])
-  const colorFn = useMemo(() => makeColorFn(colorScheme), [colorScheme])
+  const colorFn = useMemo(() => makeColorFn(colorScheme, customStops), [colorScheme, customStops])
 
   // gentle idle auto-rotation removed in favour of OrbitControls; keep
   // the hook so the frame loop is warm for resize correctness.
@@ -1709,7 +1884,7 @@ function Scene({
           {body}
         </EntranceGroup>
       </group>
-      <CameraRig hasAxes={showAxes} controls={controls} />
+      <CameraRig hasAxes={showAxes} controls={controls} snapTick={snapTick} />
       <OrbitControls
         ref={controls}
         makeDefault
@@ -1717,7 +1892,7 @@ function Scene({
         dampingFactor={0.08}
         rotateSpeed={0.7}
         enablePan
-        autoRotate={!userInteracting}
+        autoRotate={!userInteracting && !frozen}
         autoRotateSpeed={0.5}
         onStart={() => setUserInteracting(true)}
         onEnd={() => setUserInteracting(false)}
@@ -1765,13 +1940,14 @@ function legendCardStyle(chrome: Chart3DChrome): React.CSSProperties {
 }
 
 function CategoryLegend({ cats, chrome }: { cats: string[]; chrome: Chart3DChrome }) {
+  const catPalette = useContext(CategoryColorContext)
   return (
     <div style={{ ...legendCardStyle(chrome), display: 'flex', flexDirection: 'column', gap: 5 }}>
       {cats.map((c, i) => (
         <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span style={{
             width: 12, height: 12, borderRadius: 3, flexShrink: 0,
-            background: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+            background: catPalette[i % catPalette.length],
           }} />
           <span style={{ color: chrome.text, fontSize: 11.5, fontWeight: 500 }}>{c}</span>
         </div>
@@ -1978,10 +2154,43 @@ export default function Chart3D({
   height = 500,
   surfaceFunction,
   theme = 'screen',
-}: PlotlyPlot3DProps) {
+  customColors,
+  captureRef,
+}: Chart3DProps) {
   const resolvedType: Chart3DType = chartType || type || 'scatter_3d'
   const chrome = CHART3D_CHROME[theme] || CHART3D_CHROME.screen
   const [ready] = useState(true)
+
+  // ── Palette plumbing ──
+  // A user-selected palette recolours BOTH encodings: the categorical
+  // swatches (via CategoryColorContext) and the continuous z gradient
+  // (via customStops fed to makeColorFn). Falls back to the curated
+  // sets when no palette override is supplied.
+  const catPalette = useMemo(
+    () => (customColors && customColors.length >= 2 ? customColors : CATEGORY_COLORS_DEFAULT),
+    [customColors],
+  )
+  const customStops = useMemo(
+    () => (customColors && customColors.length >= 2 ? hexStops(customColors) : undefined),
+    [customColors],
+  )
+
+  // ── Capture support ──
+  // snapTick bumps re-fit the camera; once a snap is requested the
+  // scene is frozen (auto-rotation off) so the capture — and any
+  // re-capture — is taken from the identical canonical pose.
+  const [snapTick, setSnapTick] = useState(0)
+  const [frozen, setFrozen] = useState(false)
+  useEffect(() => {
+    if (!captureRef) return
+    captureRef.current = {
+      snapToDefault: () => {
+        setFrozen(true)
+        setSnapTick(t => t + 1)
+      },
+    }
+    return () => { if (captureRef) captureRef.current = null }
+  }, [captureRef])
 
   // Interactivity state lifted here so the HTML tooltip overlay + the
   // "selected" detail chip live in the DOM on top of the <Canvas>
@@ -2009,6 +2218,7 @@ export default function Chart3D({
   }, [selected, data])
 
   return (
+    <CategoryColorContext.Provider value={catPalette}>
     <div
       ref={containerRef}
       style={{
@@ -2062,6 +2272,7 @@ export default function Chart3D({
               data={data}
               resolvedType={resolvedType}
               colorScheme={colorScheme}
+              customStops={customStops}
               pointSize={pointSize}
               chrome={chrome}
               xLabel={xLabel}
@@ -2071,6 +2282,8 @@ export default function Chart3D({
               onTooltip={setTooltip}
               selected={selected}
               onSelect={setSelected}
+              snapTick={snapTick}
+              frozen={frozen}
             />
           </Canvas>
         )}
@@ -2086,5 +2299,6 @@ export default function Chart3D({
         )}
       </ChartErrorBoundary>
     </div>
+    </CategoryColorContext.Provider>
   )
 }

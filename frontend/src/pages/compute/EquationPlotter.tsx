@@ -5,9 +5,8 @@ import {
 } from 'recharts'
 import {
   FiPlay, FiPlus, FiDownload, FiCopy, FiLayers,
-  FiTrash2, FiRefreshCw, FiImage, FiCheck,
+  FiTrash2, FiRefreshCw,
 } from 'react-icons/fi'
-import { copyPlotToClipboard as copyPlotBlob, downloadPlotPng } from '../../utils/plotExport'
 import PublicationFigure from '../../components/PublicationFigure'
 import { makeTickFormatter } from '../../utils/publicationTheme'
 import { toast } from '../../contexts/ToastContext'
@@ -471,8 +470,8 @@ export default function EquationPlotter() {
   const [error, setError] = useState<string | null>(null)
   const [showLibrary, setShowLibrary] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [chartCopied, setChartCopied] = useState(false)
-  // Chart host ref — passed to plotExport for clipboard-as-image + PNG export.
+  // Chart host ref — used to size the ResponsiveContainer to the
+  // available panel height.
   const chartHostRef = useRef<HTMLDivElement | null>(null)
 
   // ODE mode
@@ -644,19 +643,6 @@ export default function EquationPlotter() {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => setCopied(false), 2000)
   }, [stats, expr, xMin, xMax])
-
-  const copyChartImage = useCallback(async () => {
-    const ok = await copyPlotBlob(chartHostRef.current)
-    if (ok) {
-      setChartCopied(true)
-      setTimeout(() => setChartCopied(false), 2000)
-    }
-  }, [])
-
-  const downloadChartImage = useCallback(async () => {
-    const label = expr.replace(/[^\w.-]+/g, '_').slice(0, 40) || 'equation_plot'
-    await downloadPlotPng(chartHostRef.current, label)
-  }, [expr])
 
   // ── Render helpers ─────────────────────────────────────────────
   const fmt = (n: number) => {
@@ -882,17 +868,14 @@ export default function EquationPlotter() {
         )}
         {history.length > 0 && <button onClick={clearHistory} style={{ ...chip, fontWeight: 400, fontSize: 10 }}><FiTrash2 size={10} /> Clear History</button>}
         <div style={{ flex: 1 }} />
+        {/* Raw-data exports only. Image export (copy figure / PNG / SVG /
+            PDF) is handled by the figure's own PublicationFigure toolbar,
+            so the duplicate Copy-Plot / PNG buttons were dropped. */}
         <button onClick={copyStats} disabled={!stats} style={{ ...chip, fontWeight: 400, opacity: stats ? 1 : 0.3 }}>
           {copied ? 'Copied!' : <><FiCopy size={11} /> Copy Stats</>}
         </button>
         <button onClick={copyChartData} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }}>
           <FiCopy size={11} /> Copy Data
-        </button>
-        <button onClick={copyChartImage} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }} title="Copy chart as image to clipboard">
-          {chartCopied ? <><FiCheck size={11} /> Copied</> : <><FiImage size={11} /> Copy Plot</>}
-        </button>
-        <button onClick={downloadChartImage} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }} title="Download chart as PNG">
-          <FiImage size={11} /> PNG
         </button>
         <button onClick={exportCSV} disabled={mainData.length === 0} style={{ ...chip, fontWeight: 400, opacity: mainData.length > 0 ? 1 : 0.3 }}>
           <FiDownload size={11} /> CSV

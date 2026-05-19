@@ -12,11 +12,6 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   ReferenceLine,
 } from 'recharts'
-import createPlotlyComponent from 'react-plotly.js/factory'
-import Plotly from '../../lib/plotlyMin'
-import type { Data, Layout } from 'plotly.js'
-
-const PlotlyChart = createPlotlyComponent(Plotly)
 import {
   run as runEngine,
   createWorkspace,
@@ -35,7 +30,6 @@ import { ALL_PRESETS, TOOLBOX_CATEGORIES } from './presets'
 import type { Preset } from './types'
 import ImagingPanel, { IMAGING_EVENT } from './ImagingPanel'
 import { getPlotBlob } from '../../utils/plotExport'
-import { plotlyConfig } from '../../utils/plotlyConfig'
 import PublicationFigure from '../../components/PublicationFigure'
 import ChartErrorBoundary from '../../components/ChartErrorBoundary'
 import Chart3D from '../../components/Chart3D'
@@ -750,6 +744,11 @@ export default function Workstation() {
     logY: false,
     legend: 'auto',
   })
+  // Figure colour scheme — applies to 2D figures (heatmap cells + line
+  // colours) and is passed through to Chart3D as `colorScheme` for 3D
+  // figures. `undefined` means "follow whatever colorscale the script
+  // set on the plot"; picking an option pins an explicit choice.
+  const [figureColorScheme, setFigureColorScheme] = useState<FigureColorScheme | undefined>(undefined)
   const [vars, setVars] = useState<VarSnapshot[]>([])
   const [varFilter, setVarFilter] = useState('')
   // Pinned workspace variables — float to the top of the list regardless
@@ -5548,6 +5547,27 @@ export default function Workstation() {
       background: 'var(--glass-bg-hover)',
       borderColor: 'var(--color-border-strong)',
     },
+    plotPaletteLabel: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      fontSize: 11,
+      fontFamily: "'JetBrains Mono', monospace",
+      letterSpacing: '0.02em',
+      color: 'var(--color-text-muted)',
+      whiteSpace: 'nowrap' as const,
+    },
+    plotPaletteSelect: {
+      padding: '3px 6px',
+      fontSize: 11,
+      fontFamily: "'JetBrains Mono', monospace",
+      color: 'var(--color-text)',
+      background: 'transparent',
+      border: '1px solid var(--glass-border)',
+      borderRadius: 8,
+      cursor: 'pointer',
+      outline: 'none',
+    },
   }), [editorFontSize, editorWrapOn, editorLineHeight, editorCharWidth])
 
   const currentPlot = plots[activePlot] ?? null
@@ -7363,16 +7383,20 @@ export default function Workstation() {
         {resultsTab === 'figure' && (
         <div style={styles.rightRail}>
           <div style={styles.plotPanel}>
-            <div style={styles.panelHeader}>
-              <span>Figure</span>
-              <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', fontSize: 11 }}>
-                {plots.length > 0 ? `${activePlot + 1} / ${plots.length}` : 'none'}
-              </span>
-            </div>
-            {/* Data-display controls only. Export / fullscreen actions
-                live in the figure's own toolbar (PublicationFigure) so
-                there's a single, un-duplicated control row per concern. */}
+            {/* Data-display controls only. The figure's own title +
+                export / fullscreen actions live inside PublicationFigure
+                (rendered in plotBody below), so the panel does NOT also
+                print a "Figure" heading here — a second heading stacked
+                immediately above the figure's own title read as an
+                overlap. The figure counter moved into this toolbar. */}
             <div style={styles.panelToolbar}>
+              <span style={{
+                fontSize: 10, fontWeight: 600, letterSpacing: 0.6,
+                textTransform: 'uppercase', color: 'var(--color-text-muted)',
+                whiteSpace: 'nowrap', marginRight: 4,
+              }}>
+                Figure {plots.length > 0 ? `${activePlot + 1} / ${plots.length}` : '—'}
+              </span>
               <button
                 style={plotOpts.grid ? { ...styles.plotChip, ...styles.plotChipActive } : styles.plotChip}
                 onClick={() => setPlotOpts(o => ({ ...o, grid: !o.grid }))}
@@ -7393,6 +7417,21 @@ export default function Workstation() {
                 onClick={() => setPlotOpts(o => ({ ...o, legend: o.legend === 'off' ? 'on' : 'off' }))}
                 title="Toggle legend"
               >legend</button>
+              <label style={styles.plotPaletteLabel} title="Figure colour palette">
+                <span aria-hidden="true">palette</span>
+                <select
+                  style={styles.plotPaletteSelect}
+                  value={figureColorScheme ?? ''}
+                  onChange={e => setFigureColorScheme(
+                    e.target.value ? (e.target.value as FigureColorScheme) : undefined)}
+                  aria-label="Figure colour palette"
+                >
+                  <option value="">Auto</option>
+                  {FIGURE_COLOR_SCHEMES.map(s => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </select>
+              </label>
               {plots.length > 1 && (
                 <>
                   <span style={{ flex: 1 }} />
@@ -7445,7 +7484,7 @@ export default function Workstation() {
               </div>
             )}
             <div ref={plotBodyRef} style={styles.plotBody}>
-              <PlotView plot={currentPlot} opts={plotOpts} />
+              <PlotView plot={currentPlot} opts={plotOpts} colorScheme={figureColorScheme} />
             </div>
           </div>
         </div>
@@ -8078,7 +8117,7 @@ export default function Workstation() {
             </div>
           </div>
           <div style={styles.fullscreenBody}>
-            <PlotView plot={currentPlot} opts={plotOpts} />
+            <PlotView plot={currentPlot} opts={plotOpts} colorScheme={figureColorScheme} />
           </div>
         </div>
       )}
@@ -8405,20 +8444,240 @@ interface PlotOpts {
 }
 const DEFAULT_PLOT_OPTS: PlotOpts = { grid: true, logX: false, logY: false, legend: 'auto' }
 
+// ── Figure colour scheme ─────────────────────────────────────────────
+// The Compute Lab figures expose a colour-palette selector (mirrors the
+// Visualization page). The four schemes match Chart3D's vocabulary so a
+// 3D figure receives the choice verbatim through Chart3D's `colorScheme`
+// prop, and 2D figures (heatmap / line / scatter) share the same word.
+type FigureColorScheme = 'viridis' | 'plasma' | 'categorical' | 'gradient'
+const FIGURE_COLOR_SCHEMES: { id: FigureColorScheme; label: string }[] = [
+  { id: 'viridis', label: 'Viridis' },
+  { id: 'plasma', label: 'Plasma' },
+  { id: 'gradient', label: 'Ocean' },
+  { id: 'categorical', label: 'Categorical' },
+]
+
 // Map a PlotSpec.colorscale (Plotly colormap name) onto the colour
-// scheme vocabulary Chart3D understands.
-function colorSchemeFor(cs?: string): 'viridis' | 'plasma' | 'categorical' | 'gradient' {
+// scheme vocabulary Chart3D understands. Used as the per-figure default
+// when the script itself specified a colorscale.
+function colorSchemeFor(cs?: string): FigureColorScheme {
   const s = (cs || '').toLowerCase()
   if (s.includes('plasma') || s.includes('magma') || s.includes('inferno')) return 'plasma'
   if (s.includes('viridis')) return 'viridis'
   return 'gradient'
 }
 
-function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; opts?: PlotOpts }) {
+// Perceptual colour-gradient anchor stops (0-255 RGB). These mirror the
+// stops Chart3D uses for its 3D surfaces so a heatmap and a 3D surface
+// rendered with the same scheme look identical.
+const HEATMAP_STOPS: Record<FigureColorScheme, number[][]> = {
+  viridis: [
+    [68, 1, 84], [72, 36, 117], [65, 68, 135], [53, 95, 141],
+    [42, 120, 142], [33, 145, 140], [34, 168, 132], [68, 191, 112],
+    [122, 209, 81], [189, 223, 38], [253, 231, 37],
+  ],
+  plasma: [
+    [13, 8, 135], [65, 4, 157], [106, 0, 168], [143, 13, 164],
+    [177, 42, 144], [203, 71, 119], [225, 100, 98], [242, 132, 75],
+    [252, 166, 54], [252, 206, 37], [240, 249, 33],
+  ],
+  gradient: [
+    [237, 248, 177], [177, 226, 180], [112, 201, 190], [65, 162, 188],
+    [43, 115, 180], [35, 62, 148],
+  ],
+  categorical: [
+    [68, 1, 84], [72, 36, 117], [65, 68, 135], [53, 95, 141],
+    [42, 120, 142], [33, 145, 140], [34, 168, 132], [68, 191, 112],
+    [122, 209, 81], [189, 223, 38], [253, 231, 37],
+  ],
+}
+
+// Sample a colour gradient at t∈[0,1] → "rgb(r,g,b)".
+function sampleHeatmapColor(scheme: FigureColorScheme, t: number): string {
+  const stops = HEATMAP_STOPS[scheme] || HEATMAP_STOPS.viridis
+  const c = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0))
+  const seg = c * (stops.length - 1)
+  const i = Math.min(stops.length - 2, Math.floor(seg))
+  const f = seg - i
+  const a = stops[i], b = stops[i + 1]
+  const r = Math.round(a[0] + (b[0] - a[0]) * f)
+  const g = Math.round(a[1] + (b[1] - a[1]) * f)
+  const bl = Math.round(a[2] + (b[2] - a[2]) * f)
+  return `rgb(${r}, ${g}, ${bl})`
+}
+
+/**
+ * Canvas-rendered 2D heatmap.
+ *
+ * Replaces the former Plotly `heatmap` trace. Plotly's only remaining
+ * mount in the Compute Lab was this 2D heatmap; its modular-core build
+ * crashed on load inside d3 (`Cannot read properties of undefined
+ * (reading 'selectAll')`) and the page-level error boundary swallowed
+ * the whole Compute Lab. A heatmap is just a grid of coloured cells, so
+ * we draw it directly on a <canvas> — no charting library, no crash.
+ *
+ * `z` is row-major (`z[yRow][xCol]`). Each cell is filled with the
+ * scheme colour for its normalised value.
+ */
+function HeatmapCanvas({
+  z, xRange, yRange, scheme,
+}: {
+  z: number[][]
+  /** [min,max] of the x coordinate axis, for the tick labels. */
+  xRange?: [number, number]
+  /** [min,max] of the y coordinate axis, for the tick labels. */
+  yRange?: [number, number]
+  scheme: FigureColorScheme
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const rows = z.length
+  const cols = z.reduce((m, r) => Math.max(m, r.length), 0)
+
+  // Data range for normalisation (finite values only).
+  const { zMin, zMax } = useMemo(() => {
+    let lo = Infinity, hi = -Infinity
+    for (const row of z) for (const v of row) {
+      if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v }
+    }
+    if (!Number.isFinite(lo)) { lo = 0; hi = 1 }
+    if (lo === hi) hi = lo + 1
+    return { zMin: lo, zMax: hi }
+  }, [z])
+
+  // Draw / redraw whenever the data, scheme or container size changes.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const wrap = wrapRef.current
+    if (!canvas || !wrap || rows === 0 || cols === 0) return
+
+    const draw = () => {
+      const cw = wrap.clientWidth || 320
+      const ch = wrap.clientHeight || 240
+      if (cw <= 0 || ch <= 0) return
+      const dpr = Math.min(window.devicePixelRatio || 1, 2)
+      canvas.width = Math.round(cw * dpr)
+      canvas.height = Math.round(ch * dpr)
+      canvas.style.width = `${cw}px`
+      canvas.style.height = `${ch}px`
+      const cx = canvas.getContext('2d')
+      if (!cx) return
+      cx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      cx.clearRect(0, 0, cw, ch)
+
+      // Cell sizes — slight overdraw (+0.5px) so seams don't show.
+      const cellW = cw / cols
+      const cellH = ch / rows
+      for (let r = 0; r < rows; r++) {
+        const rowArr = z[r] || []
+        // Row 0 sits at the TOP of the canvas but heatmaps conventionally
+        // put the first data row at the bottom — flip the y mapping.
+        const yPix = (rows - 1 - r) * cellH
+        for (let c = 0; c < cols; c++) {
+          const v = rowArr[c]
+          const t = Number.isFinite(v) ? (v - zMin) / (zMax - zMin) : 0
+          cx.fillStyle = sampleHeatmapColor(scheme, t)
+          cx.fillRect(c * cellW, yPix, cellW + 0.5, cellH + 0.5)
+        }
+      }
+    }
+
+    draw()
+    const ro = new ResizeObserver(draw)
+    ro.observe(wrap)
+    return () => ro.disconnect()
+  }, [z, rows, cols, zMin, zMax, scheme])
+
+  if (rows === 0 || cols === 0) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: '100%', height: '100%', minHeight: 180,
+        color: 'var(--color-text-muted)', fontSize: 12,
+      }}>
+        Heatmap has no data.
+      </div>
+    )
+  }
+
+  // Colour-bar legend swatches (low → high).
+  const legendStops = Array.from({ length: 6 }, (_, i) => i / 5)
+  const tick = (v?: number) => (v === undefined ? '' : Number(v.toPrecision(3)).toString())
+  const axisTextStyle: React.CSSProperties = {
+    fontSize: 9.5, color: 'var(--color-text-muted)',
+    fontFamily: "'JetBrains Mono', monospace",
+  }
+
+  return (
+    <div style={{
+      display: 'flex', width: '100%', height: '100%', minHeight: 280, gap: 10,
+    }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div
+          ref={wrapRef}
+          style={{
+            flex: 1, minWidth: 0, minHeight: 220, position: 'relative',
+            border: '1px solid var(--color-border-strong)', borderRadius: 6,
+            overflow: 'hidden',
+          }}
+          role="img"
+          aria-label={`Heatmap, ${rows} by ${cols} cells`}
+        >
+          <canvas ref={canvasRef} style={{ display: 'block' }} />
+          {/* Y-axis range labels (top = max, bottom = min). */}
+          {yRange && (
+            <>
+              <span style={{ ...axisTextStyle, position: 'absolute', top: 3, left: 4 }}>{tick(yRange[1])}</span>
+              <span style={{ ...axisTextStyle, position: 'absolute', bottom: 3, left: 4 }}>{tick(yRange[0])}</span>
+            </>
+          )}
+        </div>
+        {/* X-axis range labels (left = min, right = max). */}
+        {xRange && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', ...axisTextStyle }}>
+            <span>{tick(xRange[0])}</span>
+            <span>{tick(xRange[1])}</span>
+          </div>
+        )}
+      </div>
+      {/* Colour bar */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+        gap: 4, fontSize: 9.5, color: 'var(--color-text-muted)',
+        fontFamily: "'JetBrains Mono', monospace", flexShrink: 0,
+      }}>
+        <span>{zMax.toPrecision(3)}</span>
+        <div style={{
+          width: 12, flex: 1, minHeight: 120, borderRadius: 3,
+          border: '1px solid var(--color-border-strong)',
+          background: `linear-gradient(to top, ${
+            legendStops.map(t => sampleHeatmapColor(scheme, t)).join(', ')
+          })`,
+        }} />
+        <span>{zMin.toPrecision(3)}</span>
+      </div>
+    </div>
+  )
+}
+
+function PlotView({
+  plot, opts = DEFAULT_PLOT_OPTS, colorScheme,
+}: {
+  plot: PlotSpec | null
+  opts?: PlotOpts
+  /** User-selected figure colour scheme; falls back to the script's
+   *  colorscale (or viridis) when not set. */
+  colorScheme?: FigureColorScheme
+}) {
+  // Effective scheme: the explicit selector wins; otherwise honour any
+  // colorscale the script set on the PlotSpec.
+  const scheme: FigureColorScheme = colorScheme ?? colorSchemeFor(plot?.colorscale)
+
   // 3D plot rendering. The true-3D modes (surface / wireframe / contour /
   // scatter3d) render via Chart3D (three.js) — Plotly's WebGL gl3d engine
   // renders BLANK in the app's WebView2 runtime. The `heatmap` mode is a
-  // flat 2D SVG trace (not gl3d), so it stays on the Plotly path.
+  // flat 2D canvas grid.
   if (plot?.mode3d && plot.mode3d !== 'heatmap') {
     const mode = plot.mode3d
     // Flatten the PlotSpec's 3D payload into the DataPoint3D[] shape
@@ -8469,7 +8728,7 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
                     xLabel={plot.xLabel || 'x'}
                     yLabel={plot.yLabel || 'y'}
                     zLabel={plot.zLabel || 'z'}
-                    colorScheme={colorSchemeFor(plot.colorscale)}
+                    colorScheme={scheme}
                     theme={ctx.theme}
                     height={480}
                   />
@@ -8482,20 +8741,20 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
     )
   }
 
-  // 2D heatmap (mode3d === 'heatmap') — flat Plotly SVG, not gl3d, so it
-  // renders fine in WebView2.
+  // 2D heatmap (mode3d === 'heatmap'). Rendered with a plain <canvas>
+  // grid — a heatmap is just coloured cells, so no charting library is
+  // needed. This deliberately replaces the former Plotly `heatmap`
+  // trace: Plotly was the Compute Lab's last remaining mount and its
+  // modular-core build threw `Cannot read properties of undefined
+  // (reading 'selectAll')` on load, which the page-level error boundary
+  // turned into a full-page crash. With Plotly gone the crash is gone.
   if (plot?.mode3d === 'heatmap') {
-    const cs = plot.colorscale || 'Viridis'
-    const traces: Array<Record<string, unknown>> = [
-      { type: 'heatmap', x: plot.surfaceX, y: plot.surfaceY, z: plot.surfaceZ, colorscale: cs },
-    ]
-    const layout: Record<string, unknown> = {
-      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: '#a1a1aa', size: 11 }, margin: { l: 10, r: 10, t: plot.title ? 30 : 10, b: 10 },
-      showlegend: false, autosize: true,
-      title: plot.title ? { text: plot.title, font: { color: '#e5e5e5', size: 13 } } : undefined,
-      xaxis: { title: plot.xLabel || 'x', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' },
-      yaxis: { title: plot.yLabel || 'y', color: '#a1a1aa', gridcolor: 'rgba(255,255,255,0.06)' },
+    const z = plot.surfaceZ || []
+    const rangeOf = (arr?: number[]): [number, number] | undefined => {
+      if (!arr || arr.length === 0) return undefined
+      let lo = Infinity, hi = -Infinity
+      for (const v of arr) { if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v } }
+      return Number.isFinite(lo) ? [lo, hi] : undefined
     }
     return (
       <div style={{ width: '100%', height: '100%', minHeight: 180 }}>
@@ -8505,8 +8764,13 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
           exportName={(plot.title || 'figure-heatmap').replace(/[^\w-]+/g, '_')}
         >
           <div style={{ width: '100%', height: '100%', minHeight: 420 }}>
-            <ChartErrorBoundary resetKey={`${plot.title}:${traces.length}:heatmap`}>
-              <PlotlyChart data={traces as unknown as Data[]} layout={layout as Partial<Layout>} config={plotlyConfig()} style={{ width: '100%', height: '100%' }} useResizeHandler />
+            <ChartErrorBoundary resetKey={`${plot.title}:${z.length}:heatmap:${scheme}`}>
+              <HeatmapCanvas
+                z={z}
+                xRange={rangeOf(plot.surfaceX)}
+                yRange={rangeOf(plot.surfaceY)}
+                scheme={scheme}
+              />
             </ChartErrorBoundary>
           </div>
         </PublicationFigure>
@@ -8623,13 +8887,17 @@ function PlotView({ plot, opts = DEFAULT_PLOT_OPTS }: { plot: PlotSpec | null; o
         exportName={(plot.title || `figure-${kind}`).replace(/[^\w-]+/g, '_')}
       >
         {(ctx) => {
-          // Series colours come from the live publication palette the
-          // user picked in the figure settings drawer (default is the
-          // muted CB-safe palette) — never raw chrome accents, so an
-          // exported figure is journal-ready.
+          // Series colours. Priority: explicit per-series overrides from
+          // the publication settings drawer → the Compute Lab figure
+          // colour-scheme selector (discrete samples of the chosen
+          // perceptual gradient) → the publication palette.
+          const n = Math.max(1, plot.series.length)
           const colors = ctx.customColors && ctx.customColors.length
             ? ctx.customColors
-            : getPalette(ctx.palette)
+            : colorScheme
+              ? plot.series.map((_, i) =>
+                  sampleHeatmapColor(scheme, n === 1 ? 0.5 : i / (n - 1)))
+              : getPalette(ctx.palette)
           const ts = ctx.themeStyle
           // Screen theme renders on the dark Workstation surface / the
           // dimmed Results overlay, so keep the high-contrast border

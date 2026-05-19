@@ -202,10 +202,10 @@ select option:checked {
   color: var(--color-text);
 }
 
-/* Focus rings — only visible on keyboard navigation (:focus-visible),
- * invisible on click. Consistent 2px accent ring across buttons,
- * anchors, and form fields so tab-navigation is always discoverable
- * (previously buttons had outline:none which broke keyboard a11y).
+/* Focus rings — keyboard-navigation discoverability (:focus-visible)
+ * without the jarring bright-blue browser-default look. A subtle,
+ * theme-matched hairline ring: visible enough for a11y, quiet enough
+ * that clicking a search box / the chatbot doesn't flash a blue box.
  */
 input:focus-visible,
 textarea:focus-visible,
@@ -214,8 +214,8 @@ button:focus-visible,
 a:focus-visible,
 [role="button"]:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--color-accent-blue, #3b82f6);
-  outline-offset: 2px;
+  outline: 1.5px solid var(--color-border-strong, rgba(255, 255, 255, 0.28));
+  outline-offset: 1px;
   border-radius: var(--radius-focus, 10px);
 }
 
