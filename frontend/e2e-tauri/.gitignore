@@ -1,0 +1,10 @@
+# Harness deps — installed locally, never committed.
+node_modules/
+
+# Per-run chart screenshots. The directory itself is kept (see
+# screenshots/.gitkeep) but the PNGs are run artifacts.
+screenshots/*.png
+
+# WDIO run logs.
+logs/
+*.log
