@@ -13,8 +13,11 @@ test.describe('Data Manager — hardening worked example', () => {
     await page.waitForLoadState('domcontentloaded')
 
     // The page surfaces an Upload / Import / Add CTA in the header.
-    const action = await page.getByRole('button', { name: /Upload|Import|Add|New/i }).count()
-    expect(action).toBeGreaterThan(0)
+    // Auto-wait for it — `.count()` is a synchronous snapshot and
+    // raced React's first paint after domcontentloaded.
+    await expect(
+      page.getByRole('button', { name: /Upload|Import|Add|New/i }).first(),
+    ).toBeVisible({ timeout: 8_000 })
 
     expect(
       errors.filter(e => /Maximum call stack|is not a function|Cannot read prop/.test(e)),
