@@ -1,0 +1,180 @@
+name: Teardown Backend (DESTROY)
+
+# Destroys the humanovo-prod backend Terraform stack to stop AWS costs.
+#
+# Tears down: VPC + subnets + NAT, Aurora Serverless v2, RDS Proxy,
+# ElastiCache Serverless, Lambda + provisioned concurrency, API
+# Gateway, ECR, Secrets Manager entries, security groups.
+#
+# Does NOT touch: the Terraform state bucket (humanovo-tf-state-*) or
+# lock table, and does NOT touch the older infrastructure/terraform
+# (genup-state) stack. Backend stack only.
+#
+# Data safety: the Aurora cluster is configured with
+# skip_final_snapshot = false, so `terraform destroy` automatically
+# captures a final snapshot named `humanovo-prod-aurora-final`. The
+# database is recoverable from that snapshot. ElastiCache is a cache —
+# nothing durable is lost.
+#
+# Manual-only. Requires typing DESTROY into the confirm input.
+# To rebuild later: run bootstrap-backend-new-account.yml, then
+# deploy-backend-new-account.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DESTROY (all caps) to confirm teardown of the humanovo-prod backend stack'
+        required: true
+        default: ''
+      aws_region:
+        description: 'AWS region (must match the deployed stack)'
+        required: false
+        default: 'us-east-1'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let a teardown race a deploy.
+  group: backend-prod-mutate
+  cancel-in-progress: false
+
+env:
+  TF_WORKING_DIR: infrastructure/terraform/backend
+  TERRAFORM_VERSION: '1.6.6'
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+
+jobs:
+  teardown:
+    name: terraform destroy — backend stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Confirm intent
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DESTROY" ]; then
+            echo "::error title=Confirmation failed::You must type DESTROY (all caps) into the confirm input to run this workflow."
+            exit 1
+          fi
+          echo "Confirmation accepted — proceeding with teardown."
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm target account
+        run: |
+          aws sts get-caller-identity --output table
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false
+
+      - name: Disable Aurora deletion protection
+        # `terraform destroy` cannot delete a cluster while
+        # deletion_protection is on (it's true in the stack). Flip it
+        # off on the live cluster first; destroy then proceeds and the
+        # final snapshot is still taken (skip_final_snapshot = false).
+        run: |
+          CLUSTER=humanovo-prod-aurora
+          if aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
+               --region "$AWS_REGION" >/dev/null 2>&1; then
+            aws rds modify-db-cluster \
+              --db-cluster-identifier "$CLUSTER" \
+              --no-deletion-protection \
+              --apply-immediately \
+              --region "$AWS_REGION" >/dev/null
+            echo "Deletion protection disabled on $CLUSTER."
+          else
+            echo "Aurora cluster $CLUSTER not present — nothing to do."
+          fi
+
+      - name: Empty ECR repository
+        # An ECR repo with images cannot be deleted (the stack does not
+        # set force_delete). Remove every image so `terraform destroy`
+        # can delete the now-empty repo cleanly.
+        run: |
+          REPO=humanovo-backend
+          if aws ecr describe-repositories --repository-names "$REPO" \
+               --region "$AWS_REGION" >/dev/null 2>&1; then
+            IMAGES=$(aws ecr list-images --repository-name "$REPO" \
+              --region "$AWS_REGION" --query 'imageIds[*]' --output json)
+            if [ "$IMAGES" != "[]" ] && [ -n "$IMAGES" ]; then
+              aws ecr batch-delete-image --repository-name "$REPO" \
+                --region "$AWS_REGION" --image-ids "$IMAGES" >/dev/null
+              echo "Emptied ECR repo $REPO."
+            else
+              echo "ECR repo $REPO already empty."
+            fi
+          else
+            echo "ECR repo $REPO not present — nothing to do."
+          fi
+
+      - name: terraform destroy
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          # VPC-attached Lambda leaves Hyperplane ENIs that AWS detaches
+          # asynchronously; the first destroy can fail on a
+          # DependencyViolation when deleting the Lambda security group
+          # or subnets. The expensive resources (Aurora, ElastiCache,
+          # RDS Proxy, provisioned concurrency, fck-nat) are destroyed
+          # on attempt 1 regardless — retries only mop up the $0 VPC
+          # leftovers once the ENIs clear.
+          set +e
+          rc=1
+          for attempt in 1 2 3 4; do
+            echo "=== terraform destroy — attempt $attempt ==="
+            terraform destroy -auto-approve -input=false -lock-timeout=5m
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "terraform destroy completed cleanly."
+              break
+            fi
+            if [ "$attempt" -lt 4 ]; then
+              echo "Attempt $attempt failed (rc=$rc) — likely lingering VPC ENIs. Waiting 120s before retry."
+              sleep 120
+            fi
+          done
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Teardown incomplete::terraform destroy did not fully complete after 4 attempts."
+            echo "Resources still tracked in state:"
+            terraform state list || true
+            echo "The cost-incurring resources are normally gone by attempt 1;"
+            echo "remaining items are usually \$0 VPC objects waiting on ENI cleanup."
+            echo "Re-run this workflow in ~20 min to finish, or clear them in the console."
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## humanovo-prod backend teardown"
+            echo ""
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "Backend stack destroyed. The ~\$112/mo of Aurora + ElastiCache +"
+              echo "RDS Proxy + provisioned concurrency + fck-nat is now stopped."
+              echo ""
+              echo "- Aurora final snapshot: \`humanovo-prod-aurora-final\` (data recoverable)"
+              echo "- Terraform state bucket + lock table: untouched"
+              echo "- Old genup-state stack: untouched"
+              echo ""
+              echo "**To rebuild later:** run \`Bootstrap Backend\` then \`Deploy Backend\`."
+            else
+              echo "Teardown did not complete cleanly — see the destroy step log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
