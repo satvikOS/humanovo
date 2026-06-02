@@ -1,0 +1,240 @@
+name: Pause Backend (HALT, billing-saver)
+
+# Halts AWS backend services to stop most compute billing WITHOUT
+# destroying data or infrastructure. Fully reversible — dispatch the
+# same workflow with mode=resume to bring everything back up.
+#
+# What gets PAUSED (mode=pause):
+#   1. EventBridge rule humanovo-prod-lambda-warmer: disabled
+#      (stops the 4-minute warmup ping that would otherwise keep firing
+#      against a throttled Lambda and producing CloudWatch noise)
+#   2. Lambda humanovo-backend-prod: reserved concurrency = 0
+#      (every API Gateway invocation now returns 429)
+#   3. Lambda live alias: provisioned concurrency deleted
+#      (stops paying for warm execution environments)
+#   4. Aurora cluster humanovo-prod-aurora: stop-db-cluster
+#      (AWS auto-restarts after 7 days; re-run this workflow then to
+#      stay paused)
+#   5. API Gateway humanovo-prod-api $default stage: ThrottlingBurstLimit
+#      and ThrottlingRateLimit = 0 (rejects all traffic at the edge)
+#
+# What is NOT touched (still incurs low background cost):
+#   - ElastiCache Serverless, RDS Proxy, NAT Gateway, VPC + ENIs
+#   - Secrets Manager entries
+#   - ECR images, S3 frontend bucket, CloudFront, Route53
+#   - GCP / Azure (no automation here — Azure AI Foundry is portal-driven)
+#   - Terraform state and lock table
+#
+# Reverse: dispatch this workflow with mode=resume + confirm=RESUME.
+# NOTE: provisioned concurrency is NOT auto-restored on resume — the
+# next Terraform apply reconciles it via var.provisioned_concurrency.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'pause | resume'
+        required: true
+        default: 'pause'
+        type: choice
+        options:
+          - pause
+          - resume
+      confirm:
+        description: 'Type HALT (for pause) or RESUME (for resume) to confirm'
+        required: true
+        default: ''
+      aws_region:
+        description: 'AWS region (defaults to us-east-1)'
+        required: false
+        default: 'us-east-1'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let pause race a deploy or teardown.
+  group: backend-prod-mutate
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+  LAMBDA_NAME: humanovo-backend-prod
+  LAMBDA_ALIAS: live
+  AURORA_ID: humanovo-prod-aurora
+  WARMER_RULE: humanovo-prod-lambda-warmer
+  API_NAME: humanovo-prod-api
+
+jobs:
+  pause-or-resume:
+    name: ${{ inputs.mode }} backend stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Confirm intent
+        run: |
+          M='${{ inputs.mode }}'
+          C='${{ inputs.confirm }}'
+          if [ "$M" = "pause" ] && [ "$C" != "HALT" ]; then
+            echo "::error title=Confirmation failed::Type HALT (all caps) into the confirm input to pause."
+            exit 1
+          fi
+          if [ "$M" = "resume" ] && [ "$C" != "RESUME" ]; then
+            echo "::error title=Confirmation failed::Type RESUME (all caps) into the confirm input to resume."
+            exit 1
+          fi
+          echo "Intent confirmed: $M"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NEW_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NEW_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm target account
+        run: |
+          aws sts get-caller-identity --output table
+
+      - name: EventBridge warmer rule
+        run: |
+          if aws events describe-rule --name "$WARMER_RULE" --region "$AWS_REGION" >/dev/null 2>&1; then
+            if [ "${{ inputs.mode }}" = "pause" ]; then
+              aws events disable-rule --name "$WARMER_RULE" --region "$AWS_REGION"
+              echo "Disabled EventBridge rule $WARMER_RULE (no more 4-min warmup invocations)."
+            else
+              aws events enable-rule --name "$WARMER_RULE" --region "$AWS_REGION"
+              echo "Enabled EventBridge rule $WARMER_RULE."
+            fi
+          else
+            echo "Rule $WARMER_RULE not present in $AWS_REGION — skipping."
+          fi
+
+      - name: Lambda - reserved concurrency
+        run: |
+          if ! aws lambda get-function --function-name "$LAMBDA_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Lambda $LAMBDA_NAME not present in $AWS_REGION - skipping."
+            exit 0
+          fi
+          if [ "${{ inputs.mode }}" = "pause" ]; then
+            aws lambda put-function-concurrency \
+              --function-name "$LAMBDA_NAME" \
+              --reserved-concurrent-executions 0 \
+              --region "$AWS_REGION" >/dev/null
+            echo "Reserved concurrency on $LAMBDA_NAME set to 0 - every invocation returns 429."
+          else
+            aws lambda delete-function-concurrency \
+              --function-name "$LAMBDA_NAME" --region "$AWS_REGION" || true
+            echo "Cleared reserved concurrency on $LAMBDA_NAME - function now uses the account default."
+          fi
+
+      - name: Lambda - provisioned concurrency on alias
+        run: |
+          if ! aws lambda get-function --function-name "$LAMBDA_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Lambda $LAMBDA_NAME not present - skipping provisioned concurrency."
+            exit 0
+          fi
+          if [ "${{ inputs.mode }}" = "pause" ]; then
+            if aws lambda get-provisioned-concurrency-config \
+                 --function-name "$LAMBDA_NAME" --qualifier "$LAMBDA_ALIAS" \
+                 --region "$AWS_REGION" >/dev/null 2>&1; then
+              aws lambda delete-provisioned-concurrency-config \
+                --function-name "$LAMBDA_NAME" --qualifier "$LAMBDA_ALIAS" \
+                --region "$AWS_REGION"
+              echo "Deleted provisioned concurrency on $LAMBDA_NAME:$LAMBDA_ALIAS."
+            else
+              echo "No provisioned concurrency on $LAMBDA_NAME:$LAMBDA_ALIAS - nothing to delete."
+            fi
+          else
+            echo "Resume does NOT auto-restore provisioned concurrency."
+            echo "Run terraform apply or the deploy workflow to reconcile via var.provisioned_concurrency."
+          fi
+
+      - name: Aurora cluster
+        run: |
+          STATUS=$(aws rds describe-db-clusters \
+                    --db-cluster-identifier "$AURORA_ID" \
+                    --region "$AWS_REGION" \
+                    --query 'DBClusters[0].Status' --output text 2>/dev/null || echo "absent")
+          echo "Current Aurora status: $STATUS"
+          if [ "$STATUS" = "absent" ] || [ "$STATUS" = "None" ]; then
+            echo "Aurora cluster $AURORA_ID not present in $AWS_REGION - skipping."
+            exit 0
+          fi
+          if [ "${{ inputs.mode }}" = "pause" ]; then
+            if [ "$STATUS" = "available" ]; then
+              aws rds stop-db-cluster \
+                --db-cluster-identifier "$AURORA_ID" --region "$AWS_REGION" >/dev/null
+              echo "Aurora $AURORA_ID stop initiated."
+              echo "AWS auto-restarts stopped Aurora clusters after 7 days - re-dispatch this workflow then to stay paused."
+            else
+              echo "Aurora $AURORA_ID is '$STATUS', not 'available' - leaving as-is."
+            fi
+          else
+            if [ "$STATUS" = "stopped" ]; then
+              aws rds start-db-cluster \
+                --db-cluster-identifier "$AURORA_ID" --region "$AWS_REGION" >/dev/null
+              echo "Aurora $AURORA_ID start initiated - status will be 'available' in ~5 min."
+            else
+              echo "Aurora $AURORA_ID is '$STATUS', not 'stopped' - leaving as-is."
+            fi
+          fi
+
+      - name: API Gateway - stage throttling
+        run: |
+          API_ID=$(aws apigatewayv2 get-apis --region "$AWS_REGION" \
+                    --query "Items[?Name=='$API_NAME'].ApiId | [0]" --output text 2>/dev/null || echo "")
+          if [ -z "$API_ID" ] || [ "$API_ID" = "None" ]; then
+            echo "API $API_NAME not present in $AWS_REGION - skipping."
+            exit 0
+          fi
+          STAGE='$default'
+          if ! aws apigatewayv2 get-stage --api-id "$API_ID" --stage-name "$STAGE" \
+               --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Stage $STAGE on API $API_ID not present - skipping."
+            exit 0
+          fi
+          if [ "${{ inputs.mode }}" = "pause" ]; then
+            aws apigatewayv2 update-stage \
+              --api-id "$API_ID" --stage-name "$STAGE" --region "$AWS_REGION" \
+              --default-route-settings 'ThrottlingBurstLimit=0,ThrottlingRateLimit=0' >/dev/null
+            echo "Throttled $API_ID stage $STAGE to 0/0 - API rejects every request at the edge."
+          else
+            aws apigatewayv2 update-stage \
+              --api-id "$API_ID" --stage-name "$STAGE" --region "$AWS_REGION" \
+              --default-route-settings 'ThrottlingBurstLimit=1000,ThrottlingRateLimit=500' >/dev/null
+            echo "Restored throttling on $API_ID stage $STAGE to 1000/500 (terraform defaults)."
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Backend ${{ inputs.mode }} - $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo ""
+            if [ "${{ inputs.mode }}" = "pause" ]; then
+              echo "### Halted"
+              echo "- EventBridge \`$WARMER_RULE\`: disabled"
+              echo "- Lambda \`$LAMBDA_NAME\`: reserved concurrency = 0, provisioned concurrency cleared"
+              echo "- Aurora \`$AURORA_ID\`: stop initiated (AWS auto-restarts after 7 days)"
+              echo "- API GW \`$API_NAME\` \\\$default stage: throttling 0/0"
+              echo ""
+              echo "### Still running (low background cost, not pause-able without deletion)"
+              echo "- ElastiCache Serverless"
+              echo "- RDS Proxy"
+              echo "- NAT Gateway (fck-nat)"
+              echo "- VPC + ENIs"
+              echo "- Secrets Manager entries"
+              echo ""
+              echo "**To resume:** dispatch this same workflow with mode=resume + confirm=RESUME."
+            else
+              echo "### Resumed"
+              echo "- EventBridge \`$WARMER_RULE\`: enabled"
+              echo "- Lambda \`$LAMBDA_NAME\`: reserved concurrency cleared"
+              echo "- Aurora \`$AURORA_ID\`: start initiated"
+              echo "- API GW \`$API_NAME\` \\\$default stage: throttling restored to 1000/500"
+              echo ""
+              echo "**Note:** provisioned concurrency NOT auto-restored - run terraform apply or the deploy workflow to reconcile."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
